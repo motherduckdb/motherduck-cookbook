@@ -39,16 +39,54 @@ COLD_START_DT = datetime.date(2024, 1, 1)
 # already-loaded partitions get healed. 0 = forward-only (never re-load a day).
 OVERLAP_DAYS = 3
 
-# ---- The BigQuery query ---------------------------------------------------
-# A GoogleSQL string run against BigQuery through the `bigquery` community
-# extension. It MUST:
+# ---- How to read from BigQuery: scan (default) or query ------------------
+# READ_MODE picks how rows leave BigQuery. Default to "scan"; reach for "query"
+# only when you have a concrete need it cannot meet (see the README section
+# "Which read mode? bigquery_scan vs bigquery_query").
+#
+#   "scan"  -> bigquery_scan(): reads a table directly through the BigQuery
+#              Storage Read API. Cheaper (storage-read billing, not query
+#              bytes-scanned), lower-latency (no query job to schedule), with
+#              column projection and a row filter pushed down. The right choice
+#              for a plain partitioned-table read, which is most ingestion.
+#
+#   "query" -> bigquery_query(): runs arbitrary GoogleSQL through the Jobs API
+#              (billed by bytes scanned). Use it ONLY when you answer "yes" to:
+#              do you need server-side joins/aggregations, GoogleSQL functions
+#              or derived columns, or to read a view or external table? If not,
+#              stay on "scan".
+READ_MODE = "scan"
+
+# ---- scan-mode source (used when READ_MODE == "scan") --------------------
+# The fully-qualified BigQuery table, the columns to pull, and a row filter.
+# bigquery_scan reads columns straight from storage, so the source table must
+# already contain PARTITION_DATE_COLUMN as a real (ideally partitioned) DATE
+# column -- scan cannot derive it. SCAN_COLUMNS is the projected SELECT list
+# (use "*" for everything); only those columns are read. SCAN_FILTER is a
+# BigQuery Storage Read API row_restriction: it prunes partitions so you only
+# read the days you load. It runs BigQuery-side, so string/date literals use
+# double quotes, and it uses the same {start_dt}/{end_dt}/{placeholder} values
+# returned by build_filters().
+SCAN_TABLE = "my_project.analytics.events"
+SCAN_COLUMNS = "event_date, user_id, event_name, event_timestamp"
+SCAN_FILTER = """
+event_date >= DATE("{start_dt}")
+AND event_date < DATE("{end_dt}")
+AND event_source = "{event_source}"
+"""
+
+# ---- query-mode query (used when READ_MODE == "query") -------------------
+# A GoogleSQL string run against BigQuery through the `bigquery` extension's
+# Jobs API. Only used when READ_MODE == "query". It MUST:
 #   - return a column named exactly PARTITION_DATE_COLUMN, and
 #   - filter on the partition window using the {start_dt} / {end_dt}
 #     placeholders so BigQuery prunes partitions and only scans the days being
 #     loaded (this is what keeps the Jobs API bytes-billed cost down).
-# Add any other {placeholders} you need and return their values from
-# build_filters(). Placeholder values are substituted with str.format(); they
-# are values you control here, never end-user input.
+# This sample also illustrates *why* you would pick query mode: event_date is
+# DERIVED from event_timestamp with DATE(...), an expression bigquery_scan
+# cannot produce. Add any other {placeholders} you need and return their values
+# from build_filters(). Placeholder values are substituted with str.format();
+# they are values you control here, never end-user input.
 #
 # Quoting note: GoogleSQL string literals here use double quotes ("..."). The
 # DuckDB-side MD_DELETE_PREDICATE below uses single quotes ('...') for the same
@@ -104,6 +142,13 @@ def build_filters(start_dt: datetime.date, end_dt: datetime.date) -> dict[str, s
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+# A fully-qualified BigQuery table reference, project.dataset.table. Each part
+# is letters/digits/underscore/hyphen (the characters GCP allows in project,
+# dataset, and table names). bigquery_scan's table argument is a string literal
+# inside the SQL, not a bindable parameter, so the value is validated against
+# this before it is interpolated.
+TABLE_RE = re.compile(r"[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+
 # The community-extension name and the secret param that carries the GCP
 # service-account JSON. The deployed secret injects this param prefixed with
 # the (lowercased) secret name, e.g. `gcp_creds_GOOGLE_APPLICATION_CREDENTIALS_JSON`.
@@ -132,6 +177,8 @@ def main() -> None:
 
     if OVERLAP_DAYS < 0:
         raise ValueError(f"OVERLAP_DAYS must be >= 0, got {OVERLAP_DAYS}")
+    if READ_MODE not in {"scan", "query"}:
+        raise ValueError(f'READ_MODE must be "scan" or "query", got {READ_MODE!r}')
 
     _materialize_gcp_creds()
     con = _connect_duckdb()
@@ -224,21 +271,19 @@ def load_partition(
     next_day = day + datetime.timedelta(days=1)
     filters = build_filters(day, next_day)
     delete_sql = f"DELETE FROM {destination} WHERE {MD_DELETE_PREDICATE.format(**filters)}"
-    query_sql = QUERY.format(**filters)
+    select_sql, select_params = build_source_select(billing_project, filters)
 
     con.execute("BEGIN TRANSACTION")
     try:
         t0 = time.perf_counter()
         deleted = con.execute(delete_sql).fetchone()
         t1 = time.perf_counter()
-        # bigquery_query runs the GoogleSQL through the Jobs API; the BigQuery
-        # scan, the network transfer, and the MotherDuck insert are billed and
-        # timed together here as the "insert" phase. The DELETE phase is timed
-        # separately above. billing_project is bound as a parameter.
-        con.execute(
-            f"INSERT INTO {destination} SELECT * FROM bigquery_query(?, ?)",
-            [billing_project, query_sql],
-        )
+        # The source read pulls the day's rows from BigQuery -- bigquery_scan via
+        # the Storage Read API by default, or bigquery_query via the Jobs API in
+        # query mode -- and the network transfer and MotherDuck insert are billed
+        # and timed together here as the "insert" phase. The DELETE phase is timed
+        # separately above. See build_source_select for how each mode is bound.
+        con.execute(f"INSERT INTO {destination} {select_sql}", select_params)
         t2 = time.perf_counter()
         con.execute("COMMIT")
     except Exception:
@@ -341,9 +386,9 @@ def _ensure_destination(
 ) -> None:
     """Create the destination database/schema/table if they do not exist.
 
-    The table schema is bootstrapped from QUERY itself by running it over a
-    1970-01-01 .. 1970-01-02 window. BigQuery prunes the partitioned scan to
-    (effectively) nothing for that ancient range, so the probe is nearly free
+    The table schema is bootstrapped from the source read itself by running it
+    over a 1970-01-01 .. 1970-01-02 window. BigQuery prunes the partitioned scan
+    to (effectively) nothing for that ancient range, so the probe is nearly free
     but still returns the exact result columns and types. LIMIT 0 means we only
     take the schema, not rows.
     """
@@ -352,11 +397,11 @@ def _ensure_destination(
     con.execute(f"CREATE SCHEMA IF NOT EXISTS {ident(db)}.{ident(schema)}")
 
     probe_filters = build_filters(datetime.date(1970, 1, 1), datetime.date(1970, 1, 2))
-    probe_sql = QUERY.format(**probe_filters)
+    select_sql, params = build_source_select(billing_project, probe_filters)
     con.execute(
         f"CREATE TABLE IF NOT EXISTS {ident(db)}.{ident(schema)}.{ident(table)} AS "
-        "SELECT * FROM bigquery_query(?, ?) LIMIT 0",
-        [billing_project, probe_sql],
+        f"{select_sql} LIMIT 0",
+        params,
     )
 
 
@@ -378,6 +423,57 @@ def validate_identifier(name: str, value: str) -> str:
     if not IDENTIFIER_RE.fullmatch(value):
         raise ValueError(f"{name} must be a simple SQL identifier, got {value!r}")
     return value
+
+
+def validate_table(name: str, value: str) -> str:
+    value = value.strip()
+    if not TABLE_RE.fullmatch(value):
+        raise ValueError(
+            f"{name} must be a fully-qualified BigQuery table "
+            f"project.dataset.table, got {value!r}"
+        )
+    return value
+
+
+def sql_str(value: str) -> str:
+    # Escape single quotes so the value is safe inside a single-quoted SQL string
+    # literal (e.g. the filter= argument of bigquery_scan).
+    return value.replace("'", "''")
+
+
+def build_source_select(
+    billing_project: str, filters: dict[str, str]
+) -> tuple[str, list[str]]:
+    """Build the per-window source read as a (SELECT ..., params) pair.
+
+    READ_MODE chooses the path:
+
+      - "scan": SELECT <SCAN_COLUMNS> FROM bigquery_scan(<table>,
+        billing_project=<project>, filter=<SCAN_FILTER>). bigquery_scan's
+        arguments are string literals in the SQL, not bindable parameters, so the
+        table is validated (validate_table), the project is validated upstream
+        (require_project_id), and the filter is rendered from build_filters()
+        values you control. Reads through the Storage Read API: cheaper and no
+        query job.
+      - "query": SELECT * FROM bigquery_query(?, ?). The billing project and the
+        rendered GoogleSQL are bound as parameters. Runs the Jobs API, billed by
+        bytes scanned.
+    """
+    if READ_MODE == "scan":
+        table = validate_table("SCAN_TABLE", SCAN_TABLE)
+        row_filter = " ".join(SCAN_FILTER.format(**filters).split())
+        relation = (
+            f"bigquery_scan('{sql_str(table)}', "
+            f"billing_project='{sql_str(billing_project)}', "
+            f"filter='{sql_str(row_filter)}')"
+        )
+        return f"SELECT {SCAN_COLUMNS} FROM {relation}", []
+    if READ_MODE == "query":
+        return "SELECT * FROM bigquery_query(?, ?)", [
+            billing_project,
+            QUERY.format(**filters),
+        ]
+    raise ValueError(f'READ_MODE must be "scan" or "query", got {READ_MODE!r}')
 
 
 def require_project_id(value: str) -> str:
