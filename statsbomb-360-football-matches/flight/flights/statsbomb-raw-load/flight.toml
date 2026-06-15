@@ -1,0 +1,11 @@
+[flight]
+name = "statsbomb-raw-load"
+# On-demand: run once to backfill, or re-run to refresh from open-data.
+schedule_cron = ""
+extra_requirements = ["duckdb==1.5.3"]
+
+# Optional run-time knobs (set here, or pass as a per-run config override):
+#   MATCH_LIMIT      cap the number of matches loaded (smoke tests)
+#   COMPETITION_IDS  comma-separated competition_id filter
+# [flight.config]
+# COMPETITION_IDS = "43"

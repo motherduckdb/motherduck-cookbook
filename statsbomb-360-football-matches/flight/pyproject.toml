@@ -1,0 +1,6 @@
+[project]
+name = "statsbomb-360-flights"
+version = "0.1.0"
+description = "StatsBomb 360 ingest + transform Flights for MotherDuck"
+requires-python = ">=3.11"
+dependencies = ["duckdb==1.5.3"]
