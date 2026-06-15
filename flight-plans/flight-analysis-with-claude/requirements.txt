@@ -3,3 +3,6 @@ duckdb==1.5.3
 # subprocess; each query() opens its own MCP connection. Pinned so a Flight
 # build is reproducible.
 claude-agent-sdk==0.2.101
+# Tiny JSON-RPC client for the hosted MotherDuck MCP server (the agent's tools
+# forward to it). Plain HTTP POSTs — no async/session machinery needed.
+requests==2.32.3

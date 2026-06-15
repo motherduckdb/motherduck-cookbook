@@ -9,20 +9,25 @@ A single borough's failure does not abort the batch.
 
 This is the agentic-analysis pattern: instead of hand-writing the SQL for each
 brief, the run hands a borough to a Claude agent that explores the warehouse and
-grounds every claim in real data. The agent's ONLY capability is a single
-in-process, READ-ONLY `query` tool defined here with the Claude Agent SDK
-(`create_sdk_mcp_server` + `@tool`). It cannot shell out, read files, or write to
-the warehouse — the tool rejects anything that is not a read-only statement.
+grounds every claim in real data. The agent's tools are the **read-only** tools
+of the hosted MotherDuck MCP server (`query`, `list_tables`, `list_columns`,
+`search_catalog`, `query_context_layer`, ...), exposed to the agent as in-process
+SDK tools. It cannot shell out, read files, or run any write/DDL tool.
 
-Why an in-process tool and not Bash or a remote MCP server: the agent already
-runs inside MotherDuck compute with `MOTHERDUCK_TOKEN` in its environment, so a
-remote MCP server adds a network dependency without adding capability, and raw
-Bash would give the agent an unrestricted shell and a write-capable token. A
-scoped read-only tool is the least-privilege option for an unattended job.
+Why mirror the hosted MCP server through in-process tools instead of pointing the
+agent's SDK at the remote MCP server directly: the Agent SDK's bundled CLI cannot
+talk to the hosted endpoint (its HTTP-MCP client fails with "Connection closed"),
+but it *does* run in-process SDK tools reliably. So a tiny JSON-RPC client here
+(`MotherDuckMCPClient`) calls the hosted server over HTTP — which works fine from
+plain Python — and each hosted read-only tool is wrapped as an in-process tool
+that forwards to it. The hosted tool's own JSON Schema is reused verbatim, so new
+read-only tools the server adds appear automatically with no code change. See the
+README "Caveats" for the full story.
 
 Agent concurrency: each `query()` spawns its own bundled-CLI subprocess, so
 simultaneous agents are capped by a semaphore (CONCURRENCY) to fit the
-2-CPU / 16 GB Flight runtime and stay under Anthropic API rate limits.
+2-CPU / 16 GB Flight runtime and stay under Anthropic API rate limits. The MCP
+client is stateless (independent POSTs), so all agents share one safely.
 
 The sample data is a frozen snapshot (it ends in 2023), so the lookback window
 is anchored to MAX(created_date) in the table, not to now(). Against a live
@@ -30,7 +35,10 @@ warehouse you would anchor to now() instead.
 
 Runtime inputs:
   ANTHROPIC_API_KEY  - remapped from a Flights secret (any `*_ANTHROPIC_API_KEY`)
-  MOTHERDUCK_TOKEN   - auto-injected by the Flights runtime
+  MOTHERDUCK_TOKEN   - auto-injected by the Flights runtime; used for both the
+                       duckdb infra calls and the hosted MCP server (the injected
+                       token is a PAT, which the MCP server accepts)
+  MD_MCP_URL         - hosted MCP endpoint (default the MotherDuck public server)
   BRIEF_WINDOW_DAYS  - lookback window in days (default "7")
   CONCURRENCY        - max simultaneous agents (default "3")
   MODEL              - Claude model id (default "claude-opus-4-8")
@@ -39,13 +47,15 @@ Runtime inputs:
 """
 
 import asyncio
+import json
 import os
-import re
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 
 import duckdb
+import requests
 from claude_agent_sdk import query, ClaudeAgentOptions, create_sdk_mcp_server, tool
 
 
@@ -53,11 +63,14 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-# duckdb.connect("md:") authenticates with MOTHERDUCK_TOKEN from the environment
-# (auto-injected by the Flights runtime). Fail fast and clearly if it is missing.
-if not os.environ.get("MOTHERDUCK_TOKEN", "").strip():
+# duckdb.connect("md:") and the hosted MCP server both authenticate with
+# MOTHERDUCK_TOKEN from the environment (auto-injected by the Flights runtime).
+# Fail fast and clearly if it is missing.
+MOTHERDUCK_TOKEN = os.environ.get("MOTHERDUCK_TOKEN", "").strip()
+if not MOTHERDUCK_TOKEN:
     raise SystemExit("MOTHERDUCK_TOKEN is required (the Flights runtime injects it).")
 
+MCP_URL = os.environ.get("MD_MCP_URL", "https://api.motherduck.com/mcp").strip()
 WINDOW_DAYS = max(1, int(os.environ.get("BRIEF_WINDOW_DAYS", "7")))
 CONCURRENCY = max(1, int(os.environ.get("CONCURRENCY", "3")))
 MODEL = os.environ.get("MODEL", "claude-opus-4-8").strip()
@@ -100,82 +113,120 @@ def resolve_anthropic_key() -> None:
 resolve_anthropic_key()
 
 
-# ---- The agent's only tool: a single in-process, read-only SQL query ---------
-# Read-only is enforced in code, not just asked for in the prompt: the statement
-# must begin with a read-only keyword, be a single statement, and contain no
-# write/DDL keyword. This is defense-in-depth — the strongest guarantee is to
-# give the Flight a read-scoped MotherDuck token (see the README "Security"
-# section), so even a bug here cannot mutate data.
-READONLY_FIRST_KEYWORDS = (
-    "select", "with", "from", "describe", "desc", "show", "summarize",
-    "explain", "pragma", "table", "values",
-)
-FORBIDDEN_KEYWORD_RE = re.compile(
-    r"\b(insert|update|delete|drop|create|alter|attach|detach|copy|install|"
-    r"load|replace|truncate|grant|revoke|export|import|checkpoint|vacuum|call)\b",
-    re.IGNORECASE,
-)
-MAX_RESULT_ROWS = 200
+# ---- The agent's tools: the hosted MCP server's read-only tools --------------
+# The hosted MotherDuck MCP server exposes read AND write tools. We mirror only
+# the read-only ones into the agent. The strongest backstop is still the token's
+# permissions (give the Flight a read-scoped token); this name filter is the
+# in-code layer. Tune the denylist if you want a narrower or wider surface.
+MUTATING_PREFIXES = ("save_", "update_", "delete_", "edit_", "create_",
+                     "run_", "cancel_", "share_", "mint_", "log_")
 
 
-def check_read_only(sql: str) -> tuple[bool, str]:
-    stripped = sql.strip().rstrip(";").strip()
-    if not stripped:
-        return False, "empty query"
-    # One statement only: reject anything with an embedded ';'.
-    if ";" in stripped:
-        return False, "only a single statement is allowed"
-    first = re.match(r"[a-zA-Z]+", stripped)
-    if not first or first.group(0).lower() not in READONLY_FIRST_KEYWORDS:
-        return False, "query must start with a read-only keyword (SELECT, WITH, DESCRIBE, ...)"
-    hit = FORBIDDEN_KEYWORD_RE.search(stripped)
-    if hit:
-        return False, f"write/DDL keyword not allowed: {hit.group(0).upper()}"
-    return True, ""
+def is_read_only_tool(name: str) -> bool:
+    return name != "query_rw" and not name.startswith(MUTATING_PREFIXES)
 
 
-def run_sql_blocking(sql: str) -> str:
-    # A fresh connection per call keeps concurrent agents isolated; we run this
-    # under asyncio.to_thread so a blocking query does not stall the event loop.
-    con = duckdb.connect("md:")
-    try:
-        cur = con.execute(sql)
-        columns = [d[0] for d in cur.description] if cur.description else []
-        rows = cur.fetchall()
-    finally:
-        con.close()
-    if not rows:
-        return "(0 rows)"
-    lines = [" | ".join(columns)]
-    for row in rows[:MAX_RESULT_ROWS]:
-        lines.append(" | ".join("NULL" if v is None else str(v) for v in row))
-    if len(rows) > MAX_RESULT_ROWS:
-        lines.append(f"... ({len(rows) - MAX_RESULT_ROWS} more rows truncated)")
-    return "\n".join(lines)
+class MotherDuckMCPClient:
+    """Minimal JSON-RPC client for the hosted MotherDuck MCP server.
+
+    The server is stateless Streamable HTTP — each call is a self-contained POST,
+    so there is no session to track and no SSE stream to hold open. Talking to it
+    from plain Python like this works reliably (unlike the Agent SDK's bundled
+    CLI, which cannot reach this endpoint). Stateless also means one client is
+    safe to share across the concurrent agents; only the request-id counter needs
+    a lock.
+    """
+
+    _HEADERS = {"Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json"}
+
+    def __init__(self, url: str, token: str):
+        self.url = url
+        self.token = token
+        self._id = 0
+        self._id_lock = threading.Lock()
+
+    def _next_id(self) -> int:
+        with self._id_lock:
+            self._id += 1
+            return self._id
+
+    def request(self, method: str, params: dict | None = None) -> dict:
+        headers = dict(self._HEADERS)
+        headers["Authorization"] = f"Bearer {self.token}"
+        body = {"jsonrpc": "2.0", "method": method, "id": self._next_id()}
+        if params is not None:
+            body["params"] = params
+        resp = requests.post(self.url, json=body, headers=headers, timeout=120)
+        resp.raise_for_status()
+        # The server may answer with a single JSON object or an SSE stream; the
+        # last `data:` line of an SSE response carries the JSON-RPC message.
+        if resp.headers.get("content-type", "").startswith("text/event-stream"):
+            data: dict = {}
+            for line in resp.text.splitlines():
+                if line.startswith("data:"):
+                    data = json.loads(line[5:].strip())
+            return data
+        return resp.json()
+
+    def initialize(self) -> dict:
+        return self.request("initialize", {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "borough-briefs-flight", "version": "1.0.0"},
+        })
+
+    def list_tools(self) -> list:
+        return self.request("tools/list").get("result", {}).get("tools", [])
+
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        return self.request("tools/call", {"name": name, "arguments": arguments})
 
 
-@tool(
-    "query",
-    "Run a single READ-ONLY SQL statement against MotherDuck (DuckDB SQL) and "
-    "return the result rows as text. Only SELECT/WITH/DESCRIBE/SHOW/SUMMARIZE/"
-    "EXPLAIN-style statements are allowed; writes and DDL are rejected.",
-    {"sql": str},
-)
-async def query_tool(args: dict) -> dict:
-    sql = (args or {}).get("sql", "")
-    ok, reason = check_read_only(sql)
-    if not ok:
-        return {"content": [{"type": "text", "text": f"ERROR: query rejected ({reason})."}]}
-    try:
-        text = await asyncio.to_thread(run_sql_blocking, sql)
-    except Exception as e:  # surface the DB error to the agent so it can adjust
-        return {"content": [{"type": "text", "text": f"ERROR: {e}"}]}
-    return {"content": [{"type": "text", "text": text}]}
+def render_tool_result(resp: dict) -> str:
+    # Turn a JSON-RPC tools/call response into the text the agent sees.
+    if "error" in resp:
+        return f"ERROR: {resp['error']}"
+    result = resp.get("result", {})
+    parts = result.get("content", [])
+    text = "\n".join(p.get("text", "") for p in parts
+                     if isinstance(p, dict) and p.get("type") == "text")
+    return text or json.dumps(result)[:4000]
 
 
-# Bundling the tool into an in-process SDK MCP server named "motherduck" makes it
-# addressable to the agent as `mcp__motherduck__query`.
-QUERY_SERVER = create_sdk_mcp_server(name="motherduck", version="1.0.0", tools=[query_tool])
+def build_motherduck_server(client: MotherDuckMCPClient):
+    """Mirror the hosted server's READ-ONLY tools as in-process SDK tools.
+
+    Each in-process tool reuses the hosted tool's own JSON Schema (the SDK passes
+    a full schema dict through unchanged) and forwards the call through `client`.
+    Returns the SDK MCP server plus the `allowed_tools` list naming each mirrored
+    tool as `mcp__motherduck__<name>`.
+    """
+    specs = [s for s in client.list_tools() if is_read_only_tool(s.get("name", ""))]
+
+    def make_tool(spec: dict):
+        name = spec["name"]
+        description = spec.get("description") or name
+        schema = spec.get("inputSchema") or {"type": "object", "properties": {}}
+
+        async def forward(args, _name=name):
+            resp = await asyncio.to_thread(client.call_tool, _name, args or {})
+            return {"content": [{"type": "text", "text": render_tool_result(resp)}]}
+
+        return tool(name, description, schema)(forward)
+
+    sdk_tools = [make_tool(s) for s in specs]
+    names = [s["name"] for s in specs]
+    server = create_sdk_mcp_server(name="motherduck", version="1.0.0", tools=sdk_tools)
+    allowed = [f"mcp__motherduck__{n}" for n in names]
+    return server, allowed, names
+
+
+# Connect once at import and mirror the hosted read-only toolset. A failure here
+# (unreachable server, rejected token) fails the run immediately and clearly.
+MCP_CLIENT = MotherDuckMCPClient(MCP_URL, MOTHERDUCK_TOKEN)
+MCP_CLIENT.initialize()
+MOTHERDUCK_SERVER, ALLOWED_TOOLS, MIRRORED_TOOLS = build_motherduck_server(MCP_CLIENT)
+log(f"Mirrored {len(MIRRORED_TOOLS)} read-only MotherDuck MCP tools: {MIRRORED_TOOLS}")
 
 
 def get_anchor(con: duckdb.DuckDBPyConnection) -> datetime:
@@ -219,11 +270,11 @@ def build_prompt(borough: str, window_start: datetime, anchor: datetime) -> str:
 You are preparing a brief of *notable things* in NYC 311 service requests for the
 borough: {borough}.
 
-You have one tool: `query`, which runs a single READ-ONLY SQL statement (DuckDB
-SQL) against MotherDuck and returns the result rows. Use it to explore the
-warehouse and ground every claim in real data. It only accepts read-only
-statements (SELECT / WITH / DESCRIBE / SHOW / SUMMARIZE / EXPLAIN); writes and
-DDL are rejected, so do not attempt them. Run one statement per call.
+You have a set of READ-ONLY MotherDuck tools. The main one is `query`, which runs
+DuckDB SQL and returns rows — call it with database="sample_data" and your `sql`.
+Other tools (`list_tables`, `list_columns`, `search_catalog`, ...) help you
+explore the schema. There are no write tools; do not attempt to modify anything.
+Ground every claim in real query results.
 
 The data lives in the table `{SOURCE_TABLE}` (one row per 311 request). It is a
 frozen snapshot, so your analysis window is fixed to the most recent
@@ -233,8 +284,8 @@ Filter on `borough = '{borough}'` and `created_date BETWEEN '{start_str}' AND
 '{end_str}'` for every query about this window.
 
 Steps:
-1. DESCRIBE the table first to confirm the real column names before
-   querying — do not assume them. Useful columns include created_date,
+1. Confirm the real column names before querying (DESCRIBE the table, or use
+   `list_columns`) — do not assume them. Useful columns include created_date,
    closed_date, agency, agency_name, complaint_type, descriptor, status,
    incident_zip, community_board, open_data_channel_type, borough.
 2. Profile this borough's activity in the window: total requests, the busiest
@@ -260,15 +311,15 @@ stored verbatim.
 async def generate_brief(borough: str, window_start: datetime, anchor: datetime) -> str:
     options = ClaudeAgentOptions(
         model=MODEL,
-        mcp_servers={"motherduck": QUERY_SERVER},
-        # The agent's ONLY capability is the in-process read-only `query` tool.
-        # `tools=[]` disables every built-in tool (no Bash, Read, Write, ...), so
-        # the agent cannot shell out or touch the filesystem; `allowed_tools`
-        # auto-approves just our query tool; `dontAsk` denies anything not
-        # pre-approved without ever prompting (this runs headless);
+        mcp_servers={"motherduck": MOTHERDUCK_SERVER},
+        # The agent's only capabilities are the mirrored read-only MotherDuck
+        # tools. `tools=[]` disables every built-in tool (no Bash, Read, Write,
+        # ...), so the agent cannot shell out or touch the filesystem;
+        # `allowed_tools` auto-approves exactly the mirrored tools; `dontAsk`
+        # denies anything not pre-approved without ever prompting (headless);
         # `setting_sources=[]` ignores any local Claude settings.
         tools=[],
-        allowed_tools=["mcp__motherduck__query"],
+        allowed_tools=ALLOWED_TOOLS,
         permission_mode="dontAsk",
         setting_sources=[],
     )

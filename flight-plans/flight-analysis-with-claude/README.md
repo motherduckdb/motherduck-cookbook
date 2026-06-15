@@ -3,13 +3,13 @@ title: Run Agentic Analysis From a Flight With the Claude Agent SDK
 id: flight-analysis-with-claude
 description: >-
   A reusable Flight that runs scheduled agentic analysis: it fans out one Claude
-  Agent SDK agent per entity, each given a single in-process read-only SQL tool
-  to explore MotherDuck and write a "notable things" brief, then persists every
-  brief. Use when you want a recurring run where Claude writes the analysis
-  instead of hand-coded SQL.
+  Agent SDK agent per entity, each given the read-only tools of the hosted
+  MotherDuck MCP server to explore the warehouse and write a "notable things"
+  brief, then persists every brief. Use when you want a recurring run where
+  Claude writes the analysis instead of hand-coded SQL.
 type: template
 category: automation
-features: [flights]
+features: [flights, mcp]
 tags: [claude-agent-sdk, python]
 ---
 
@@ -19,20 +19,26 @@ A single-file Flight that produces a recurring set of analytical briefs, one per
 entity, where **Claude writes the analysis instead of you hand-coding the SQL**.
 Each run discovers a list of entities, then fans out one
 [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) agent per
-entity under a concurrency cap. Each agent is given exactly **one** tool — a
-single in-process, **read-only** `query` tool defined in `flight.py` with the
-SDK's `create_sdk_mcp_server` and `@tool` — and a prompt; it explores the
+entity under a concurrency cap. Each agent is given the **read-only tools of the
+hosted MotherDuck MCP server** (`query`, `list_tables`, `list_columns`,
+`search_catalog`, `query_context_layer`, ...) and a prompt; it explores the
 warehouse and returns a ranked "notable things" brief grounded in real query
 results. The run stores every brief and logs a batch summary; one entity's
 failure never aborts the batch.
 
-**Why an in-process read-only tool** (and not raw Bash or a remote MCP server):
-the agent already runs inside MotherDuck compute with `MOTHERDUCK_TOKEN` in its
-environment, so a remote MCP server would add a network dependency without adding
-any capability, while raw Bash would hand the agent an unrestricted shell and a
-write-capable token. A single scoped tool — built-in tools disabled, the tool
-itself rejecting anything that is not a read-only statement — is the
-least-privilege option for an unattended, scheduled job.
+**How the agent reaches MCP — and why it's done this way.** The agent does *not*
+connect the SDK to the remote MCP server directly: the Agent SDK's bundled CLI
+cannot talk to the hosted endpoint (its HTTP-MCP client fails with `Connection
+closed`), even though the server is healthy for any standard client. So
+`flight.py` includes a tiny JSON-RPC client (`MotherDuckMCPClient`) that calls
+the hosted server over plain HTTP — which works fine from Python — and wraps each
+hosted **read-only** tool as an *in-process* SDK tool that forwards to it. The
+agent only ever sees in-process tools (which the CLI runs reliably); the HTTP
+hop happens in our code. The hosted tool's own JSON Schema is reused verbatim, so
+new read-only tools the server adds (for example, more context-layer tools)
+appear automatically with no code change. Built-in tools are disabled and only
+read-only tools are mirrored, so the agent cannot shell out or mutate anything —
+least privilege for an unattended, scheduled job.
 
 The shipped example briefs **NYC 311 service requests by borough** using the
 public `sample_data` dataset, so a fresh deploy runs end to end with no data of
@@ -45,32 +51,35 @@ partition by) and your tables.
 `flight.py` runs a fixed sequence; the parts you change are the discovery query,
 the `SOURCE_TABLE`, and the prompt in `build_prompt()`:
 
-1. **Anchor the window.** `sample_data` is a frozen snapshot, so "recent" is
+1. **Mirror the hosted MCP toolset.** At startup the Flight connects
+   `MotherDuckMCPClient` to the hosted MCP server, lists its tools, keeps the
+   **read-only** ones (dropping a mutating-name denylist plus `query_rw`), and
+   wraps each as an in-process SDK tool via `create_sdk_mcp_server` + `@tool`.
+2. **Anchor the window.** `sample_data` is a frozen snapshot, so "recent" is
    measured from `MAX(created_date)` in the table, not `now()`. The run computes
    an anchor and a `BRIEF_WINDOW_DAYS` lookback once. Against a live warehouse
    you would anchor to `now()` instead.
-2. **Discover entities.** A SQL query lists the boroughs active in the window
+3. **Discover entities.** A SQL query lists the boroughs active in the window
    (busiest first, excluding the geography-less `Unspecified` bucket). The
    `BOROUGHS` env var overrides discovery; `MAX_BOROUGHS` caps the count for
    testing.
-3. **Fan out, bounded.** One Claude Agent SDK `query()` per borough runs behind
+4. **Fan out, bounded.** One Claude Agent SDK `query()` per borough runs behind
    an `asyncio.Semaphore(CONCURRENCY)`. Each `query()` spawns its own bundled-CLI
    subprocess, so the semaphore keeps the run inside the 2-CPU / 16 GB Flight
-   runtime and under Anthropic API rate limits.
-4. **Agentic analysis through one read-only tool.** Each agent gets the
-   in-process `query` tool and nothing else: `ClaudeAgentOptions` sets `tools=[]`
-   (all built-in tools off — no Bash, Read, Write), `allowed_tools=["mcp__motherduck__query"]`
-   (auto-approve just our tool), and `permission_mode="dontAsk"` (deny anything
-   else, never prompt — it runs headless). The prompt fixes its borough and
-   window, tells it to `DESCRIBE` before querying, and to decide what is *notable*
-   (complaint spikes, aging open requests, zip/community-board hotspots, channel
-   shifts), forbidding invented numbers. The `query` tool enforces read-only in
-   code (see [Security](#security)), so writes are impossible, not merely
-   discouraged.
+   runtime and under Anthropic API rate limits. `ClaudeAgentOptions` sets
+   `tools=[]` (all built-in tools off — no Bash, Read, Write),
+   `allowed_tools=[...]` (auto-approve exactly the mirrored read-only tools), and
+   `permission_mode="dontAsk"` (deny anything else, never prompt — it runs
+   headless). The prompt fixes the borough and window and decides what is
+   *notable* (complaint spikes, aging open requests, zip/community-board
+   hotspots, channel shifts), forbidding invented numbers.
 5. **Persist + summarize.** Each non-empty brief is written to `RESULTS_TABLE`
    (`flights_demo.main.borough_briefs`), and the run logs an `ok` / `failed`
    batch summary to stderr. Per-entity errors are caught so one failure does not
    abort the rest.
+
+Discovery and persistence use a direct `duckdb.connect("md:")` (deterministic
+infra steps); only the agent's exploration goes through the MCP tools.
 
 ## Questions to answer
 
@@ -81,6 +90,8 @@ the `SOURCE_TABLE`, and the prompt in `build_prompt()`:
   snapshot (anchor to `MAX(...)`)?
 - What counts as *notable* for your domain — what should the prompt tell the
   agent to look for, and what should it ignore?
+- Which hosted MCP tools should the agent get? The default mirrors all read-only
+  tools; narrow the set if you want a tighter surface.
 - Which Claude model fits the budget and latency you want, and what concurrency
   fits your entity count and API rate limits?
 - Which MotherDuck token will the agents use, and is it scoped to read-only on
@@ -98,37 +109,31 @@ the `SOURCE_TABLE`, and the prompt in `build_prompt()`:
   session that runs several exploratory queries. Five boroughs on a large model
   is cheap; hundreds of entities is not. Use `MAX_BOROUGHS` and `CONCURRENCY` to
   bound a test run before scheduling, and pick the model deliberately.
-- **Read-only is enforced in two layers, but verify the token too.** The `query`
-  tool rejects any statement that is not a single read-only statement, and
-  built-in tools are disabled so the agent cannot shell out. The check is
-  deliberately conservative, so a value like `'Drop Off'` in a string literal can
-  be rejected — the agent simply rephrases. The strongest backstop is still the
-  MotherDuck token's permissions: give the Flight a read-scoped token (see
-  [Security](#security)) so even a bug cannot mutate data.
+- **Read-only is enforced by what is mirrored, plus the token.** The agent can
+  only call the tools `flight.py` mirrors, and the mutating-name filter
+  (`is_read_only_tool`) drops `query_rw` and any `save_/update_/delete_/...` tool
+  before they reach the agent; built-in tools are disabled so it cannot shell
+  out. The filter keys on tool *names*, so review it if the server adds a
+  read-only tool with an unusual name (it would be excluded) or a mutating tool
+  with an unusual name (it would slip through). The strongest backstop is still
+  the token's permissions — see [Security](#security).
+- **The hosted MCP server can't be used directly through the SDK (today).** It's
+  tempting to set `mcp_servers={"motherduck": {"type": "http", "url":
+  "https://api.motherduck.com/mcp", ...}}` and skip the bridge. With the pinned
+  `claude-agent-sdk` version this fails: the bundled CLI's HTTP-MCP client errors
+  with `Connection closed` on tool calls, even though the server is healthy for a
+  standard client. Worse, if you leave built-in tools enabled
+  (`bypassPermissions` without `tools=[]`), the failure is silently masked — the
+  agent falls back to running SQL through the `Bash` tool, so it looks like it
+  works while the MCP server is never used. The in-process bridge in `flight.py`
+  side-steps this: the CLI only sees in-process tools, and the (working) HTTP
+  call happens in Python. This may become unnecessary if a future SDK fixes the
+  CLI's HTTP-MCP client.
 - **Frozen sample data.** `sample_data` ends in 2023 and never changes, so the
   window is anchored to `MAX(created_date)`. If you point this at a live table,
   switch the anchor to `now()` or briefs will drift to a fixed historical window.
 - **Empty windows produce empty briefs.** If discovery or the window returns no
   rows for an entity, that entity is logged as `empty` and skipped, not stored.
-- **Prefer the in-process tool over the hosted MotherDuck MCP server here.** It's
-  tempting to point the agent at MotherDuck's remote MCP server
-  (`https://api.motherduck.com/mcp`) instead of defining a local tool. The durable
-  reason not to is **redundancy**: this code already runs inside MotherDuck compute
-  with `MOTHERDUCK_TOKEN` in the environment, so a remote server is a network
-  round-trip to reach data the process can already query directly, with no added
-  capability. There is also a practical snag at the time of writing: with the
-  `claude-agent-sdk` version pinned in `requirements.txt`, tool calls to that
-  remote server through the SDK's bundled CLI fail with `Error calling tool:
-  Connection closed`, even though the server itself is healthy (a standard MCP
-  client connects, lists tools, and calls them fine). That looks like a bug in the
-  bundled CLI's HTTP-MCP client rather than a server or protocol problem, so it may
-  change across SDK versions — but combined with the redundancy, it makes the
-  remote server the wrong tool for *this* job. The in-process tool has no transport
-  at all (it's a Python function the SDK calls in the same process), so neither
-  issue applies. Worse, if you leave built-in tools enabled (`bypassPermissions`
-  with no `tools=[]`), a failed remote MCP call is silently masked: the agent just
-  falls back to running SQL through the `Bash` tool, so it looks like it works
-  while the MCP server is never actually used.
 
 ## What you'll adjust
 
@@ -140,7 +145,8 @@ the source query and prompt are functions you edit directly.
 | Discovery query | `discover_boroughs()` in `flight.py` | top boroughs by volume | The SQL that lists the entities to brief. Replace with your own partition. |
 | `SOURCE_TABLE` | top of `flight.py` | `sample_data.nyc.service_requests` | The table each agent analyzes. Point at your data. |
 | `build_prompt()` | function in `flight.py` | 311 "notable things" prompt | What the agent looks for and how the brief is shaped. The main thing you tune. |
-| `query_tool` / `check_read_only` | functions in `flight.py` | single read-only `query` tool | The one tool the agent gets. Adjust the read-only allowlist or result-row cap (`MAX_RESULT_ROWS`) here; rename and the `allowed_tools` entry must match. |
+| `MUTATING_PREFIXES` / `is_read_only_tool` | top of `flight.py` | drop `query_rw` + `save_/update_/delete_/...` | Which hosted MCP tools the agent gets. Tighten for a narrower surface. |
+| `MCP_URL` | env `MD_MCP_URL` | `https://api.motherduck.com/mcp` | The hosted MotherDuck MCP endpoint the bridge calls. |
 | `RESULTS_TABLE` | top of `flight.py` | `flights_demo.main.borough_briefs` | Where briefs are stored, as `database.schema.table`. Must be writable. |
 | `BRIEF_WINDOW_DAYS` | config / env | `7` | Lookback window in days, measured from the anchor date. |
 | `CONCURRENCY` | config / env | `3` | Max simultaneous agents. Bound by CPU/RAM and API rate limits. |
@@ -148,7 +154,7 @@ the source query and prompt are functions you edit directly.
 | `MAX_BOROUGHS` | config / env | `0` (all) | Cap the number of entities for a cheap test run. `0` = no cap. |
 | `BOROUGHS` | env | (unset) | Comma-separated override that skips discovery (e.g. `BROOKLYN,QUEENS`). |
 | `ANTHROPIC_API_KEY` | Flight secret / env | (required) | Anthropic API key. A local run sets it directly; a Flight injects it from a secret (see below). |
-| `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for the warehouse (used by `duckdb.connect("md:")` for discovery, the `query` tool, and persistence). Select a token on the Flight; never hard-code it. |
+| `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for both `duckdb.connect("md:")` (discovery + persistence) and the hosted MCP server (the agent's tools). Select a token on the Flight; never hard-code it. |
 
 ## Run it
 
@@ -156,6 +162,11 @@ You need a MotherDuck account, a MotherDuck access token, and an
 [Anthropic API key](https://console.anthropic.com/settings/keys). With the
 defaults the agents read the public `sample_data.nyc.service_requests` table (no
 data of your own required) and write briefs to `flights_demo.main.borough_briefs`.
+
+The MotherDuck token must be one the **MCP server accepts** — a Personal Access
+Token (the kind under [Settings > Access Tokens](https://app.motherduck.com/settings/tokens)).
+A Flight's auto-injected token is already such a token (see
+[Deploy as a Flight](#deploy-as-a-flight)).
 
 ```bash
 export MOTHERDUCK_TOKEN=your_md_token_here
@@ -165,8 +176,9 @@ export MAX_BOROUGHS=1
 uv run --with-requirements requirements.txt flight.py
 ```
 
-The run discovers boroughs, fans out the agents, prints a batch summary to
-stderr, and stores one brief per borough. Inspect them with:
+The run mirrors the read-only MCP tools (it logs how many), discovers boroughs,
+fans out the agents, prints a batch summary to stderr, and stores one brief per
+borough. Inspect them with:
 
 ```sql
 SELECT run_ts, borough, window_days, left(brief_md, 280) AS preview
@@ -209,7 +221,9 @@ checked in; adapt the arguments to your situation), passing:
   `MAX_BOROUGHS` as key/value pairs
 
 A MotherDuck token is attached to the Flight automatically and injected at run
-time as `MOTHERDUCK_TOKEN`; no token argument is needed.
+time as `MOTHERDUCK_TOKEN`; no token argument is needed. That injected token is a
+Personal Access Token, which the hosted MCP server accepts, so the bridge works
+with the default token — no extra secret for MCP.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
@@ -219,21 +233,26 @@ clear the cap and add a schedule (for example `0 13 * * *`, daily at 13:00 UTC)
 by updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule
 updates are metadata-only and do not create a new Flight version.
 
-- **Least privilege by construction.** The agent has exactly one tool. Built-in
-  tools are disabled (`tools=[]`), so it cannot run shell commands, read files, or
-  reach the network; `permission_mode="dontAsk"` denies anything not pre-approved
-  without prompting; `setting_sources=[]` keeps local Claude settings from quietly
-  adding tools. This is the main reason to prefer a scoped tool over giving the
-  agent raw Bash.
-- **Read-only enforced in code, not just the prompt.** `check_read_only` requires
-  a single statement that begins with a read-only keyword and contains no
-  write/DDL keyword (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `CREATE`, `ATTACH`,
-  `COPY`, ...). A prompt instruction is a hint; this is a gate.
+## Security
+
+- **Least privilege by construction.** The agent only gets the mirrored
+  read-only MCP tools. Built-in tools are disabled (`tools=[]`), so it cannot run
+  shell commands, read files, or reach the network on its own;
+  `permission_mode="dontAsk"` denies anything not pre-approved without prompting;
+  `setting_sources=[]` keeps local Claude settings from quietly adding tools.
+- **Only read-only tools are exposed.** `is_read_only_tool` filters the hosted
+  server's tool list before any tool reaches the agent, dropping `query_rw` and
+  every `save_/update_/delete_/edit_/create_/...` tool. Review the filter if the
+  server's tool naming changes (it keys on names).
 - **Still scope the token.** Defense in depth: give the Flight a MotherDuck token
   scoped to read the source data (and write only the `RESULTS_TABLE` database), so
-  even a gap in the read-only check cannot modify anything else. The discovery and
-  persistence steps in `flight.py` are the only writers, and they only touch
-  `RESULTS_TABLE`.
+  even if a mutating tool slipped through the name filter it could not modify
+  anything else. In `flight.py` only the discovery and persistence steps write,
+  and only to `RESULTS_TABLE`.
+- **The token rides on the MCP requests.** `MotherDuckMCPClient` sends
+  `MOTHERDUCK_TOKEN` as a bearer header to the hosted MCP endpoint over HTTPS.
+  Treat it as any warehouse credential; it is read from the environment, never
+  hard-coded.
 - **Keep secrets out of code.** The Anthropic key comes from a MotherDuck secret
   (or a local env var), never hard-coded or placed in Flight `config`. The
   MotherDuck token is injected by the runtime, never checked in.
@@ -249,6 +268,9 @@ updates are metadata-only and do not create a new Flight version.
   and the [Python SDK reference](https://docs.claude.com/en/api/agent-sdk/python),
   including `ClaudeAgentOptions`, `permission_mode`, `tools` / `allowed_tools`, and
   defining in-process tools with `create_sdk_mcp_server` and the `@tool` decorator.
-- Deeper MotherDuck or DuckDB questions: use the `ask_docs_question` MCP tool.
+- MotherDuck MCP server: the hosted endpoint and its tools (the `query` tool used
+  here takes `database`, `sql`, and `new_fragments`). Deeper MotherDuck or DuckDB
+  questions: use the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight source)
-  and [`requirements.txt`](requirements.txt) (`duckdb`, `claude-agent-sdk`).
+  and [`requirements.txt`](requirements.txt) (`duckdb`, `claude-agent-sdk`,
+  `requests`).
