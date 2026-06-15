@@ -7,6 +7,7 @@ description: >-
   for inactive users. Use when an application gives each user their own database
   and share, and access should follow an active/inactive flag.
 type: template
+category: automation
 features: [flights, shares]
 tags: []
 ---

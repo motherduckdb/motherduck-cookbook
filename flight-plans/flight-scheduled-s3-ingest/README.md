@@ -7,6 +7,7 @@ description: >-
   files already land in partitioned object storage and you want a scheduled,
   incremental warehouse refresh without re-reading every partition each run.
 type: template
+category: ingestion
 features: [flights]
 tags: [ingest, s3]
 ---

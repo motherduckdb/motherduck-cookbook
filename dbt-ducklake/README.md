@@ -7,6 +7,7 @@ description: >-
   database. Use when you want a dbt project that lands raw tables in DuckLake
   storage and writes analytics models to native MotherDuck.
 type: example
+category: analytics
 features: [ducklake]
 tags: [dbt]
 ---

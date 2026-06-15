@@ -7,6 +7,7 @@ description: >-
   tables. Use when you want a from-scratch dbt warehouse on MotherDuck and a
   worked example of shipping a Dive on top of dbt models.
 type: example
+category: analytics
 features: [dives, shares]
 tags: [dbt]
 ---

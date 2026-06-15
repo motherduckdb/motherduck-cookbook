@@ -64,6 +64,7 @@
         "type",
         "title",
         "description",
+        "category",
         "features",
         "tags",
         "path",
@@ -86,6 +87,16 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "getting-started",
+            "ingestion",
+            "analytics",
+            "integrations",
+            "end-to-end",
+            "automation"
+          ]
         },
         "features": {
           "type": "array",

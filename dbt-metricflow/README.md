@@ -7,6 +7,7 @@ description: >-
   MotherDuck. Use when you want one metric definition (revenue, order count,
   derived ratios) that runs identically on a local file and in the cloud.
 type: example
+category: analytics
 features: []
 tags: [dbt, metricflow]
 ---

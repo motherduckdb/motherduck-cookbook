@@ -9,6 +9,7 @@ description: >-
   you want a scheduled, trend-aware map of which data objects your Dives lean on
   and how they connect.
 type: template
+category: analytics
 features: [flights, dives]
 tags: []
 ---

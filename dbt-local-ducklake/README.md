@@ -8,6 +8,7 @@ description: >-
   compaction) for local dbt development that mirrors a managed DuckLake on
   MotherDuck.
 type: example
+category: analytics
 features: [ducklake]
 tags: [dbt, postgres, sqlite]
 ---

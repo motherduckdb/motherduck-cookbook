@@ -10,6 +10,7 @@ description: >-
   GoogleSQL. Use when you want scheduled, incremental BigQuery to MotherDuck
   ingestion as part of a migration off BigQuery.
 type: template
+category: ingestion
 features: [flights]
 tags: [bigquery, ingest, migrate]
 ---

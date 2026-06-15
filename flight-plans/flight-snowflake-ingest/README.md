@@ -8,6 +8,7 @@ description: >-
   MotherDuck ingest with a control table you can curate, for example as part of
   a migration off Snowflake.
 type: template
+category: ingestion
 features: [flights]
 tags: [snowflake, ingest, migrate]
 ---

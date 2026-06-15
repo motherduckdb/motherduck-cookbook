@@ -7,6 +7,7 @@ description: >-
   SQL. Use when you want to build Grafana dashboards or time-series panels on top
   of MotherDuck data.
 type: example
+category: integrations
 features: []
 tags: [grafana, docker]
 ---

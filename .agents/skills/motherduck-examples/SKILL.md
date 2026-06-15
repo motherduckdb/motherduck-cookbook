@@ -59,7 +59,7 @@ sync, GitHub Pages, or committed generated JSON.
 ## README Metadata
 
 Catalog READMEs start with YAML front matter. For catalog entries, keep exactly
-these six keys:
+these seven keys:
 
 ```yaml
 ---
@@ -69,6 +69,7 @@ description: >-
   Query public Hacker News Parquet data in S3 and build dbt models. Use when a
   user wants to ingest S3/Parquet with dbt, run locally or on MotherDuck.
 type: example
+category: ingestion
 features: []
 tags: [dbt]
 ---
@@ -78,6 +79,11 @@ Rules:
 
 - `id` must match the folder name.
 - `type` is `example` or `template`.
+- `category` is the single primary navigation bucket for the entry. It must be
+  one of `getting-started`, `ingestion`, `analytics`, `integrations`,
+  `end-to-end`, or `automation`. Pick by primary intent: a Flight that ingests
+  data is `ingestion`, while a Flight that sends operational alerts is
+  `automation`; `flights` remains a feature, not a category.
 - `features` is a subset of the MotherDuck capabilities the code actually uses:
   `admin_api`, `dives`, `ducklake`, `flights`, `mcp`, `pg_duckdb`, `pg_endpoint`,
   `shares`, `wasm`. Use `pg_endpoint` for the MotherDuck Postgres wire endpoint

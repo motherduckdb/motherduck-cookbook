@@ -77,7 +77,7 @@ injects it as `MOTHERDUCK_TOKEN`.
 
 ## Anatomy of an example
 
-Every example README starts with YAML front matter holding exactly six keys:
+Every example README starts with YAML front matter holding exactly seven keys:
 
 ```yaml
 ---
@@ -87,6 +87,7 @@ description: >-
   One or two sentences on what it does, then a "Use when ..." clause so an
   agent can route to it.
 type: example                   # example | template
+category: ingestion             # one primary navigation category (see list below)
 features: []                    # MotherDuck capabilities used; [] if none (see list below)
 tags: [dbt]                     # curated lowercase slugs: significant third-party tools
 ---
@@ -94,6 +95,9 @@ tags: [dbt]                     # curated lowercase slugs: significant third-par
 
 - `type` is `example` (a concrete, worked instance) or `template` (a generic plan
   an agent parameterizes).
+- `category` is one primary navigation bucket: `getting-started`, `ingestion`,
+  `analytics`, `integrations`, `end-to-end`, or `automation`. Pick by primary
+  intent: Flights are categorized by what they do, not by being Flights.
 - `features` names the MotherDuck capabilities the code actually uses, from:
   `admin_api`, `dives`, `ducklake`, `flights`, `mcp`, `pg_duckdb`, `pg_endpoint`,
   `shares`, `wasm`. Note `pg_endpoint` (MotherDuck's Postgres wire endpoint) and

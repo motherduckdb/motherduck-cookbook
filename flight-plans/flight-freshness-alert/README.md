@@ -7,6 +7,7 @@ description: >-
   when you want scheduled freshness monitoring on MotherDuck tables with a
   warn/error severity model and a Slack notification.
 type: template
+category: automation
 features: [flights]
 tags: [slack]
 ---

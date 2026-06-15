@@ -5,10 +5,10 @@
 
 """Validate README front matter and build the examples catalog.
 
-Every catalog entry is a README.md with YAML front matter holding exactly six
-keys: title, id, description, type, features, tags. Running this script with no
-output path validates the front matter across the repo (non-zero exit on the
-first problem). Pass --output to also write catalog.json.
+Every catalog entry is a README.md with YAML front matter holding exactly seven
+keys: title, id, description, type, category, features, tags. Running this script
+with no output path validates the front matter across the repo (non-zero exit on
+the first problem). Pass --output to also write catalog.json.
 """
 
 from __future__ import annotations
@@ -27,6 +27,14 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ALLOWED_TYPES = {"example", "template"}
+ALLOWED_CATEGORIES = {
+    "getting-started",
+    "ingestion",
+    "analytics",
+    "integrations",
+    "end-to-end",
+    "automation",
+}
 ALLOWED_FEATURES = {
     "admin_api",
     "dives",
@@ -82,8 +90,16 @@ ALLOWED_TAGS = {
     "ingest",
     "migrate",
 }
-ALLOWED_KEYS = {"title", "id", "description", "type", "features", "tags"}
-REQUIRED_KEYS = {"title", "id", "description", "type"}
+ALLOWED_KEYS = {
+    "title",
+    "id",
+    "description",
+    "type",
+    "category",
+    "features",
+    "tags",
+}
+REQUIRED_KEYS = {"title", "id", "description", "type", "category"}
 FLIGHT_PLANS_DIR = "flight-plans"
 
 SKIPPED_DIR_NAMES = {
@@ -196,6 +212,12 @@ def build_item(
             f"{readme_path}: type must be one of {sorted(ALLOWED_TYPES)}"
         )
 
+    category = assert_string(frontmatter, readme_path, "category")
+    if category not in ALLOWED_CATEGORIES:
+        raise CatalogError(
+            f"{readme_path}: category must be one of {sorted(ALLOWED_CATEGORIES)}"
+        )
+
     features = assert_slug_list(frontmatter, readme_path, "features")
     unknown_features = set(features) - ALLOWED_FEATURES
     if unknown_features:
@@ -237,6 +259,7 @@ def build_item(
         "type": item_type,
         "title": assert_string(frontmatter, readme_path, "title"),
         "description": assert_string(frontmatter, readme_path, "description"),
+        "category": category,
         "features": features,
         "tags": tags,
         "path": relative_dir,

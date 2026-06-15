@@ -8,6 +8,7 @@ description: >-
   with backoff, and a per-table audit log. Use it for a config-driven, re-runnable
   Postgres to MotherDuck ingest.
 type: template
+category: ingestion
 features: [flights]
 tags: [postgres, ingest, migrate]
 ---

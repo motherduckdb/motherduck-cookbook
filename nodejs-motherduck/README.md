@@ -8,6 +8,7 @@ description: >-
   Node.js app or service that can ship the DuckDB binary, including concurrent
   workloads that need pooled connections.
 type: example
+category: getting-started
 features: []
 tags: [nodejs, javascript, generic-pool]
 ---

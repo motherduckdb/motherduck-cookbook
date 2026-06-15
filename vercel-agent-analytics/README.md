@@ -8,6 +8,7 @@ description: >-
   Use when you want to measure AI bot, agent, and AI-referred human traffic to a
   Vercel-hosted site and query it live from a Dive or any SQL tool, with no AWS or S3.
 type: example
+category: end-to-end
 features: []
 tags: [vercel, nodejs, typescript]
 ---

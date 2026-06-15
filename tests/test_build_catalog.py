@@ -31,6 +31,7 @@ title: Ingest API data into MotherDuck with Python
 id: python-ingestion
 description: Load API data into MotherDuck from Python.
 type: example
+category: ingestion
 features: []
 tags:
   - python
@@ -69,6 +70,7 @@ type: example
             "type": "example",
             "title": "Ingest API data into MotherDuck with Python",
             "description": "Load API data into MotherDuck from Python.",
+            "category": "ingestion",
             "features": [],
             "tags": ["python", "pyarrow"],
             "path": "python-ingestion",
@@ -108,6 +110,7 @@ title: Duplicate
 id: duplicate
 description: Duplicate IDs should not be allowed.
 type: example
+category: integrations
 """,
         )
 
@@ -126,6 +129,7 @@ title: Ingest API data into MotherDuck with Python
 id: python-ingestion
 description: Load API data into MotherDuck from Python.
 type: example
+category: ingestion
 categories:
   - ingestion
 """,
@@ -148,6 +152,7 @@ title: Build Hacker News Models From S3 With dbt
 id: dbt-ingestion-s3
 description: A dbt example that can deploy as a Flight.
 type: example
+category: ingestion
 features:
   - flights
 tags:
@@ -169,6 +174,7 @@ title: Build Hacker News Models From S3 With dbt
 id: dbt-ingestion-s3
 description: A concrete example should not live under flight-plans.
 type: example
+category: ingestion
 features:
   - flights
 tags:
@@ -192,6 +198,7 @@ title: Run Any dbt Project as a MotherDuck Flight
 id: dbt-runner
 description: Run dbt as a MotherDuck Flight.
 type: template
+category: automation
 features:
   - flights
 tags:
@@ -206,3 +213,44 @@ tags:
 
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(catalog)
+
+
+def test_missing_category_fails(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "python-ingestion" / "README.md",
+        """
+title: Ingest API data into MotherDuck with Python
+id: python-ingestion
+description: Load API data into MotherDuck from Python.
+type: example
+features: []
+tags: [python]
+""",
+    )
+
+    with pytest.raises(
+        build_catalog_module.CatalogError, match="missing required keys .*category"
+    ):
+        build_catalog_module.build_catalog(repo_root)
+
+
+def test_unknown_category_fails(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "python-ingestion" / "README.md",
+        """
+title: Ingest API data into MotherDuck with Python
+id: python-ingestion
+description: Load API data into MotherDuck from Python.
+type: example
+category: etl
+features: []
+tags: [python]
+""",
+    )
+
+    with pytest.raises(
+        build_catalog_module.CatalogError, match="category must be one of"
+    ):
+        build_catalog_module.build_catalog(repo_root)

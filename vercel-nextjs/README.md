@@ -7,6 +7,7 @@ description: >-
   (or any Node serverless) backend that reads MotherDuck data through pooled,
   parameterized SQL.
 type: example
+category: integrations
 features: [pg_endpoint]
 tags: [vercel, nextjs, node-postgres]
 ---

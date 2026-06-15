@@ -8,6 +8,7 @@ description: >-
   live. Use when you want a worked example of pairing a scheduled Flight ingest
   with a Dive built and deployed as code.
 type: example
+category: end-to-end
 features: [flights, dives]
 tags: [python, typescript]
 ---

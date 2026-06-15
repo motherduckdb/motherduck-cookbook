@@ -8,6 +8,7 @@ description: >-
   sample dbt models locally against a local file while still reading from (and
   writing to) MotherDuck, without maintaining two separate projects.
 type: example
+category: analytics
 features: []
 tags: [dbt]
 ---

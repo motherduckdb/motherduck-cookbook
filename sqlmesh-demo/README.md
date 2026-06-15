@@ -7,6 +7,7 @@ description: >-
   SCD type 2, audits, virtual data environments). Use when you want a SQLMesh
   project on MotherDuck, or a dlt-to-SQLMesh ELT pipeline to adapt.
 type: example
+category: analytics
 features: []
 tags: [sqlmesh, dlt]
 ---

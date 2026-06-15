@@ -8,6 +8,7 @@ description: >-
   and each retries with exponential backoff. 
   Use for a set of SQL transformations inside one Flight.
 type: template
+category: analytics
 features: [flights]
 tags: []
 ---

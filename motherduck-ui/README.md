@@ -7,6 +7,7 @@ description: >-
   in the MotherDuck web UI. Use when you want a hands-on intro to interactive data
   exploration and ad hoc cleaning in MotherDuck without writing application code.
 type: example
+category: getting-started
 features: []
 tags: []
 ---

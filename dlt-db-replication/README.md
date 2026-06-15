@@ -7,6 +7,7 @@ description: >-
   refresh tables from a source SQL database into MotherDuck and want tunable
   extract, normalize, and load parallelism.
 type: example
+category: ingestion
 features: []
 tags: [dlt, postgres, connectorx]
 ---

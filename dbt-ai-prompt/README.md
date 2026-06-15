@@ -8,6 +8,7 @@ description: >-
   to run inside a dbt model as a normal SQL transformation, with no external
   API code.
 type: example
+category: analytics
 features: [shares]
 tags: [dbt]
 ---

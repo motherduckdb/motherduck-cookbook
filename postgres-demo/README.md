@@ -7,6 +7,7 @@ description: >-
   tables from psql. Use when you want a hybrid Postgres plus MotherDuck setup
   where one side reads the other, not a serverless app talking to MotherDuck.
 type: example
+category: integrations
 features: [pg_duckdb]
 tags: [postgres, docker]
 ---

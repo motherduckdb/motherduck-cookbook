@@ -7,6 +7,7 @@ description: >-
   want a serverless HTTP API or edge endpoint that reads from MotherDuck and
   returns JSON.
 type: example
+category: integrations
 features: [pg_endpoint]
 tags: [cloudflare, typescript, node-postgres]
 ---

@@ -7,6 +7,7 @@ description: >-
   when you want a dbt-on-MotherDuck recipe that reads Parquet/CSV directly from
   object storage without copying it first.
 type: example
+category: ingestion
 features: []
 tags: [dbt]
 ---

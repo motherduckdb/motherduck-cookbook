@@ -8,6 +8,7 @@ description: >-
   full-stack edge app that queries MotherDuck without bundling DuckDB and keeps a
   small piece of real-time shared state at the edge.
 type: example
+category: end-to-end
 features: [pg_endpoint, shares]
 tags: [cloudflare, durable-objects, node-postgres, d3, typescript]
 ---

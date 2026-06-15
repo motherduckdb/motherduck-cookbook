@@ -9,6 +9,7 @@ description: >-
   multi-stage Flight pipeline (raw -> core -> marts, transformed with in-warehouse
   SQL) paired with a bespoke D3 Dive deployed as code.
 type: example
+category: end-to-end
 features: [flights, dives]
 tags: [python, typescript, d3]
 ---

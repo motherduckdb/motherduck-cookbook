@@ -7,6 +7,7 @@ description: >-
   scores a churn model on top. Use when you need a SQL-first churn feature
   pipeline on MotherDuck, with model training kept as a separate step.
 type: example
+category: analytics
 features: []
 tags: [dbt, python, scikit-learn]
 ---

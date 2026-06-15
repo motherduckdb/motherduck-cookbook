@@ -7,6 +7,7 @@ description: >-
   Python ingestion that handles API calls, schema drift, state, and merge
   behavior without hand-writing every INSERT.
 type: template
+category: ingestion
 features: [flights]
 tags: [dlt, ingest]
 ---

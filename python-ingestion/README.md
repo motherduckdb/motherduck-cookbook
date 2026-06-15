@@ -7,6 +7,7 @@ description: >-
   PyArrow path. Use when you need a standalone Python ingestion script that pulls
   from an API or in-memory dataframe and writes to MotherDuck.
 type: example
+category: ingestion
 features: []
 tags: [python, pyarrow, pandas]
 ---
