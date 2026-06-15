@@ -3,4 +3,4 @@ duckdb==1.5.2
 # columnar path from Snowflake into DuckDB. pyarrow is pinned explicitly below so
 # the Arrow object DuckDB registers is reproducible across builds.
 snowflake-connector-python[pandas]==3.18.0
-pyarrow==18.1.0
+pyarrow==23.0.1
