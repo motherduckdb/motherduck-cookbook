@@ -47,6 +47,28 @@ pipeline.run(source, write_disposition="replace")
 - `[destination.motherduck] batch_size = 1000000` trades memory for throughput. Large batches load faster but hold more in memory.
 - `[data_writer] format = "parquet"` is the interim format dlt writes before loading. Parquet gives good compression and load performance.
 
+## Questions to answer
+
+- Source database: which PostgreSQL host, database, and schema?
+- Which tables to replicate, and is the list stable or changing often?
+- Load strategy: full refresh (`replace`, current default) or incremental (`merge`/`append` with a cursor/primary key)?
+- Target MotherDuck database and dataset (schema) name?
+- Expected data volume, so extract/normalize/load workers and `batch_size` can be tuned?
+- Credentials: PostgreSQL username/password and a MotherDuck access token, and where they should live (`secrets.toml` vs environment).
+- How often should this run, and from where (local, CI, an orchestrator)?
+
+## Caveats
+
+- **`secrets.toml` is required and gitignored.** It is not committed and does not exist until you create it. A missing or partial file fails the run; do not put the MotherDuck token or PostgreSQL password in `config.toml`, which is committed.
+- **Full refresh by default.** `write_disposition="replace"` drops and recreates every listed table on each run. It does not preserve history or do change data capture. Switch to `merge`/`append` for incremental loads.
+- **No tables configured raises early.** If `[sources.sql_database.tables]` is empty or missing, the pipeline raises `ValueError` before connecting. This is intentional, so the table list must be set in `config.toml`.
+- **A stale `table` key is in `config.toml`.** Alongside the real `tables` list there is a leftover singular `table = ["call_center"]` entry marked deprecated. The code reads `tables` (plural) only; ignore or delete the `table` key so you don't edit the wrong one.
+- **ConnectorX is version-pinned.** `connectorx<0.4.2` is a hard upper bound. Loosening it can break extraction.
+- **Metrics ignore `[runtime] log_level`.** `print_pipeline_metrics` logs through its own `pipeline_metrics` logger at `INFO` with `propagate=False`, so the metrics summary always prints even though `config.toml` sets the dlt runtime `log_level` to `WARNING`. The two log levels are independent; raising or lowering `[runtime] log_level` will not silence or surface the metrics block.
+- **Worker/pool mismatch stalls extraction.** Setting `[sources.sql_database] workers` higher than `[postgres] pool_size` exhausts the connection pool. Keep them equal.
+- **Memory pressure under heavy load.** Large `batch_size` plus high worker counts can cause out-of-memory errors on big tables. Reduce `batch_size` or worker counts if you hit OOM.
+- **Connection failures.** If extraction cannot reach the source, verify the PostgreSQL credentials in `secrets.toml`, the `host`/`port`, and network reachability from where the pipeline runs.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -62,16 +84,6 @@ pipeline.run(source, write_disposition="replace")
 | `[destination.motherduck] batch_size` in `.dlt/config.toml` | Rows per load batch (memory vs throughput) | `1000000` |
 | `[data_writer] format` in `.dlt/config.toml` | Interim file format | `parquet` |
 | `[runtime] log_level` in `.dlt/config.toml` | dlt log verbosity (does NOT control the metrics output) | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-
-## Questions to answer
-
-- Source database: which PostgreSQL host, database, and schema?
-- Which tables to replicate, and is the list stable or changing often?
-- Load strategy: full refresh (`replace`, current default) or incremental (`merge`/`append` with a cursor/primary key)?
-- Target MotherDuck database and dataset (schema) name?
-- Expected data volume, so extract/normalize/load workers and `batch_size` can be tuned?
-- Credentials: PostgreSQL username/password and a MotherDuck access token, and where they should live (`secrets.toml` vs environment).
-- How often should this run, and from where (local, CI, an orchestrator)?
 
 ## Run it
 
@@ -125,18 +137,6 @@ The run connects to PostgreSQL, extracts the configured tables in parallel, norm
 - [`pyproject.toml`](pyproject.toml) - project metadata and dependencies (`dlt[motherduck]`, version-pinned `connectorx`, `psycopg2-binary`, `sqlalchemy`, `humanize`), resolved by `uv`.
 - [`uv.lock`](uv.lock) - pinned dependency lockfile for reproducible `uv` installs.
 - [`.gitignore`](.gitignore) - excludes `secrets.toml`, `.env`, Python build artifacts, and local `*.duckdb` files.
-
-## Caveats
-
-- **`secrets.toml` is required and gitignored.** It is not committed and does not exist until you create it. A missing or partial file fails the run; do not put the MotherDuck token or PostgreSQL password in `config.toml`, which is committed.
-- **Full refresh by default.** `write_disposition="replace"` drops and recreates every listed table on each run. It does not preserve history or do change data capture. Switch to `merge`/`append` for incremental loads.
-- **No tables configured raises early.** If `[sources.sql_database.tables]` is empty or missing, the pipeline raises `ValueError` before connecting. This is intentional, so the table list must be set in `config.toml`.
-- **A stale `table` key is in `config.toml`.** Alongside the real `tables` list there is a leftover singular `table = ["call_center"]` entry marked deprecated. The code reads `tables` (plural) only; ignore or delete the `table` key so you don't edit the wrong one.
-- **ConnectorX is version-pinned.** `connectorx<0.4.2` is a hard upper bound. Loosening it can break extraction.
-- **Metrics ignore `[runtime] log_level`.** `print_pipeline_metrics` logs through its own `pipeline_metrics` logger at `INFO` with `propagate=False`, so the metrics summary always prints even though `config.toml` sets the dlt runtime `log_level` to `WARNING`. The two log levels are independent; raising or lowering `[runtime] log_level` will not silence or surface the metrics block.
-- **Worker/pool mismatch stalls extraction.** Setting `[sources.sql_database] workers` higher than `[postgres] pool_size` exhausts the connection pool. Keep them equal.
-- **Memory pressure under heavy load.** Large `batch_size` plus high worker counts can cause out-of-memory errors on big tables. Reduce `batch_size` or worker counts if you hit OOM.
-- **Connection failures.** If extraction cannot reach the source, verify the PostgreSQL credentials in `secrets.toml`, the `host`/`port`, and network reachability from where the pipeline runs.
 
 ## Learn more
 

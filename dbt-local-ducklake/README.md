@@ -98,6 +98,26 @@ local_sqlite:
   CALL ducklake_cleanup_old_files('catalog', cleanup_all => true);
   ```
 
+## Questions to answer
+
+- Which DuckLake backend: local Postgres, local SQLite, or a managed catalog on MotherDuck (`md:`)?
+- What is the source data: keep TPC-H, or repoint `external_location` to your own parquet / object-storage path?
+- What scale factor should the benchmark data use (full ~10GB vs a small dev sample)?
+- Which target database and schema should models materialize into (defaults: `catalog.raw` and `catalog.prep`)?
+- For the local Postgres target, what are the metadata store credentials (host, port, database)?
+- Should DuckLake maintenance (compaction, snapshot expiry) run, and on what cadence?
+
+## Caveats
+
+- **Postgres database must exist first.** The `local` target attaches `ducklake:postgres:` against a `ducklake_catalog` database. dbt will not create it for you. Run `createdb ducklake_catalog` (or the equivalent) before `dbt build`, or the attach fails.
+- **Secrets do not belong in `profiles.yml`.** The shipped Postgres secret has no password (local trust auth). For any non-local Postgres, supply credentials via environment variables / a dbt secret resolver, not by committing them here.
+- **`core_nightly` is a moving target.** The DuckLake extension is pinned to the `core_nightly` repo, so behavior can change between builds. Pin to a released DuckLake version once one is available if you need reproducibility.
+- **Snapshot expiry is aggressive.** `maintain_ducklake()` expires snapshots `older_than => now() - INTERVAL '1 minute'` even though its log line says "1 hour". Running it discards almost all time-travel history immediately. Widen the interval before relying on it in any environment where you want to keep snapshots.
+- **`merge_adjacent_files` and friends are DuckLake-only.** These maintenance calls only resolve when the attached catalog is a DuckLake. Running the macro against a plain DuckDB attach will error.
+- **The `motherduck` target uses a hardcoded database name.** `md:jdw_ducklake` is an example database. Point it at your own MotherDuck DuckLake database and set `motherduck_token` in the environment, or the attach fails silently to authenticate.
+- **Scale factor 10 generates ~10GB.** Generating and materializing the full set is slow and disk-heavy. Use `--scale-factor 1` (or lower) for fast iteration; the same models work at any scale.
+- **`data/`, `data_files/`, and `*.db` are gitignored.** The generated parquet, DuckLake data files, and SQLite metadata are intentionally not committed. A fresh clone has to regenerate data and rebuild before queries return rows.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -112,15 +132,6 @@ local_sqlite:
 | `models.dbt_local_ducklake.tpch` (dbt_project.yml) | Where models land in the catalog | `raw` -> `catalog.raw` (tables), `queries` -> `catalog.prep` (tables) |
 | TPC-H scale factor | Size of the generated benchmark data | `--scale-factor 10` (~10GB); lower it (e.g. `1` for ~1GB) for a fast local run |
 | `maintain_ducklake()` (macros/ducklake_maintenance.sql) | Compaction and snapshot cleanup cadence | merges adjacent files, then `ducklake_expire_snapshots(... older_than => now() - INTERVAL '1 minute')` and `ducklake_cleanup_old_files`; tune the interval |
-
-## Questions to answer
-
-- Which DuckLake backend: local Postgres, local SQLite, or a managed catalog on MotherDuck (`md:`)?
-- What is the source data: keep TPC-H, or repoint `external_location` to your own parquet / object-storage path?
-- What scale factor should the benchmark data use (full ~10GB vs a small dev sample)?
-- Which target database and schema should models materialize into (defaults: `catalog.raw` and `catalog.prep`)?
-- For the local Postgres target, what are the metadata store credentials (host, port, database)?
-- Should DuckLake maintenance (compaction, snapshot expiry) run, and on what cadence?
 
 ## Run it
 
@@ -170,17 +181,6 @@ duckdb -c "INSTALL ducklake; LOAD ducklake; \
 - [`macros/ducklake_maintenance.sql`](macros/ducklake_maintenance.sql) - the `maintain_ducklake()` operation: merges adjacent files, expires old snapshots, and cleans up orphaned data files.
 - [`.user.yml`](.user.yml) - dbt's per-user identifier file (anonymous usage tracking).
 - `analyses/`, `seeds/`, `snapshots/`, `tests/`, `macros/` - the standard dbt project directories, kept as empty placeholders except for the macros above.
-
-## Caveats
-
-- **Postgres database must exist first.** The `local` target attaches `ducklake:postgres:` against a `ducklake_catalog` database. dbt will not create it for you. Run `createdb ducklake_catalog` (or the equivalent) before `dbt build`, or the attach fails.
-- **Secrets do not belong in `profiles.yml`.** The shipped Postgres secret has no password (local trust auth). For any non-local Postgres, supply credentials via environment variables / a dbt secret resolver, not by committing them here.
-- **`core_nightly` is a moving target.** The DuckLake extension is pinned to the `core_nightly` repo, so behavior can change between builds. Pin to a released DuckLake version once one is available if you need reproducibility.
-- **Snapshot expiry is aggressive.** `maintain_ducklake()` expires snapshots `older_than => now() - INTERVAL '1 minute'` even though its log line says "1 hour". Running it discards almost all time-travel history immediately. Widen the interval before relying on it in any environment where you want to keep snapshots.
-- **`merge_adjacent_files` and friends are DuckLake-only.** These maintenance calls only resolve when the attached catalog is a DuckLake. Running the macro against a plain DuckDB attach will error.
-- **The `motherduck` target uses a hardcoded database name.** `md:jdw_ducklake` is an example database. Point it at your own MotherDuck DuckLake database and set `motherduck_token` in the environment, or the attach fails silently to authenticate.
-- **Scale factor 10 generates ~10GB.** Generating and materializing the full set is slow and disk-heavy. Use `--scale-factor 1` (or lower) for fast iteration; the same models work at any scale.
-- **`data/`, `data_files/`, and `*.db` are gitignored.** The generated parquet, DuckLake data files, and SQLite metadata are intentionally not committed. A fresh clone has to regenerate data and rebuild before queries return rows.
 
 ## Learn more
 

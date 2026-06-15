@@ -80,6 +80,26 @@ async validate(resource) {
 }
 ```
 
+## Questions to answer
+
+- Which MotherDuck database and schema should the scripts target? Default is `my_db`; sample queries read the `sample_data.nyc` share.
+- Is a MotherDuck access token available, and where should it live? These scripts read it from `MOTHERDUCK_TOKEN` in `.env`.
+- Is this a one-shot script or a long-running service: does it need the connection pool, and at what concurrency (min/max, recycle timers)?
+- What queries or tables should replace the `example_users` and `nyc.taxi` samples?
+- Does the runtime ship the DuckDB binary (native driver), or does it need the Postgres endpoint instead (see `cloudflare-workers` for that pattern)?
+
+## Caveats
+
+- The native driver loads the DuckDB binary in-process. Runtimes that cannot ship a native addon (Cloudflare Workers, some serverless platforms, browsers) will fail to load `@duckdb/node-api`. Use the Postgres endpoint there instead (`cloudflare-workers` example).
+- Do not call `DuckDBInstance.create()` per request or per pooled connection: that re-loads the MotherDuck extension and re-fetches catalog metadata every time. Always go through `fromCache()` so connections share one instance.
+- Keep the token out of source control. The token is read from `MOTHERDUCK_TOKEN` in `.env`, and `.gitignore` already excludes `.env`. Do not hardcode it into `basic.js`, `connection-pool.js`, or commit a populated `.env`. If `MOTHERDUCK_TOKEN` is unset, both scripts exit early with a clear error.
+- ESM only: `package.json` sets `"type": "module"`, so use `import`, not `require`. Node.js below 22 may not support the syntax used here.
+- `validate()` only recycles a connection on borrow (`testOnBorrow: true`). A connection that sits idle past `idleTimeoutMillis` is evicted by the eviction sweep, but staleness is checked when the connection is handed out, not continuously. Tune `recycleTimeoutMillis`, `evictionRunIntervalMillis`, and the idle timeouts together.
+- `SET THREADS='1'` trades per-query speed for fair CPU sharing across the pool. If you raise `max` without watching threads, pooled connections can oversubscribe CPU; if a single query is slow and concurrency is low, raise the thread count.
+- The pool example reads only from `sample_data.nyc.taxi`; the writes in `basic.js` create and drop `example_users` in your target database. Point these at a database you are allowed to write to, and note that `basic.js` drops `example_users` on exit (in its `finally` block).
+- `getRowObjects()` returns DuckDB-typed values; large integers come back as `BigInt`, not `Number`. Handle that when serializing results (for example `JSON.stringify` on a `BigInt` throws).
+- Always close connections (`connection.closeSync()`) and drain the pool (`pool.drain()` then `pool.clear()`) on shutdown, or the process can hang on open handles.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -92,14 +112,6 @@ async validate(resource) {
 | Eviction / recycle timers in `src/connection-pool.js` | Idle cleanup and connection recycling | `softIdleTimeoutMillis: 60000`, `idleTimeoutMillis: 120000`, `recycleTimeoutMillis: 300000` |
 | `SET THREADS='1'` in the pool factory | Threads per pooled connection so they don't compete for CPU | Raise or drop depending on concurrency vs per-query speed |
 | `queries` array in `src/connection-pool.js` | The concurrent queries run through the pool | Replace the `sample_data.nyc.taxi` aggregates with your own SQL |
-
-## Questions to answer
-
-- Which MotherDuck database and schema should the scripts target? Default is `my_db`; sample queries read the `sample_data.nyc` share.
-- Is a MotherDuck access token available, and where should it live? These scripts read it from `MOTHERDUCK_TOKEN` in `.env`.
-- Is this a one-shot script or a long-running service: does it need the connection pool, and at what concurrency (min/max, recycle timers)?
-- What queries or tables should replace the `example_users` and `nyc.taxi` samples?
-- Does the runtime ship the DuckDB binary (native driver), or does it need the Postgres endpoint instead (see `cloudflare-workers` for that pattern)?
 
 ## Run it
 
@@ -129,18 +141,6 @@ npm run pool
 - [`.env.template`](.env.template) - environment template: copy to `.env` and set `MOTHERDUCK_TOKEN` (and optionally `MOTHERDUCK_DATABASE`).
 - [`.nvmrc`](.nvmrc) - pins Node.js 22 for tools like `nvm`.
 - [`.gitignore`](.gitignore) - excludes `node_modules/`, `.env`, local DuckDB files, and other noise from version control.
-
-## Caveats
-
-- The native driver loads the DuckDB binary in-process. Runtimes that cannot ship a native addon (Cloudflare Workers, some serverless platforms, browsers) will fail to load `@duckdb/node-api`. Use the Postgres endpoint there instead (`cloudflare-workers` example).
-- Do not call `DuckDBInstance.create()` per request or per pooled connection: that re-loads the MotherDuck extension and re-fetches catalog metadata every time. Always go through `fromCache()` so connections share one instance.
-- Keep the token out of source control. The token is read from `MOTHERDUCK_TOKEN` in `.env`, and `.gitignore` already excludes `.env`. Do not hardcode it into `basic.js`, `connection-pool.js`, or commit a populated `.env`. If `MOTHERDUCK_TOKEN` is unset, both scripts exit early with a clear error.
-- ESM only: `package.json` sets `"type": "module"`, so use `import`, not `require`. Node.js below 22 may not support the syntax used here.
-- `validate()` only recycles a connection on borrow (`testOnBorrow: true`). A connection that sits idle past `idleTimeoutMillis` is evicted by the eviction sweep, but staleness is checked when the connection is handed out, not continuously. Tune `recycleTimeoutMillis`, `evictionRunIntervalMillis`, and the idle timeouts together.
-- `SET THREADS='1'` trades per-query speed for fair CPU sharing across the pool. If you raise `max` without watching threads, pooled connections can oversubscribe CPU; if a single query is slow and concurrency is low, raise the thread count.
-- The pool example reads only from `sample_data.nyc.taxi`; the writes in `basic.js` create and drop `example_users` in your target database. Point these at a database you are allowed to write to, and note that `basic.js` drops `example_users` on exit (in its `finally` block).
-- `getRowObjects()` returns DuckDB-typed values; large integers come back as `BigInt`, not `Number`. Handle that when serializing results (for example `JSON.stringify` on a `BigInt` throws).
-- Always close connections (`connection.closeSync()`) and drain the pool (`pool.drain()` then `pool.clear()`) on shutdown, or the process can hang on open handles.
 
 ## Learn more
 

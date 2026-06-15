@@ -91,6 +91,42 @@ where inference picks a wider or narrower type than you want.
 in-memory DuckDB database (no MotherDuck or network needed), covering a single
 insert, multiple inserts, and a 100-row table that spans many chunks.
 
+## Questions to answer
+
+- What is the source: an HTTP API, a local file, or an in-memory dataframe?
+- Which MotherDuck database and table should the data land in?
+- Small payload (pandas, one shot) or larger payload (typed PyArrow, chunked)?
+- Full refresh (create/replace) or append to an existing table?
+- How often should it run, and where will the `motherduck_token` come from?
+
+## Caveats
+
+- **`CREATE TABLE IF NOT EXISTS` does not refresh.** Both scripts only create the
+  table on the first run; later runs are silent no-ops and the data goes stale.
+  For a full refresh use `CREATE OR REPLACE TABLE`; to accumulate rows, create the
+  table once and `INSERT` on subsequent runs (the large script's pattern).
+- **Missing token fails at attach, not at startup.** If `.env` is absent, holds
+  the placeholder `mytoken`, or you run from a directory where `load_dotenv()`
+  cannot find `.env`, the script fails when it reaches `ATTACH 'md:'`. Confirm the
+  token is real and that you run from this folder.
+- **GitHub `stats/contributors` can return `202` with an empty body.** GitHub
+  computes contributor statistics asynchronously and returns `202 Accepted` with
+  no data on the first request for a repo. The script does not retry, so a cold
+  cache yields an empty load. Re-run after a moment, or handle `202` explicitly
+  for your own source.
+- **Unauthenticated GitHub API requests are rate limited** to roughly 60 per hour
+  per IP. For anything beyond a demo, send an authentication header, and do not
+  hardcode that token in the script or commit it.
+- **Keep secrets out of source and config.** The token belongs in `.env` (which
+  should be gitignored) or a real environment variable, never in `flight.py`-style
+  committed code or in the `.env.template`.
+- **The pandas path infers types.** For wide or sparse payloads, inference can
+  pick types you did not intend (for example everything as `VARCHAR`, or integers
+  promoted to floats by nulls). Prefer the typed PyArrow path when types matter.
+- **`chunk_size=10` is a demo value.** It is set small so the example logs several
+  chunks. Tiny chunks mean many round trips; raise it (around `100000`) for real
+  loads.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -102,14 +138,6 @@ insert, multiple inserts, and a 100-row table that spans many chunks.
 | Target table name | Where rows land: `github.github_commits` (small) / `github.github_commits_large` (large). | `<database>.<table>` |
 | Explicit schema (large script) | The PyArrow + DuckDB column types for typed ingestion. | `[("login", pa.string()), ("total_commits", pa.int64())]` |
 | `chunk_size` (large script) | Rows per INSERT batch. Set to 10 in the demo; use a larger value in production. | `100000` is a good default |
-
-## Questions to answer
-
-- What is the source: an HTTP API, a local file, or an in-memory dataframe?
-- Which MotherDuck database and table should the data land in?
-- Small payload (pandas, one shot) or larger payload (typed PyArrow, chunked)?
-- Full refresh (create/replace) or append to an existing table?
-- How often should it run, and where will the `motherduck_token` come from?
 
 ## Run it
 
@@ -143,34 +171,6 @@ uv run pytest tests
 - [`.env.template`](.env.template) - copy to `.env` and set `motherduck_token`; the scripts read it via `load_dotenv()`.
 - [`.python-version`](.python-version) - pins the interpreter to Python 3.12.
 - [`uv.lock`](uv.lock) - the pinned `uv` dependency lockfile.
-
-## Caveats
-
-- **`CREATE TABLE IF NOT EXISTS` does not refresh.** Both scripts only create the
-  table on the first run; later runs are silent no-ops and the data goes stale.
-  For a full refresh use `CREATE OR REPLACE TABLE`; to accumulate rows, create the
-  table once and `INSERT` on subsequent runs (the large script's pattern).
-- **Missing token fails at attach, not at startup.** If `.env` is absent, holds
-  the placeholder `mytoken`, or you run from a directory where `load_dotenv()`
-  cannot find `.env`, the script fails when it reaches `ATTACH 'md:'`. Confirm the
-  token is real and that you run from this folder.
-- **GitHub `stats/contributors` can return `202` with an empty body.** GitHub
-  computes contributor statistics asynchronously and returns `202 Accepted` with
-  no data on the first request for a repo. The script does not retry, so a cold
-  cache yields an empty load. Re-run after a moment, or handle `202` explicitly
-  for your own source.
-- **Unauthenticated GitHub API requests are rate limited** to roughly 60 per hour
-  per IP. For anything beyond a demo, send an authentication header, and do not
-  hardcode that token in the script or commit it.
-- **Keep secrets out of source and config.** The token belongs in `.env` (which
-  should be gitignored) or a real environment variable, never in `flight.py`-style
-  committed code or in the `.env.template`.
-- **The pandas path infers types.** For wide or sparse payloads, inference can
-  pick types you did not intend (for example everything as `VARCHAR`, or integers
-  promoted to floats by nulls). Prefer the typed PyArrow path when types matter.
-- **`chunk_size=10` is a demo value.** It is set small so the example logs several
-  chunks. Tiny chunks mean many round trips; raise it (around `100000`) for real
-  loads.
 
 ## Learn more
 

@@ -48,6 +48,27 @@ models are:
 The same project runs unchanged against a local DuckDB file or against
 MotherDuck; only the dbt target changes.
 
+## Questions to answer
+
+- What is the source data: which S3/HTTPS path and file, and is it Parquet or CSV?
+- Which models are actually needed (keep the three samples, replace them, or select a subset)?
+- Target MotherDuck database and schema for the built tables.
+- Local DuckDB run or MotherDuck run?
+- Is there a MotherDuck account and access token available?
+
+## Caveats
+
+- **The target database must already exist.** dbt does not create it. The `prod`
+  target connects to `md:hacker_news_stats`, which fails if the database is
+  missing. Run `CREATE DATABASE IF NOT EXISTS ...` first.
+- **No `dev` target exists.** `profiles.yml` defines `local` and `prod` only. dbt
+  errors on `--target dev`.
+- **Swapping to a private bucket needs a secret.** The default S3 dataset is
+  public. Pointing `external_location` at a private bucket requires a DuckDB/
+  MotherDuck `SECRET`; the project ships none.
+- **Do not put a token in source or config.** The `local` and `prod` runs read
+  `MOTHERDUCK_TOKEN` from the environment; keep it out of the repo.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -59,14 +80,6 @@ MotherDuck; only the dbt target changes.
 | `profiles.yml` targets | Local vs cloud destination. | `local` (`local.db` DuckDB file) or `prod` (`md:hacker_news_stats`) |
 | `profiles.yml` `prod` `path` | The MotherDuck database dbt builds into. | `md:hacker_news_stats`; create the database first |
 | `MOTHERDUCK_TOKEN` (env) | Auth for MotherDuck runs. | a read/write token from your account |
-
-## Questions to answer
-
-- What is the source data: which S3/HTTPS path and file, and is it Parquet or CSV?
-- Which models are actually needed (keep the three samples, replace them, or select a subset)?
-- Target MotherDuck database and schema for the built tables.
-- Local DuckDB run or MotherDuck run?
-- Is there a MotherDuck account and access token available?
 
 ## Run it
 
@@ -105,19 +118,6 @@ stays on disk. There is no `dev` target; use `local`.
 - [`pyproject.toml`](pyproject.toml): Python project metadata for local `uv run` (pins `dbt-duckdb==1.9.3`).
 - [`uv.lock`](uv.lock): resolved lockfile for the local `uv` environment. [`.python-version`](.python-version) pins Python 3.12.
 - [`analyses/`](analyses/), [`macros/`](macros/), [`seeds/`](seeds/), [`snapshots/`](snapshots/), [`tests/`](tests/): standard dbt scaffold directories, empty for now (each holds a `.gitkeep`).
-
-## Caveats
-
-- **The target database must already exist.** dbt does not create it. The `prod`
-  target connects to `md:hacker_news_stats`, which fails if the database is
-  missing. Run `CREATE DATABASE IF NOT EXISTS ...` first.
-- **No `dev` target exists.** `profiles.yml` defines `local` and `prod` only. dbt
-  errors on `--target dev`.
-- **Swapping to a private bucket needs a secret.** The default S3 dataset is
-  public. Pointing `external_location` at a private bucket requires a DuckDB/
-  MotherDuck `SECRET`; the project ships none.
-- **Do not put a token in source or config.** The `local` and `prod` runs read
-  `MOTHERDUCK_TOKEN` from the environment; keep it out of the repo.
 
 ## Learn more
 

@@ -33,6 +33,19 @@ Two decoupled slices:
 The Flight keeps `nba_box_scores_v3` current; the Dive queries it live. Each
 slice's README covers its own deeper development and deploy details.
 
+## How it works
+
+- [`flight/README.md`](./flight/README.md) — pipeline layout, local development, and Flight registration.
+- [`dive/README.md`](./dive/README.md) — the three-tab Dive, the esbuild bundle, deploy SQL, and data-modeling notes (stable `entity_id` aggregation, the `game_quality = -1` sub-15-minute sentinel, and Dive-renderer styling caveats).
+
+## Questions to answer
+
+- Which MotherDuck database holds the box-score tables? (Default `nba_box_scores_v3`.)
+- Which seasons do you need — the current season on a nightly schedule, a historical range to backfill, or both?
+- Which MotherDuck token name does the Flight inject, and does it have read+write on that database? (Default `dives-loader-nba`.)
+- Production tables, or an isolated `_new` suffix to validate a run before promoting?
+- What Dive title do you deploy under (the script resolves it by title), and are you deploying with a DuckDB **1.5.2** client (MotherDuck rejects 1.5.3)?
+
 ## What you'll adjust
 
 | Knob | Where | Purpose |
@@ -47,14 +60,6 @@ slice's README covers its own deeper development and deploy details.
 | `md_token_name` | `flight/flights/*/flight.toml` | MotherDuck token the Flight runtime injects as `MOTHERDUCK_TOKEN`. Default `dives-loader-nba`. |
 | `schedule_cron` | `flight/flights/nba_nightly/flight.toml` | Nightly schedule. Default `0 16 * * *` (16:00 UTC). |
 | `DIVE_TITLE` / `NBA_DIVE_DATABASE` | env (`dive/scripts/deploy-dive.sh`) | Dive title to create/update (default `NBA Box Scores`) and the source database bound to its `nba_box_scores_v3` alias. |
-
-## Questions to answer
-
-- Which MotherDuck database holds the box-score tables? (Default `nba_box_scores_v3`.)
-- Which seasons do you need — the current season on a nightly schedule, a historical range to backfill, or both?
-- Which MotherDuck token name does the Flight inject, and does it have read+write on that database? (Default `dives-loader-nba`.)
-- Production tables, or an isolated `_new` suffix to validate a run before promoting?
-- What Dive title do you deploy under (the script resolves it by title), and are you deploying with a DuckDB **1.5.2** client (MotherDuck rejects 1.5.3)?
 
 ## Run it
 
@@ -108,8 +113,6 @@ creating it the first time and updating its content after — no Dive id is pinn
 in the repo. See [`dive/README.md`](./dive/README.md) for the title/database
 overrides and the underlying SQL.
 
-## How it works / Learn more
+## Learn more
 
-- [`flight/README.md`](./flight/README.md) — pipeline layout, local development, and Flight registration.
-- [`dive/README.md`](./dive/README.md) — the three-tab Dive, the esbuild bundle, deploy SQL, and data-modeling notes (stable `entity_id` aggregation, the `game_quality = -1` sub-15-minute sentinel, and Dive-renderer styling caveats).
 - For Flight and Dive deployment mechanics, see the MotherDuck MCP guides (`get_flight_guide`, `get_dive_guide`) and `ask_docs_question`.

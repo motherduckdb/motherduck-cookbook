@@ -38,84 +38,6 @@ It reads Dives read-only and writes only to the target database you configure.
 Everything is driven by Flight config, so you adapt it by setting config values,
 not by editing `flight.py`.
 
-## What you'll adjust
-
-Every knob is a config/env value read at the top of `flight.py`. Set them as
-Flight config, not by editing code.
-
-| Config key | Default | Purpose |
-|---|---|---|
-| `TARGET_DATABASE` | `dive_metrics` | Database that holds the metrics table. Created if missing. Validated as a SQL identifier. |
-| `TARGET_SCHEMA` | `main` | Schema for the metrics table. Created if missing. Validated as a SQL identifier. |
-| `METRICS_TABLE` | `dive_usage_metrics` | Usage metrics table name. A companion `<table>_latest` view exposes the newest run. Validated as a SQL identifier. |
-| `BUILD_RELATIONSHIPS` | `true` | Also build the dependency, co-occurrence, and join-key tables. Set false to produce only the usage metrics. |
-| `EDGES_TABLE` | `dive_object_edges` | Dependency-edge table (one row per Dive-to-object reference). Validated as a SQL identifier. |
-| `COOCCURRENCE_TABLE` | `dive_table_cooccurrence` | Table co-occurrence table (table pairs sharing a statement). Validated as a SQL identifier. |
-| `JOIN_TABLE` | `dive_join_edges` | Mined join-key table (column-to-column edges). Validated as a SQL identifier. |
-| `INCLUDE_ORG_SHARES` | `true` | When true, scan every Dive shared in the organization via `MD_LIST_DIVES(include_org_shares := true)`. When false, scan only the token owner's own Dives. |
-| `DIVE_LIMIT` | (unset) | Optional cap on how many Dives to scan, useful for a quick first run. Unset or `0` means no limit. |
-| `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Use a token that can read the Dives you want counted and write `TARGET_DATABASE`. Never put it in config. |
-
-## Questions to answer
-
-- Should the metrics cover every Dive shared in the organization (`INCLUDE_ORG_SHARES=true`), or only the token owner's own Dives?
-- Where should the metrics live (`TARGET_DATABASE`, `TARGET_SCHEMA`, `METRICS_TABLE`), and is that database writable by the chosen token?
-- Which service account token can read the Dives you care about and write the target database?
-- How often should the snapshot refresh (daily or weekly), given how often Dives change?
-- Do you need a quick bounded first run (`DIVE_LIMIT`) before scanning everything?
-
-## Run it
-
-You need a MotherDuck account and an access token. This template has a
-credential-free smoke test: with only a `MOTHERDUCK_TOKEN`, a fresh run produces
-real metrics from your own and your organization's shared Dives. No other
-credentials or setup are needed, because Dives, `MD_LIST_DIVES`, `MD_GET_DIVE`,
-and `json_serialize_sql` are all built into MotherDuck.
-
-```bash
-export MOTHERDUCK_TOKEN=your_token_here
-# optional: bound the first run while you confirm the output
-export DIVE_LIMIT=25
-uv run --with-requirements requirements.txt flight.py
-```
-
-This enumerates the Dives, parses the SQL in each, and writes the metric rows to
-`dive_metrics.main.dive_usage_metrics` (creating the database and schema on first
-run). It prints how many Dives it scanned, how many SQL statements it parsed and
-skipped, and the row count per object type. Query the result:
-
-```sql
-SELECT object_type, object_name, dive_count, reference_count
-FROM dive_metrics.main.dive_usage_metrics_latest
-WHERE object_type = 'table'
-ORDER BY dive_count DESC, reference_count DESC
-LIMIT 20;
-```
-
-### Deploy as a Flight
-
-Create the Flight with the `MD_CREATE_FLIGHT` SQL function (no deploy SQL is
-checked in; adapt the arguments to your situation), passing:
-
-- `name`: a Flight name, for example `dive_usage_metrics`
-- `source_code`: the contents of [`flight.py`](flight.py)
-- `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
-- `config`: the keys from [What you'll adjust](#what-youll-adjust) you want to
-  override (omit any you are keeping at default)
-
-A MotherDuck token is attached to the Flight automatically and injected at run
-time as `MOTHERDUCK_TOKEN`; no token argument is needed. The run can only count
-Dives that token can read, so deploy from an account that sees them.
-
-Create the Flight without a schedule, trigger one manual run with
-`MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and read the run logs and the `_latest` view to
-confirm the metrics look right. Then add a schedule by updating the Flight's
-`schedule_cron` with `MD_UPDATE_FLIGHT`. A daily run
-(`0 6 * * *`) or weekly run (`0 6 * * 1`) is a reasonable cadence, since Dive
-source SQL changes slowly. Schedule updates are metadata-only and do not create a
-new Flight version.
-
 ## How it works
 
 `flight.py` runs a fixed sequence; the config values only change its inputs:
@@ -173,6 +95,14 @@ ORDER BY dive_count DESC
 LIMIT 20;
 ```
 
+## Questions to answer
+
+- Should the metrics cover every Dive shared in the organization (`INCLUDE_ORG_SHARES=true`), or only the token owner's own Dives?
+- Where should the metrics live (`TARGET_DATABASE`, `TARGET_SCHEMA`, `METRICS_TABLE`), and is that database writable by the chosen token?
+- Which service account token can read the Dives you care about and write the target database?
+- How often should the snapshot refresh (daily or weekly), given how often Dives change?
+- Do you need a quick bounded first run (`DIVE_LIMIT`) before scanning everything?
+
 ## Caveats
 
 - **Tables are limited to fully-qualified names.** Only `database.schema.table`
@@ -216,6 +146,76 @@ LIMIT 20;
   often queries actually run, see `MD_INFORMATION_SCHEMA.QUERY_HISTORY`, but note
   that query history records executed SQL and cannot be attributed back to a
   specific Dive.
+
+## What you'll adjust
+
+Every knob is a config/env value read at the top of `flight.py`. Set them as
+Flight config, not by editing code.
+
+| Config key | Default | Purpose |
+|---|---|---|
+| `TARGET_DATABASE` | `dive_metrics` | Database that holds the metrics table. Created if missing. Validated as a SQL identifier. |
+| `TARGET_SCHEMA` | `main` | Schema for the metrics table. Created if missing. Validated as a SQL identifier. |
+| `METRICS_TABLE` | `dive_usage_metrics` | Usage metrics table name. A companion `<table>_latest` view exposes the newest run. Validated as a SQL identifier. |
+| `BUILD_RELATIONSHIPS` | `true` | Also build the dependency, co-occurrence, and join-key tables. Set false to produce only the usage metrics. |
+| `EDGES_TABLE` | `dive_object_edges` | Dependency-edge table (one row per Dive-to-object reference). Validated as a SQL identifier. |
+| `COOCCURRENCE_TABLE` | `dive_table_cooccurrence` | Table co-occurrence table (table pairs sharing a statement). Validated as a SQL identifier. |
+| `JOIN_TABLE` | `dive_join_edges` | Mined join-key table (column-to-column edges). Validated as a SQL identifier. |
+| `INCLUDE_ORG_SHARES` | `true` | When true, scan every Dive shared in the organization via `MD_LIST_DIVES(include_org_shares := true)`. When false, scan only the token owner's own Dives. |
+| `DIVE_LIMIT` | (unset) | Optional cap on how many Dives to scan, useful for a quick first run. Unset or `0` means no limit. |
+| `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Use a token that can read the Dives you want counted and write `TARGET_DATABASE`. Never put it in config. |
+
+## Run it
+
+You need a MotherDuck account and an access token. This template has a
+credential-free smoke test: with only a `MOTHERDUCK_TOKEN`, a fresh run produces
+real metrics from your own and your organization's shared Dives. No other
+credentials or setup are needed, because Dives, `MD_LIST_DIVES`, `MD_GET_DIVE`,
+and `json_serialize_sql` are all built into MotherDuck.
+
+```bash
+export MOTHERDUCK_TOKEN=your_token_here
+# optional: bound the first run while you confirm the output
+export DIVE_LIMIT=25
+uv run --with-requirements requirements.txt flight.py
+```
+
+This enumerates the Dives, parses the SQL in each, and writes the metric rows to
+`dive_metrics.main.dive_usage_metrics` (creating the database and schema on first
+run). It prints how many Dives it scanned, how many SQL statements it parsed and
+skipped, and the row count per object type. Query the result:
+
+```sql
+SELECT object_type, object_name, dive_count, reference_count
+FROM dive_metrics.main.dive_usage_metrics_latest
+WHERE object_type = 'table'
+ORDER BY dive_count DESC, reference_count DESC
+LIMIT 20;
+```
+
+### Deploy as a Flight
+
+Create the Flight with the `MD_CREATE_FLIGHT` SQL function (no deploy SQL is
+checked in; adapt the arguments to your situation), passing:
+
+- `name`: a Flight name, for example `dive_usage_metrics`
+- `source_code`: the contents of [`flight.py`](flight.py)
+- `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `config`: the keys from [What you'll adjust](#what-youll-adjust) you want to
+  override (omit any you are keeping at default)
+
+A MotherDuck token is attached to the Flight automatically and injected at run
+time as `MOTHERDUCK_TOKEN`; no token argument is needed. The run can only count
+Dives that token can read, so deploy from an account that sees them.
+
+Create the Flight without a schedule, trigger one manual run with
+`MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
+listed by `MD_FLIGHTS()`), and read the run logs and the `_latest` view to
+confirm the metrics look right. Then add a schedule by updating the Flight's
+`schedule_cron` with `MD_UPDATE_FLIGHT`. A daily run
+(`0 6 * * *`) or weekly run (`0 6 * * 1`) is a reasonable cadence, since Dive
+source SQL changes slowly. Schedule updates are metadata-only and do not create a
+new Flight version.
 
 ## Security
 

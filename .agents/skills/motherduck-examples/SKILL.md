@@ -111,14 +111,20 @@ Use this structure:
 
 1. `# <title>` and a short paragraph explaining what the example does and which
    MotherDuck pattern it demonstrates.
-2. `## What you'll adjust`: a table of real knobs found in the code, with each
-   knob's purpose and example values/options.
+2. `## How it works`: the concrete pattern, architecture, or files that explain
+   what the example does before readers start changing values.
 3. `## Questions to answer`: the information needed before adapting the example
    (source, target database/schema, load pattern, schedule, credentials).
-4. `## Run it`: local commands and environment variables.
-5. For flight-capable entries (`features` includes `flights`), add a
-   `### Deploy as a Flight` subsection under `## Run it`.
-6. `## How it works / Learn more`: link to extra files in the folder and point
+4. `## Caveats`: footguns, limitations, and cases where the example is the wrong
+   tool.
+5. `## What you'll adjust`: a table of real knobs found in the code, with each
+   knob's purpose and example values/options.
+6. `## Run it`: local commands and environment variables. For flight-capable
+   entries (`features` includes `flights`), add a `### Deploy as a Flight`
+   subsection under `## Run it`.
+7. `## Security`: credential handling, SQL safety, access-control notes, and
+   other security-specific concerns when relevant.
+8. `## Learn more`: link to extra files in the folder and point
    to MCP guides such as `get_flight_guide`, `get_dive_guide`, or
    `ask_docs_question`. This and `## Caveats` are the only places where MCP tool
    names belong; every other section uses the SQL surface (`MD_CREATE_FLIGHT`,

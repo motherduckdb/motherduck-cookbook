@@ -25,6 +25,55 @@ stats (partitioned by `year`) and build `flights_demo.main.duckdb_pypi_downloads
 in your own account, so a fresh deploy produces a successful run you can then
 point at your own data.
 
+## How it works
+
+`flight.py` runs a fixed sequence; the config values only change its inputs:
+
+1. Connect to MotherDuck (`md:`) and `CREATE DATABASE`/`CREATE SCHEMA IF NOT EXISTS`
+   for the destination, so the Flight owns everything it needs.
+2. Create the destination once with `CREATE TABLE IF NOT EXISTS ... AS SELECT * ... LIMIT 0`,
+   which infers the destination columns from the source without reading rows.
+3. `DELETE` the target partition, then `INSERT` it back by reading the source with
+   `hive_partitioning = true` and `WHERE PARTITION_COLUMN = LOAD_PARTITION`. The
+   filter on the partition column is what lets DuckDB prune to a single folder.
+4. Count the refreshed rows and append one row to the run ledger.
+
+The default load is a `SELECT *` pass-through, so it works for any partitioned
+Parquet with no code changes. To shape the data instead, replace the marked
+`SELECT *` in the `INSERT` with your own projection or aggregation, keeping the
+partition column so the incremental replace still lines up.
+
+## Questions to answer
+
+- Which partitioned source, and what is its partition key (`SOURCE_GLOB`, `PARTITION_COLUMN`)?
+- Which partition should each scheduled run refresh (`LOAD_PARTITION`, default current year)?
+- Target MotherDuck database, schema, and table (`DESTINATION_*`); is letting the Flight create them acceptable?
+- Is the source public, or does a private bucket need a MotherDuck S3 secret first?
+- Which service account token should the Flight use for a scheduled workload?
+- What schedule (cron) should it run on?
+
+## Caveats
+
+- **Pruning depends on a direct partition filter.** The speedup comes from
+  comparing the raw `PARTITION_COLUMN` to `LOAD_PARTITION`. Wrapping the column in
+  a function (for example `CAST(year AS VARCHAR)`) can defeat pruning and read
+  every folder.
+- **The destination schema is inferred on the first run.** If you later change the
+  source columns, they may not match the existing table. Drop and recreate the
+  destination, or migrate it, when the shape changes.
+- **Numeric partition values are integers.** A digit-only `LOAD_PARTITION` is bound
+  as an integer so it matches a numeric Hive column. Pass a non-numeric value for
+  string partitions (for example a region code).
+- **Private buckets need a secret.** The default dataset is public. Point
+  `SOURCE_GLOB` at a private bucket only after adding a MotherDuck **S3 secret**
+  for it: the simplest way is the MotherDuck UI at
+  [Settings > Secrets](https://app.motherduck.com/settings/secrets), or
+  `CREATE SECRET ... (TYPE S3, ...)` from the DuckDB client. It must be available
+  to the Flight's token. (This is an S3 secret on the account, not a Flights
+  secret: it is read by the engine, not injected as an env var.)
+- **Keep the token out of config.** Select a token on the Flight so
+  `MOTHERDUCK_TOKEN` is injected at runtime; do not place it in `config`.
+
 ## What you'll adjust
 
 Every knob is a config/env value read at the top of `flight.py`. Set them as
@@ -41,15 +90,6 @@ Flight config, not by editing code.
 | `HIVE_PARTITIONING` | `true` | Turn `key=value` folder names into columns. |
 | `RUN_LEDGER_TABLE` | `ingest_runs` | Audit table that records one row per run. Validated as a SQL identifier. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Select a token on the Flight; never put it in config. |
-
-## Questions to answer
-
-- Which partitioned source, and what is its partition key (`SOURCE_GLOB`, `PARTITION_COLUMN`)?
-- Which partition should each scheduled run refresh (`LOAD_PARTITION`, default current year)?
-- Target MotherDuck database, schema, and table (`DESTINATION_*`); is letting the Flight create them acceptable?
-- Is the source public, or does a private bucket need a MotherDuck S3 secret first?
-- Which service account token should the Flight use for a scheduled workload?
-- What schedule (cron) should it run on?
 
 ## Run it
 
@@ -92,46 +132,6 @@ historical files. Once the manual run is green, add a daily schedule (the source
 updates daily; `30 6 * * *`, 06:30 UTC, is a reasonable default) by updating the
 Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates are
 metadata-only and do not create a new Flight version.
-
-## How it works
-
-`flight.py` runs a fixed sequence; the config values only change its inputs:
-
-1. Connect to MotherDuck (`md:`) and `CREATE DATABASE`/`CREATE SCHEMA IF NOT EXISTS`
-   for the destination, so the Flight owns everything it needs.
-2. Create the destination once with `CREATE TABLE IF NOT EXISTS ... AS SELECT * ... LIMIT 0`,
-   which infers the destination columns from the source without reading rows.
-3. `DELETE` the target partition, then `INSERT` it back by reading the source with
-   `hive_partitioning = true` and `WHERE PARTITION_COLUMN = LOAD_PARTITION`. The
-   filter on the partition column is what lets DuckDB prune to a single folder.
-4. Count the refreshed rows and append one row to the run ledger.
-
-The default load is a `SELECT *` pass-through, so it works for any partitioned
-Parquet with no code changes. To shape the data instead, replace the marked
-`SELECT *` in the `INSERT` with your own projection or aggregation, keeping the
-partition column so the incremental replace still lines up.
-
-## Caveats
-
-- **Pruning depends on a direct partition filter.** The speedup comes from
-  comparing the raw `PARTITION_COLUMN` to `LOAD_PARTITION`. Wrapping the column in
-  a function (for example `CAST(year AS VARCHAR)`) can defeat pruning and read
-  every folder.
-- **The destination schema is inferred on the first run.** If you later change the
-  source columns, they may not match the existing table. Drop and recreate the
-  destination, or migrate it, when the shape changes.
-- **Numeric partition values are integers.** A digit-only `LOAD_PARTITION` is bound
-  as an integer so it matches a numeric Hive column. Pass a non-numeric value for
-  string partitions (for example a region code).
-- **Private buckets need a secret.** The default dataset is public. Point
-  `SOURCE_GLOB` at a private bucket only after adding a MotherDuck **S3 secret**
-  for it: the simplest way is the MotherDuck UI at
-  [Settings > Secrets](https://app.motherduck.com/settings/secrets), or
-  `CREATE SECRET ... (TYPE S3, ...)` from the DuckDB client. It must be available
-  to the Flight's token. (This is an S3 secret on the account, not a Flights
-  secret: it is read by the engine, not injected as an env var.)
-- **Keep the token out of config.** Select a token on the Flight so
-  `MOTHERDUCK_TOKEN` is injected at runtime; do not place it in `config`.
 
 ## Security
 

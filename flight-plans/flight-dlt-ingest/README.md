@@ -25,6 +25,67 @@ and load it into `flights_demo_dlt.github_repo_stats` in your own account, so a
 fresh deploy produces a successful run. You adapt it by replacing the demo source
 function and pointing the destination at your data.
 
+## How it works
+
+`flight.py` runs a fixed sequence; the config values only change its inputs:
+
+1. Set `HOME=/tmp` (dlt writes working files under `HOME`, and a Flight has a
+   writable `/tmp`) and point the dlt MotherDuck destination at
+   `DESTINATION_DATABASE` through an environment variable, so no token is written
+   anywhere.
+2. Connect to MotherDuck (`md:`) and `CREATE DATABASE IF NOT EXISTS` the
+   destination, because dlt creates the dataset and tables but not the database.
+3. Build a dlt pipeline and `run()` the source with `loader_file_format="parquet"`
+   and the configured write disposition and primary key.
+4. Append one row to the run ledger capturing the dlt load package summary.
+
+## Why this dlt setup
+
+The important default is the load format. For MotherDuck, prefer Parquet loader
+files over row-wise `insert_values`, so larger sources stay on a bulk-loading
+path. The Flight makes that choice explicit with `loader_file_format="parquet"`.
+
+Use this dlt pattern when you want schema evolution, state tracking, merge
+behavior, or a ready-made source connector. If you already have clean Parquet
+files in S3, the [flight-scheduled-s3-ingest](../flight-scheduled-s3-ingest)
+template is simpler. If you only have a few hundred rows of control metadata,
+direct inserts are fine.
+
+## Adapt the pattern
+
+- Replace `repo_rows()` with a dlt source for your API, database, or filesystem.
+- Keep `DESTINATION_DATABASE` pointed at the database where dlt should create the
+  dataset.
+- Use `WRITE_DISPOSITION=merge` with a `PRIMARY_KEY` for entity tables, and
+  `append` for event streams.
+- Keep `loader_file_format="parquet"` unless you have measured a reason to change
+  it.
+- Lower dlt load workers if a source or network path is unreliable. See the
+  [dlt MotherDuck destination docs](https://dlthub.com/docs/dlt-ecosystem/destinations/motherduck).
+
+## Questions to answer
+
+- What is the real source: which dlt source, API, database, or filesystem replaces `repo_rows()`?
+- Target MotherDuck database and dataset (`DESTINATION_DATABASE`, `DATASET_NAME`); is letting the Flight create the database acceptable?
+- Load behavior: `merge` with a `PRIMARY_KEY` for entity tables, or `append` for event streams?
+- Which service account token, and how are any source credentials kept out of config?
+- What schedule (cron) should it run on?
+
+## Caveats
+
+- **dlt does not create the database.** It creates the dataset (schema) and tables,
+  so the Flight pre-creates `DESTINATION_DATABASE` with `CREATE DATABASE IF NOT EXISTS`.
+- **`merge` needs a primary key.** With `WRITE_DISPOSITION=merge`, set `PRIMARY_KEY`
+  to the column that identifies a row; otherwise use `append` or `replace`.
+- **Keep source credentials out of config.** Flight config is for non-secret
+  values. Add a private source's credentials as a MotherDuck **Flights secret**
+  (the simplest way is the MotherDuck UI at
+  [Settings > Secrets](https://app.motherduck.com/settings/secrets), or
+  `CREATE SECRET ... (TYPE flights, ...)` from the DuckDB client), which the
+  runtime injects as env vars you read with `os.environ`.
+- **Keep the token out of config.** The runtime attaches a MotherDuck token and
+  injects it as `MOTHERDUCK_TOKEN`; never place a token in `config`.
+
 ## What you'll adjust
 
 Every knob is a config/env value read at the top of `flight.py`. Set them as
@@ -42,14 +103,6 @@ Flight config, not by editing code. The demo source itself lives in the
 | `GITHUB_REPOS` | `duckdb/duckdb,motherduckdb/motherduck-docs,dlt-hub/dlt` | Comma-separated repos the demo source fetches. |
 | `RUN_LEDGER_TABLE` | `dlt_ingest_runs` | Audit table in the database's `main` schema. Validated as a SQL identifier. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Select a token on the Flight; never put it in config. |
-
-## Questions to answer
-
-- What is the real source: which dlt source, API, database, or filesystem replaces `repo_rows()`?
-- Target MotherDuck database and dataset (`DESTINATION_DATABASE`, `DATASET_NAME`); is letting the Flight create the database acceptable?
-- Load behavior: `merge` with a `PRIMARY_KEY` for entity tables, or `append` for event streams?
-- Which service account token, and how are any source credentials kept out of config?
-- What schedule (cron) should it run on?
 
 ## Run it
 
@@ -91,59 +144,6 @@ row appear. Once the manual run is green, add a daily schedule (`15 7 * * *`,
 07:15 UTC, is a reasonable default) by updating the Flight's `schedule_cron` with
 `MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and do not create a new
 Flight version.
-
-## How it works
-
-`flight.py` runs a fixed sequence; the config values only change its inputs:
-
-1. Set `HOME=/tmp` (dlt writes working files under `HOME`, and a Flight has a
-   writable `/tmp`) and point the dlt MotherDuck destination at
-   `DESTINATION_DATABASE` through an environment variable, so no token is written
-   anywhere.
-2. Connect to MotherDuck (`md:`) and `CREATE DATABASE IF NOT EXISTS` the
-   destination, because dlt creates the dataset and tables but not the database.
-3. Build a dlt pipeline and `run()` the source with `loader_file_format="parquet"`
-   and the configured write disposition and primary key.
-4. Append one row to the run ledger capturing the dlt load package summary.
-
-## Why this dlt setup
-
-The important default is the load format. For MotherDuck, prefer Parquet loader
-files over row-wise `insert_values`, so larger sources stay on a bulk-loading
-path. The Flight makes that choice explicit with `loader_file_format="parquet"`.
-
-Use this dlt pattern when you want schema evolution, state tracking, merge
-behavior, or a ready-made source connector. If you already have clean Parquet
-files in S3, the [flight-scheduled-s3-ingest](../flight-scheduled-s3-ingest)
-template is simpler. If you only have a few hundred rows of control metadata,
-direct inserts are fine.
-
-## Adapt the pattern
-
-- Replace `repo_rows()` with a dlt source for your API, database, or filesystem.
-- Keep `DESTINATION_DATABASE` pointed at the database where dlt should create the
-  dataset.
-- Use `WRITE_DISPOSITION=merge` with a `PRIMARY_KEY` for entity tables, and
-  `append` for event streams.
-- Keep `loader_file_format="parquet"` unless you have measured a reason to change
-  it.
-- Lower dlt load workers if a source or network path is unreliable. See the
-  [dlt MotherDuck destination docs](https://dlthub.com/docs/dlt-ecosystem/destinations/motherduck).
-
-## Caveats
-
-- **dlt does not create the database.** It creates the dataset (schema) and tables,
-  so the Flight pre-creates `DESTINATION_DATABASE` with `CREATE DATABASE IF NOT EXISTS`.
-- **`merge` needs a primary key.** With `WRITE_DISPOSITION=merge`, set `PRIMARY_KEY`
-  to the column that identifies a row; otherwise use `append` or `replace`.
-- **Keep source credentials out of config.** Flight config is for non-secret
-  values. Add a private source's credentials as a MotherDuck **Flights secret**
-  (the simplest way is the MotherDuck UI at
-  [Settings > Secrets](https://app.motherduck.com/settings/secrets), or
-  `CREATE SECRET ... (TYPE flights, ...)` from the DuckDB client), which the
-  runtime injects as env vars you read with `os.environ`.
-- **Keep the token out of config.** The runtime attaches a MotherDuck token and
-  injects it as `MOTHERDUCK_TOKEN`; never place a token in `config`.
 
 ## Security
 
