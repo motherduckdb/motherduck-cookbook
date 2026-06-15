@@ -1,14 +1,21 @@
 """
-Borough briefs — MotherDuck Flight (Claude Agent SDK, parallel fan-out).
+Agentic analysis — MotherDuck Flight (Claude Agent SDK, parallel fan-out).
 
-One run discovers each NYC borough present in the public 311 service-request
-sample, then fans out one Claude Agent SDK agent per borough (bounded
-concurrency) to produce a "notable things" brief of recent activity. Each brief
-is written to `flights_demo.main.borough_briefs`; the run logs a batch summary.
-A single borough's failure does not abort the batch.
+This example Flight showcases doing an agentic analysis on data in MotherDuck
+using Claude. The Flight fans out multiple Claude Agents, which each analyze a
+portion of the data using the MotherDuck MCP server, and write their findings to
+a summary in a table in MotherDuck. This specific example looks at a sample
+dataset of NYC 311 service requests, and spawns an agent for each borough of NYC
+to analyze service requests in that region.
+
+One run discovers each entity (here, each NYC borough present in the public 311
+service-request sample), then fans out one Claude Agent SDK agent per entity
+(bounded concurrency) to produce a "notable things" brief of recent activity.
+Each brief is written to `flights_demo.main.borough_briefs`; the run logs a batch
+summary. A single entity's failure does not abort the batch.
 
 This is the agentic-analysis pattern: instead of hand-writing the SQL for each
-brief, the run hands a borough to a Claude agent that explores the warehouse and
+brief, the run hands an entity to a Claude agent that explores the warehouse and
 grounds every claim in real data. The agent's tools are the **read-only** tools
 of the hosted MotherDuck MCP server (`query`, `list_tables`, `list_columns`,
 `search_catalog`, `query_context_layer`, ...), exposed to the agent as in-process
