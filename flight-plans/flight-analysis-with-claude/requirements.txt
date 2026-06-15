@@ -1,0 +1,5 @@
+duckdb==1.5.3
+# The Claude Agent SDK bundles the Claude Code CLI and drives it as a
+# subprocess; each query() opens its own MCP connection. Pinned so a Flight
+# build is reproducible.
+claude-agent-sdk==0.2.101
