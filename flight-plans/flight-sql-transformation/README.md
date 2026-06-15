@@ -25,6 +25,37 @@ The example statements live in `sql_statements()` — the example is one chain c
 table, a view, a scalar macro, a diamond, and a dependency on a table this
 Flight does not create. Replace them with your own; the engine stays untouched.
 
+## How it works
+
+1. Parse each statement with sqlglot to get its produced object and its table
+   and macro references.
+2. Build the DAG: a reference matching another statement's output becomes an
+   edge. Table/view references resolve against table/view producers, macro calls
+   against macros. Duplicate targets, ambiguous references, and cycles are
+   rejected before anything runs.
+3. Execute on a `ThreadPoolExecutor`: launch every node whose upstreams have all
+   succeeded, retry each with exponential backoff, and on a permanent failure
+   skip its downstream while independent branches finish. The report logs each
+   statement's status, attempts, and duration.
+
+## Questions to answer
+
+- What `CREATE` statements make up your pipeline?
+- What is the destination database?
+- How many statements can safely run at once?
+- On what schedule (cron, UTC) should it run?
+
+## Caveats
+
+- **External references are not dependencies.** A reference no statement produces
+  (`read_csv(...)`, `sample_data.*`, a pre-existing table) creates no edge and is
+  treated as an existing input.
+- **Ambiguous references fail fast.** A reference matching two produced objects
+  (e.g. bare `t` when both `a.t` and `b.t` exist) raises rather than guess.
+  Qualify the name to disambiguate.
+- **Statements must be `CREATE ... AS <query>`.** A non-`CREATE` statement, or a
+  `CREATE TABLE` with only a column list and no `AS`, is rejected.
+
 ## What you'll adjust
 
 | Knob | Where | Default | Purpose |
@@ -34,13 +65,6 @@ Flight does not create. Replace them with your own; the engine stays untouched.
 | `MAX_WORKERS` | Flight config / env | `4` | Thread-pool size — independent statements run at once. |
 | `MAX_ATTEMPTS` | Flight config / env | `4` | Retries per statement before skipping downstream statements. |
 | `RETRY_BASE_DELAY` | Flight config / env | `1.0` | First delay before retry (doubles each retry, capped at 30s). |
-
-## Questions to answer
-
-- What `CREATE` statements make up your pipeline?
-- What is the destination database?
-- How many statements can safely run at once?
-- On what schedule (cron, UTC) should it run?
 
 ## Run it
 
@@ -57,40 +81,17 @@ exit means at least one statement failed.
 
 ### Deploy as a Flight
 
-Deploy with the MotherDuck MCP server. Call `get_flight_guide` first for the
-exact arguments, then `create_flight` with:
+Deploy through the Flight SQL surface (`MD_CREATE_FLIGHT`, then
+`MD_RUN_FLIGHT`) with:
 
 - `source_code`: [`flight.py`](flight.py), with `sql_statements()` edited to your statements
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
-- `access_token_name`: a token that can write the destination (list with `md_access_tokens()`); injected as `MOTHERDUCK_TOKEN`
 - `config`: `TARGET_DATABASE`, `MAX_WORKERS` as needed
 
-Create it without a schedule, trigger one run with `run_flight` to confirm it
-loads, then add a `schedule_cron` using cron syntax based on user input.
-
-## How it works
-
-1. Parse each statement with sqlglot to get its produced object and its table
-   and macro references.
-2. Build the DAG: a reference matching another statement's output becomes an
-   edge. Table/view references resolve against table/view producers, macro calls
-   against macros. Duplicate targets, ambiguous references, and cycles are
-   rejected before anything runs.
-3. Execute on a `ThreadPoolExecutor`: launch every node whose upstreams have all
-   succeeded, retry each with exponential backoff, and on a permanent failure
-   skip its downstream while independent branches finish. The report logs each
-   statement's status, attempts, and duration.
-
-## Caveats
-
-- **External references are not dependencies.** A reference no statement produces
-  (`read_csv(...)`, `sample_data.*`, a pre-existing table) creates no edge and is
-  treated as an existing input.
-- **Ambiguous references fail fast.** A reference matching two produced objects
-  (e.g. bare `t` when both `a.t` and `b.t` exist) raises rather than guess.
-  Qualify the name to disambiguate.
-- **Statements must be `CREATE ... AS <query>`.** A non-`CREATE` statement, or a
-  `CREATE TABLE` with only a column list and no `AS`, is rejected.
+The Flight runtime injects `MOTHERDUCK_TOKEN`; make sure it can write the
+destination database. Create the Flight without a schedule, trigger one run with
+`MD_RUN_FLIGHT` to confirm it loads, then add a `schedule_cron` using cron
+syntax based on user input.
 
 ## Learn more
 

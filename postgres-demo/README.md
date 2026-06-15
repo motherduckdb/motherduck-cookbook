@@ -17,6 +17,31 @@ This example runs a local Postgres using the `pgduckdb/pgduckdb` Docker image, w
 
 Note this is the `pg_duckdb` / pg scanner path: DuckDB embedded inside Postgres, reaching MotherDuck via the `MOTHERDUCK_TOKEN`. It is not the MotherDuck Postgres wire endpoint (where a plain psql client connects directly to MotherDuck). If you only want a Postgres driver pointed at MotherDuck, you want the wire endpoint instead, not this image.
 
+## How it works
+
+- The `pgduckdb/pgduckdb` container embeds DuckDB inside Postgres and reaches MotherDuck through `MOTHERDUCK_TOKEN`.
+- The DuckDB CLI uses the `postgres` extension to attach the local Postgres container and scan its tables.
+- `CREATE TABLE AS SELECT` copies data across the boundary when you want a local replica rather than a live hybrid query.
+
+## Questions to answer
+
+- Which direction is needed: read Postgres from MotherDuck/DuckDB, read MotherDuck from Postgres, or both?
+- Which source table(s) in Postgres or MotherDuck should be moved, and to which target database and schema?
+- Is this a one-time copy (CTAS) or do you expect to query the two systems live in a hybrid query?
+- Which MotherDuck region and token should the container use, and where is that token stored?
+- Is the local Postgres password and host the default from this example, or have they been changed? The ATTACH string must match whatever you set.
+- Does the source table already exist in the system you are reading from? If not, create and load it first.
+
+## Caveats
+
+- **The source table must already exist.** `winelist` is assumed to be present; this example does not create or seed it. `SELECT * FROM pg.public.winelist` (or the psql equivalent) errors with a missing-table error until you create and load it yourself. Load a table on the side you intend to read first.
+- **Keep the ATTACH string in sync with the container env.** If you change `POSTGRES_PASSWORD`, remap the port (e.g. `-p 5433:5432`), or run on a different host, the `password=`, `host=`, and implied port in the ATTACH connection string must all match, or the attach fails silently from the user's point of view (it just cannot connect).
+- **Use `host=127.0.0.1`, not the container name.** The DuckDB CLI runs on your host, not inside the container, so it reaches Postgres through the published port on `127.0.0.1`. On some systems `localhost` resolves to IPv6 first and the connection hangs or refuses; prefer `127.0.0.1`.
+- **`pg_duckdb` is not the Postgres wire endpoint.** This image embeds DuckDB inside Postgres and reaches MotherDuck via a token. It is a different mechanism from MotherDuck's Postgres wire endpoint. Picking the wrong one is the most common confusion here. Use this image only when you actually want Postgres and MotherDuck reading each other's tables locally.
+- **Forgetting `duckdb.motherduck_enabled=true` fails quietly.** Without that flag the container starts fine and ordinary Postgres works, but MotherDuck tables will not be reachable from psql.
+- **Do not commit your real token or password.** `very_secur3_pw` and `your_token` are placeholders. Do not bake a real `MOTHERDUCK_TOKEN` into a committed script or image; pass it as runtime env. The example password is intentionally weak and is fine for a local throwaway container only.
+- **5432 is often already in use** (a local Postgres install, another container). If `docker run` reports the port is allocated, remap the host side and update the ATTACH string accordingly.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -28,15 +53,6 @@ Note this is the `pg_duckdb` / pg scanner path: DuckDB embedded inside Postgres,
 | ATTACH connection string (DuckDB CLI) | Where the DuckDB CLI finds the local Postgres | `dbname=postgres user=postgres password=... host=127.0.0.1` |
 | Source table (`pg.public.winelist`) | The Postgres table you scan from DuckDB | Replace `winelist` with your own table and schema; this table must already exist (see Caveats) |
 | Target database / schema | Where CTAS writes the replicated data | A MotherDuck database for PG to MD, or `public` in Postgres for MD to PG |
-
-## Questions to answer
-
-- Which direction is needed: read Postgres from MotherDuck/DuckDB, read MotherDuck from Postgres, or both?
-- Which source table(s) in Postgres or MotherDuck should be moved, and to which target database and schema?
-- Is this a one-time copy (CTAS) or do you expect to query the two systems live in a hybrid query?
-- Which MotherDuck region and token should the container use, and where is that token stored?
-- Is the local Postgres password and host the default from this example, or have they been changed? The ATTACH string must match whatever you set.
-- Does the source table already exist in the system you are reading from? If not, create and load it first.
 
 ## Run it
 
@@ -102,17 +118,7 @@ FROM public.winelist_local AS local
 JOIN <motherduck_table> AS md USING (id);
 ```
 
-## Caveats
-
-- **The source table must already exist.** `winelist` is assumed to be present; this example does not create or seed it. `SELECT * FROM pg.public.winelist` (or the psql equivalent) errors with a missing-table error until you create and load it yourself. Load a table on the side you intend to read first.
-- **Keep the ATTACH string in sync with the container env.** If you change `POSTGRES_PASSWORD`, remap the port (e.g. `-p 5433:5432`), or run on a different host, the `password=`, `host=`, and implied port in the ATTACH connection string must all match, or the attach fails silently from the user's point of view (it just cannot connect).
-- **Use `host=127.0.0.1`, not the container name.** The DuckDB CLI runs on your host, not inside the container, so it reaches Postgres through the published port on `127.0.0.1`. On some systems `localhost` resolves to IPv6 first and the connection hangs or refuses; prefer `127.0.0.1`.
-- **`pg_duckdb` is not the Postgres wire endpoint.** This image embeds DuckDB inside Postgres and reaches MotherDuck via a token. It is a different mechanism from MotherDuck's Postgres wire endpoint. Picking the wrong one is the most common confusion here. Use this image only when you actually want Postgres and MotherDuck reading each other's tables locally.
-- **Forgetting `duckdb.motherduck_enabled=true` fails quietly.** Without that flag the container starts fine and ordinary Postgres works, but MotherDuck tables will not be reachable from psql.
-- **Do not commit your real token or password.** `very_secur3_pw` and `your_token` are placeholders. Do not bake a real `MOTHERDUCK_TOKEN` into a committed script or image; pass it as runtime env. The example password is intentionally weak and is fine for a local throwaway container only.
-- **5432 is often already in use** (a local Postgres install, another container). If `docker run` reports the port is allocated, remap the host side and update the ATTACH string accordingly.
-
-## How it works / Learn more
+## Learn more
 
 - Loading data from Postgres into MotherDuck: [MotherDuck docs](https://motherduck.com/docs/key-tasks/loading-data-into-motherduck/loading-data-from-postgres/).
 - pg_duckdb (DuckDB embedded in Postgres) and the MotherDuck integration flag: the [pg_duckdb project](https://github.com/duckdb/pg_duckdb).

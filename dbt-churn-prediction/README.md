@@ -109,6 +109,39 @@ the database under `--write-schema` (`python_churn_model_metrics`,
 `python_churn_current_scores`, `python_churn_survival_summary`). Read the script
 before adapting the model side.
 
+## Questions to answer
+
+- How is churn defined for this business (cancellation window, inactivity window)? This sets the label and `member_churn_grace_period_days`. Write this down first: it becomes the target the model learns.
+- What are the source tables for customers, subscriptions/memberships, usage/activity, and payments, and where do they live? You need four kinds of source data: one customer row per customer, a subscription/contract table, an activity/usage table, and a payment/billing table.
+- Target MotherDuck database and schema for the feature tables (default `subscription_churn`).
+- Full refresh each run, or incremental? Current models rebuild as tables; seeds use `--full-refresh`.
+- What "as of" date should the daily score table use (`churn_as_of_date`), and which historical snapshot dates should labels and features cover (`churn_label_dates()`)?
+- Should the feature tables refresh on a schedule, and at what cadence?
+- MotherDuck token / credentials for cloud runs.
+- Train on the bundled IBM Telco benchmark first, or straight on your own dbt-built history?
+
+## Caveats
+
+- **`--source dbt` refuses the bundled sample on purpose.** The script raises if
+  the training matrix has fewer than 50 rows or fewer than 10 positive labels.
+  The bundled seeds are intentionally tiny: too small for useful machine
+  learning. Replace the seeds with real history before using `--source dbt`, or
+  stick to `--source ibm_telco` for benchmarking.
+- **The time-based split needs history.** `--source dbt` splits on `as_of_date`
+  and requires at least 3 distinct snapshot dates, with non-empty train,
+  validation, and test partitions. One snapshot date will not train.
+- **Snapshot dates are hardcoded.** `churn_label_dates()` in
+  `macros/churn_features.sql` lists fixed dates (Dec 2025 through Mar 2026), and
+  `vars.churn_as_of_date` defaults to `2026-04-15`. For your own data, edit both
+  so the snapshot dates and the "as of" date line up with your history;
+  otherwise the feature/label join produces empty or stale tables.
+- **`--database` is required for `--source dbt`.** Omitting it raises. The
+  script auto-discovers the schema holding `fct_customer_features_historical`
+  (preferring an `analytics` schema), so the dbt build must have run first
+  against the same database.
+- **Don't put your token in config.** `MOTHERDUCK_TOKEN` is a secret: keep it in
+  `.env` locally (gitignored), not as a committed file.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -123,17 +156,6 @@ before adapting the model side.
 | seeds (`seeds/raw_*.csv`) | Sample raw inputs to swap for your own customer, membership, usage, payment data | `raw_customers`, `raw_memberships`, `raw_usage_events`, `raw_payments` |
 | `--source` (training script) | Training data source | `ibm_telco` (runs immediately) or `dbt` (your built tables) |
 | `--write-schema` (training script) | Schema for Python prediction/metric tables written back | `science` (default) |
-
-## Questions to answer
-
-- How is churn defined for this business (cancellation window, inactivity window)? This sets the label and `member_churn_grace_period_days`. Write this down first: it becomes the target the model learns.
-- What are the source tables for customers, subscriptions/memberships, usage/activity, and payments, and where do they live? You need four kinds of source data: one customer row per customer, a subscription/contract table, an activity/usage table, and a payment/billing table.
-- Target MotherDuck database and schema for the feature tables (default `subscription_churn`).
-- Full refresh each run, or incremental? Current models rebuild as tables; seeds use `--full-refresh`.
-- What "as of" date should the daily score table use (`churn_as_of_date`), and which historical snapshot dates should labels and features cover (`churn_label_dates()`)?
-- Should the feature tables refresh on a schedule, and at what cadence?
-- MotherDuck token / credentials for cloud runs.
-- Train on the bundled IBM Telco benchmark first, or straight on your own dbt-built history?
 
 ## Run it
 
@@ -184,28 +206,6 @@ uv run python scripts/train_python_churn_models.py --source dbt --database "md:$
 - [`.env.example`](.env.example) - template for `MOTHERDUCK_TOKEN` and `MOTHERDUCK_DATABASE`; copy to `.env` (gitignored) for cloud runs.
 - `analyses/`, `macros/`, `snapshots/` - standard dbt scaffold dirs, currently placeholders (`.gitkeep`).
 - `uv.lock` - pinned dependency lockfile for `uv`.
-
-## Caveats
-
-- **`--source dbt` refuses the bundled sample on purpose.** The script raises if
-  the training matrix has fewer than 50 rows or fewer than 10 positive labels.
-  The bundled seeds are intentionally tiny: too small for useful machine
-  learning. Replace the seeds with real history before using `--source dbt`, or
-  stick to `--source ibm_telco` for benchmarking.
-- **The time-based split needs history.** `--source dbt` splits on `as_of_date`
-  and requires at least 3 distinct snapshot dates, with non-empty train,
-  validation, and test partitions. One snapshot date will not train.
-- **Snapshot dates are hardcoded.** `churn_label_dates()` in
-  `macros/churn_features.sql` lists fixed dates (Dec 2025 through Mar 2026), and
-  `vars.churn_as_of_date` defaults to `2026-04-15`. For your own data, edit both
-  so the snapshot dates and the "as of" date line up with your history;
-  otherwise the feature/label join produces empty or stale tables.
-- **`--database` is required for `--source dbt`.** Omitting it raises. The
-  script auto-discovers the schema holding `fct_customer_features_historical`
-  (preferring an `analytics` schema), so the dbt build must have run first
-  against the same database.
-- **Don't put your token in config.** `MOTHERDUCK_TOKEN` is a secret: keep it in
-  `.env` locally (gitignored), not as a committed file.
 
 ## Learn more
 

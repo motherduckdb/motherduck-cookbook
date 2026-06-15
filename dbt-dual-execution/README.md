@@ -64,6 +64,25 @@ from {{ source("tpc-ds", "store_sales") }}
 
 The `tpcds/queries/` models (`query_1.sql` ... `query_99.sql`) are the TPC-DS analytical queries materialized as views on top of the raw models.
 
+## Questions to answer
+
+- Which MotherDuck database(s) should models target, and which models should stay local on disk (no explicit `database=`)?
+- What is the source database and schema the raw models should read from (here `jdw_dev.jdw_tpcds`)? Does it already exist in your account?
+- Should local runs sample the source data, and at what rate, or read it in full?
+- Local-only iteration, cloud-only, or the dual (attach both) setup as configured here?
+- Is a MotherDuck token already configured in the shell, or should auth happen via the browser prompt?
+
+## Caveats
+
+- **Same database name across targets.** `database="my_db"` is hard-coded in the `example/` models. Under `--target local` that name resolves only because `attach: "md:"` brings `my_db` into the session, and under `--target prod` it resolves only if `my_db` exists in your account. If the database does not exist in MotherDuck, the run fails. Create it first or change the name.
+- **Switching targets changes where "local" models land.** Models without `database=` follow the target default. With `--target prod` (default db `md:jdw_dev`) those models materialize in the cloud, not on disk, so `--target prod` is not a true "everything in cloud" run unless every model pins its `database`.
+- **`attach: "md:"` attaches everything.** It pulls in all MotherDuck databases on every local run, which can be slow if you have many. Narrow it to `md:my_db` when you only need one.
+- **Source must exist before the raw models run.** `_sources.yml` points at `jdw_dev.jdw_tpcds`. dbt does not create sources; if that database/schema is absent (or you have not been granted access), the `tpcds` models error. Repoint `_sources.yml` to data you actually have.
+- **Sampling only kicks in on the `local` target.** The `using sample 1 %` clause is gated by `target.name == 'local'`. Renaming the local target, or running under any other target, silently reads the full source, which can be expensive on large tables.
+- **Don't put your token in `profiles.yml`.** Authenticate with the `MOTHERDUCK_TOKEN` environment variable (or the browser prompt), not by committing a token into the profile or connection string.
+- **`*.db` is gitignored.** The local `local.db` file is excluded by `.gitignore`, so local materializations are intentionally not version-controlled; expect a fresh file on a clean checkout.
+- **dbt-duckdb version is pinned.** `pyproject.toml` pins `dbt-duckdb==1.9.3`. The ATTACH/dual-execution behavior here is verified against that version; newer or older releases may differ.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -77,14 +96,6 @@ The `tpcds/queries/` models (`query_1.sql` ... `query_99.sql`) are the TPC-DS an
 | `{% if target.name == 'local' %}` sampling | Reduces source rows on local runs so iteration is fast; full data runs in the cloud. | `using sample 1 %` in `models/tpcds/raw/store_sales.sql` |
 | `dbt_project.yml` model materializations | Default materialization per folder (`example` as views, `tpcds/raw` as tables, `tpcds/queries` as views). | `+materialized: table` / `view`, `+tags: ['raw']` |
 | `threads` (both profile outputs) | dbt concurrency for the run. | `threads: 4` |
-
-## Questions to answer
-
-- Which MotherDuck database(s) should models target, and which models should stay local on disk (no explicit `database=`)?
-- What is the source database and schema the raw models should read from (here `jdw_dev.jdw_tpcds`)? Does it already exist in your account?
-- Should local runs sample the source data, and at what rate, or read it in full?
-- Local-only iteration, cloud-only, or the dual (attach both) setup as configured here?
-- Is a MotherDuck token already configured in the shell, or should auth happen via the browser prompt?
 
 ## Run it
 
@@ -116,17 +127,6 @@ The first cloud run opens a browser prompt for MotherDuck authentication unless 
 - [`analyses/`](analyses/), [`macros/`](macros/), [`seeds/`](seeds/), [`snapshots/`](snapshots/), [`tests/`](tests/) - the standard empty dbt scaffold directories (each holds only a `.gitkeep`).
 - [`.gitignore`](.gitignore) - excludes dbt build output and `*.db`, so the local `local.db` is intentionally not version-controlled.
 - `.python-version`, `.user.yml` - the pinned Python version for `uv` and dbt's per-user invocation id.
-
-## Caveats
-
-- **Same database name across targets.** `database="my_db"` is hard-coded in the `example/` models. Under `--target local` that name resolves only because `attach: "md:"` brings `my_db` into the session, and under `--target prod` it resolves only if `my_db` exists in your account. If the database does not exist in MotherDuck, the run fails. Create it first or change the name.
-- **Switching targets changes where "local" models land.** Models without `database=` follow the target default. With `--target prod` (default db `md:jdw_dev`) those models materialize in the cloud, not on disk, so `--target prod` is not a true "everything in cloud" run unless every model pins its `database`.
-- **`attach: "md:"` attaches everything.** It pulls in all MotherDuck databases on every local run, which can be slow if you have many. Narrow it to `md:my_db` when you only need one.
-- **Source must exist before the raw models run.** `_sources.yml` points at `jdw_dev.jdw_tpcds`. dbt does not create sources; if that database/schema is absent (or you have not been granted access), the `tpcds` models error. Repoint `_sources.yml` to data you actually have.
-- **Sampling only kicks in on the `local` target.** The `using sample 1 %` clause is gated by `target.name == 'local'`. Renaming the local target, or running under any other target, silently reads the full source, which can be expensive on large tables.
-- **Don't put your token in `profiles.yml`.** Authenticate with the `MOTHERDUCK_TOKEN` environment variable (or the browser prompt), not by committing a token into the profile or connection string.
-- **`*.db` is gitignored.** The local `local.db` file is excluded by `.gitignore`, so local materializations are intentionally not version-controlled; expect a fresh file on a clean checkout.
-- **dbt-duckdb version is pinned.** `pyproject.toml` pins `dbt-duckdb==1.9.3`. The ATTACH/dual-execution behavior here is verified against that version; newer or older releases may differ.
 
 ## Learn more
 

@@ -77,6 +77,25 @@ DBT_PROFILES_DIR=.. uv run dbt run
 DBT_PROFILES_DIR=.. uv run mf query --metrics cancellation_rate
 ```
 
+## Questions to answer
+
+- What is the source fact table and its grain (one row per order, event, session)?
+- Which metrics matter (sums, counts, distinct counts, derived ratios) and what are their labels?
+- What time grain and date range should the time spine cover?
+- Run against local DuckDB only, MotherDuck only, or both (promote local to cloud)?
+- For MotherDuck: which database name, and is a MotherDuck token available?
+
+## Caveats
+
+- **Build before you query.** `mf query` reads materialized tables, not the YAML alone. Run `dbt seed` and `dbt run` first, or you get empty or error results. After changing `semantic_models.yml`, re-run `dbt run`.
+- **`DBT_PROFILES_DIR=..` is mandatory** when running from `ecommerce_metrics/`, because `profiles.yml` lives one level up in `metricflow-example/`. Without it dbt looks in `~/.dbt/` and fails to find the profile.
+- **dbt and `mf` pick targets differently.** `dbt` uses `--target motherduck`; the `mf` CLI ignores `--target` and reads `DBT_TARGET`. Setting only one runs half your flow against the wrong database, often silently.
+- **Time-dimension queries are bounded by the spine.** `metricflow_time_spine.sql` only generates dates from `2024-01-01` to `2025-12-31`. Grouping by `metric_time__*` outside that window returns no rows. Widen the `generate_series` range to query other periods.
+- **Only the `day` grain is declared.** The time spine and `dbt_project.yml` define a `day` granularity; `metric_time__month`, `__week`, and `__year` roll up from it. If you need a coarser native grain you must add it to the spine config.
+- **MotherDuck token env var naming.** dbt-duckdb accepts `MOTHERDUCK_TOKEN` or `motherduck_token`. The token is read from the environment, not from `profiles.yml` (do not paste secrets into the profile). A missing or invalid token fails at connection time, not at parse time.
+- **Create the MotherDuck database first.** `md:ecommerce_test_db` must exist before `dbt run` writes into it; the one-time `CREATE DATABASE` step above handles this. dbt will not create the database for you.
+- **Derived metrics reference metric names, not measures.** `revenue_per_customer` uses `revenue / customers`, both of which are metrics. Referencing a raw measure name in a derived `expr` will not resolve. Metric declaration order in the file does not matter; MetricFlow resolves the whole graph.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -91,14 +110,6 @@ DBT_PROFILES_DIR=.. uv run mf query --metrics cancellation_rate
 | `models/semantic_models.yml` | Semantic model: entities, dimensions, measures, metrics | add/edit measures and metrics here to define new KPIs |
 | `models/fct_orders.sql` + `seeds/raw_orders.csv` | The fact table and its source rows | swap the seed and fact model for your own grain/columns |
 | `models/metricflow_time_spine.sql` | Date spine backing time dimensions | `generate_series` range, currently `2024-01-01` to `2025-12-31` |
-
-## Questions to answer
-
-- What is the source fact table and its grain (one row per order, event, session)?
-- Which metrics matter (sums, counts, distinct counts, derived ratios) and what are their labels?
-- What time grain and date range should the time spine cover?
-- Run against local DuckDB only, MotherDuck only, or both (promote local to cloud)?
-- For MotherDuck: which database name, and is a MotherDuck token available?
 
 ## Run it
 
@@ -155,17 +166,6 @@ The generated SQL is identical for both targets. MotherDuck's hybrid execution d
 - [`metricflow-example/ecommerce_metrics/seeds/raw_orders.csv`](metricflow-example/ecommerce_metrics/seeds/raw_orders.csv): the 20-row source order data loaded by `dbt seed`.
 - [`metricflow-example/ecommerce_metrics/README.md`](metricflow-example/ecommerce_metrics/README.md): the default dbt starter README (unmodified boilerplate).
 - `metricflow-example/ecommerce_metrics/` also holds the standard dbt scaffold dirs (`analyses/`, `macros/`, `snapshots/`, `tests/`), each with a `.gitkeep` placeholder and otherwise empty.
-
-## Caveats
-
-- **Build before you query.** `mf query` reads materialized tables, not the YAML alone. Run `dbt seed` and `dbt run` first, or you get empty or error results. After changing `semantic_models.yml`, re-run `dbt run`.
-- **`DBT_PROFILES_DIR=..` is mandatory** when running from `ecommerce_metrics/`, because `profiles.yml` lives one level up in `metricflow-example/`. Without it dbt looks in `~/.dbt/` and fails to find the profile.
-- **dbt and `mf` pick targets differently.** `dbt` uses `--target motherduck`; the `mf` CLI ignores `--target` and reads `DBT_TARGET`. Setting only one runs half your flow against the wrong database, often silently.
-- **Time-dimension queries are bounded by the spine.** `metricflow_time_spine.sql` only generates dates from `2024-01-01` to `2025-12-31`. Grouping by `metric_time__*` outside that window returns no rows. Widen the `generate_series` range to query other periods.
-- **Only the `day` grain is declared.** The time spine and `dbt_project.yml` define a `day` granularity; `metric_time__month`, `__week`, and `__year` roll up from it. If you need a coarser native grain you must add it to the spine config.
-- **MotherDuck token env var naming.** dbt-duckdb accepts `MOTHERDUCK_TOKEN` or `motherduck_token`. The token is read from the environment, not from `profiles.yml` (do not paste secrets into the profile). A missing or invalid token fails at connection time, not at parse time.
-- **Create the MotherDuck database first.** `md:ecommerce_test_db` must exist before `dbt run` writes into it; the one-time `CREATE DATABASE` step above handles this. dbt will not create the database for you.
-- **Derived metrics reference metric names, not measures.** `revenue_per_customer` uses `revenue / customers`, both of which are metrics. Referencing a raw measure name in a derived `expr` will not resolve. Metric declaration order in the file does not matter; MetricFlow resolves the whole graph.
 
 ## Learn more
 

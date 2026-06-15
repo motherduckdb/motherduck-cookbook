@@ -28,6 +28,50 @@ with real MotherDuck usernames and set `DRY_RUN=false` to provision for real.
 Everything is driven by Flight config, so you adapt it by setting config values,
 not by editing `flight.py`.
 
+## How it works
+
+`flight.py` runs a fixed sequence; the config values only change its inputs:
+
+1. Connect to MotherDuck (`md:`), create `PROVISION_DATABASE` and its schema, seed
+   the demo control table if it does not exist, and create the ledger table.
+2. Read the users ordered by email.
+3. For each **active** user, derive `DATABASE_PREFIX + slug(email)` and create the
+   database, a `USER_SCHEMA` schema, and a `profile` table, then create a
+   restricted share (`ACCESS RESTRICTED, VISIBILITY HIDDEN, UPDATE AUTOMATIC`) and
+   grant read access to the username.
+4. For each **inactive** user, revoke read access on that user's share.
+5. Append one ledger row per user, including whether the run was a dry run.
+
+When `DRY_RUN` is true, steps 3 and 4 only log the intended action; the ledger
+still records the plan, so you can review exactly what a live run would do.
+
+## Questions to answer
+
+- Which control table lists the users, and does it have `email`, `segment`, and `active` columns (`USERS_TABLE`, `PROVISION_DATABASE`, `PROVISION_SCHEMA`)?
+- Are the `email` values valid MotherDuck usernames in the same sharing scope?
+- How should per-user databases and shares be named (`DATABASE_PREFIX`, `SHARE_SUFFIX`)?
+- What does each user's database need beyond the demo profile table (`USER_SCHEMA` plus your own tables)?
+- Which admin or service account token should own the created resources?
+- Run on demand, or on a schedule once the control table is trusted?
+- Validating the plan first (`DRY_RUN=true`), or ready to provision for real (`DRY_RUN=false`)?
+
+## Caveats
+
+- **These are account-level resources.** The databases and shares are visible
+  beyond `PROVISION_DATABASE`. Treat this as an admin workflow with a scoped token.
+- **`DRY_RUN` defaults to true on purpose.** A first deploy never creates shares
+  for placeholder users. Replace the seeded demo users with real MotherDuck
+  usernames before setting `DRY_RUN=false`.
+- **Deprovisioning is revoke-only.** Inactive users lose share access, but their
+  database is not dropped. Dropping user databases is a separate policy decision.
+- **Usernames must be valid.** A grant or revoke for an address that is not a
+  MotherDuck user in the same sharing scope is skipped and logged, not fatal, so
+  one bad row does not stop the run.
+- **Re-running is idempotent for resources, not the ledger.** Active users use
+  `IF NOT EXISTS`/`OR REPLACE`, but the ledger appends one row per user per run.
+- **Keep the token out of config.** Select a token on the Flight so
+  `MOTHERDUCK_TOKEN` is injected at runtime; do not place it in `config`.
+
 ## What you'll adjust
 
 Every knob is a config/env value read at the top of `flight.py`. Set them as
@@ -44,16 +88,6 @@ Flight config, not by editing code.
 | `SHARE_SUFFIX` | `_share` | Suffix for each per-user share (`<database><suffix>`). Validated as a SQL identifier. |
 | `USER_SCHEMA` | `app` | Schema created inside each user database for the profile table. Validated as a SQL identifier. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Use an admin or service account token allowed to create databases and shares and to grant/revoke. Never put it in config. |
-
-## Questions to answer
-
-- Which control table lists the users, and does it have `email`, `segment`, and `active` columns (`USERS_TABLE`, `PROVISION_DATABASE`, `PROVISION_SCHEMA`)?
-- Are the `email` values valid MotherDuck usernames in the same sharing scope?
-- How should per-user databases and shares be named (`DATABASE_PREFIX`, `SHARE_SUFFIX`)?
-- What does each user's database need beyond the demo profile table (`USER_SCHEMA` plus your own tables)?
-- Which admin or service account token should own the created resources?
-- Run on demand, or on a schedule once the control table is trusted?
-- Validating the plan first (`DRY_RUN=true`), or ready to provision for real (`DRY_RUN=false`)?
 
 ## Run it
 
@@ -99,40 +133,6 @@ the seeded demo rows), set `DRY_RUN=false`, and run again to provision. Add a
 schedule by updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT` only
 once you trust the control table; schedule updates are metadata-only and do not
 create a new Flight version.
-
-## How it works
-
-`flight.py` runs a fixed sequence; the config values only change its inputs:
-
-1. Connect to MotherDuck (`md:`), create `PROVISION_DATABASE` and its schema, seed
-   the demo control table if it does not exist, and create the ledger table.
-2. Read the users ordered by email.
-3. For each **active** user, derive `DATABASE_PREFIX + slug(email)` and create the
-   database, a `USER_SCHEMA` schema, and a `profile` table, then create a
-   restricted share (`ACCESS RESTRICTED, VISIBILITY HIDDEN, UPDATE AUTOMATIC`) and
-   grant read access to the username.
-4. For each **inactive** user, revoke read access on that user's share.
-5. Append one ledger row per user, including whether the run was a dry run.
-
-When `DRY_RUN` is true, steps 3 and 4 only log the intended action; the ledger
-still records the plan, so you can review exactly what a live run would do.
-
-## Caveats
-
-- **These are account-level resources.** The databases and shares are visible
-  beyond `PROVISION_DATABASE`. Treat this as an admin workflow with a scoped token.
-- **`DRY_RUN` defaults to true on purpose.** A first deploy never creates shares
-  for placeholder users. Replace the seeded demo users with real MotherDuck
-  usernames before setting `DRY_RUN=false`.
-- **Deprovisioning is revoke-only.** Inactive users lose share access, but their
-  database is not dropped. Dropping user databases is a separate policy decision.
-- **Usernames must be valid.** A grant or revoke for an address that is not a
-  MotherDuck user in the same sharing scope is skipped and logged, not fatal, so
-  one bad row does not stop the run.
-- **Re-running is idempotent for resources, not the ledger.** Active users use
-  `IF NOT EXISTS`/`OR REPLACE`, but the ledger appends one row per user per run.
-- **Keep the token out of config.** Select a token on the Flight so
-  `MOTHERDUCK_TOKEN` is injected at runtime; do not place it in `config`.
 
 ## Security
 

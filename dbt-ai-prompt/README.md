@@ -59,6 +59,25 @@ Two views build on that table:
 - `models/reviews/reviews_attributes_by_product.sql` unnests the array fields (`product_features`, `pros`, `cons`, `competitor_mentions`, `use_case`, `purchase_reason`, `reported_issues`, `quality_concerns`) and re-aggregates them into deduplicated arrays per product with `array_distinct(array_agg(...))`. The result is one row per `parent_asin` holding the distinct set of everything reviewers mentioned.
 - `models/reviews/reviews_attributes_sentiment_by_product.sql` counts positive/neutral/negative sentiment per product and computes a normalized score, `(positive - negative) / total`, ranging from -1 to 1, for both overall reviews and customer-service interactions. `NULLIF(..., 0)` guards against divide-by-zero when a product has no scored rows.
 
+## Questions to answer
+
+- What is the source table of unstructured text, and which columns hold the text to extract from?
+- Which target MotherDuck database and schema should the models write to?
+- What structured fields are wanted out, and what are the allowed values / types for each?
+- Should this run on a sample (the `limit 10` demo) or the full table?
+- Is there a `MOTHERDUCK_TOKEN` with read/write access to the target database?
+- Is the source database created and populated (or, for the demo, is the `webshop-dbt-md-ai` share attached)?
+
+## Caveats
+
+- Do not commit your `MOTHERDUCK_TOKEN`. The repo ships an `.envrc` that exported a real token during development. Treat any token visible in version control as compromised, rotate it, and load tokens from your own environment or a secret manager instead of checking them in.
+- `prompt()` runs once per input row and is billed and rate-limited as an AI call. The model ships with `limit 10` for exactly this reason. Removing the limit on a large table can be slow and costly, so size your run deliberately.
+- LLM output is non-deterministic. Two `dbt run` invocations can return slightly different extractions, so do not rely on byte-stable results. Materializing `reviews_attributes` as a `table` (the default) freezes one run's output for the downstream views; re-running re-extracts.
+- The `accepted_values` test on `sentiment` will fail if `prompt()` ever returns a value outside `positive`/`neutral`/`negative` (for example a capitalized or hedged answer). The `struct_descr` text is guidance, not a hard constraint. Keep the test as a guardrail and tighten the prompt wording, or normalize the column, if it trips.
+- Change `+database: my_db` in `dbt_project.yml` before running. The placeholder `my_db` is not a real database; leave it and `dbt run` writes to (or fails to create) a database called `my_db`.
+- The source must exist and be reachable. `_sources.yml` points at the `webshop-dbt-md-ai` share; if it is not attached, or your own source table is missing, dbt fails at compile/run time rather than silently producing empty output.
+- Empty arrays vs nulls: list fields are instructed to return an empty array when nothing matches. `unnest` drops empty arrays, so products whose reviews mention nothing for a given field simply do not contribute rows in `reviews_attributes_by_product`. That is expected, not a bug.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -73,15 +92,6 @@ Two views build on that table:
 | `path: 'md:'` and `target: dev` in `profiles.yml` | Connection target for dbt | `md:` for MotherDuck, or a local `.duckdb` file path |
 | `MOTHERDUCK_TOKEN` env var | Read/write auth for MotherDuck | A token from your MotherDuck account |
 | `accepted_values` / `not_null` tests in `models/reviews/schema.yml` | Validate the extracted output (e.g. sentiment in positive/neutral/negative) | Adjust to your fields |
-
-## Questions to answer
-
-- What is the source table of unstructured text, and which columns hold the text to extract from?
-- Which target MotherDuck database and schema should the models write to?
-- What structured fields are wanted out, and what are the allowed values / types for each?
-- Should this run on a sample (the `limit 10` demo) or the full table?
-- Is there a `MOTHERDUCK_TOKEN` with read/write access to the target database?
-- Is the source database created and populated (or, for the demo, is the `webshop-dbt-md-ai` share attached)?
 
 ## Run it
 
@@ -118,16 +128,6 @@ ATTACH 'md:_share/webshop-dbt-md-ai/a8a01cac-c4e6-4de1-93bf-bcc4c54aa77f';
 - [`models/reviews/schema.yml`](models/reviews/schema.yml) - model documentation and data tests: column descriptions plus `not_null` and `accepted_values` checks (e.g. `sentiment` must be positive/neutral/negative).
 - [`analyses/`](analyses/), [`macros/`](macros/), [`seeds/`](seeds/), [`snapshots/`](snapshots/), [`tests/`](tests/) - the standard dbt project directories, empty placeholders here (each holds a `.gitkeep`).
 - [`.gitignore`](.gitignore) - ignores dbt build output: `target/`, `dbt_packages/`, and `logs/`.
-
-## Caveats
-
-- Do not commit your `MOTHERDUCK_TOKEN`. The repo ships an `.envrc` that exported a real token during development. Treat any token visible in version control as compromised, rotate it, and load tokens from your own environment or a secret manager instead of checking them in.
-- `prompt()` runs once per input row and is billed and rate-limited as an AI call. The model ships with `limit 10` for exactly this reason. Removing the limit on a large table can be slow and costly, so size your run deliberately.
-- LLM output is non-deterministic. Two `dbt run` invocations can return slightly different extractions, so do not rely on byte-stable results. Materializing `reviews_attributes` as a `table` (the default) freezes one run's output for the downstream views; re-running re-extracts.
-- The `accepted_values` test on `sentiment` will fail if `prompt()` ever returns a value outside `positive`/`neutral`/`negative` (for example a capitalized or hedged answer). The `struct_descr` text is guidance, not a hard constraint. Keep the test as a guardrail and tighten the prompt wording, or normalize the column, if it trips.
-- Change `+database: my_db` in `dbt_project.yml` before running. The placeholder `my_db` is not a real database; leave it and `dbt run` writes to (or fails to create) a database called `my_db`.
-- The source must exist and be reachable. `_sources.yml` points at the `webshop-dbt-md-ai` share; if it is not attached, or your own source table is missing, dbt fails at compile/run time rather than silently producing empty output.
-- Empty arrays vs nulls: list fields are instructed to return an empty array when nothing matches. `unnest` drops empty arrays, so products whose reviews mention nothing for a given field simply do not contribute rows in `reviews_attributes_by_product`. That is expected, not a bug.
 
 ## Learn more
 

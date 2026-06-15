@@ -32,6 +32,82 @@ move in one run). There is no first-class DuckDB `snowflake` extension, so the
 path is `snowflake-connector-python` (Arrow fetch) into a DuckDB-registered Arrow
 object, then a CTAS into `md:`.
 
+## How it works
+
+`flight.py` connects to MotherDuck (`md:`), creates `TARGET_DB`, the control
+schema, and the target schema if missing, then runs one or both phases:
+
+1. **DISCOVER.** Determine the databases in scope: just `SNOWFLAKE_DATABASE` when
+   set, otherwise every database the connection can see (via `SHOW TERSE
+   DATABASES`). For each, query its `INFORMATION_SCHEMA.TABLES` (optionally
+   filtered to `SNOWFLAKE_SCHEMA`), listing `table_catalog, table_schema,
+   table_name, row_count, bytes, table_type`, and skip any database the role
+   cannot read. Write the combined result to the inventory control table with an
+   added `selected BOOLEAN` (defaulted to `table_type = 'BASE TABLE'`) and a
+   `discovered_at` timestamp. The write is a `CREATE OR REPLACE`, so re-discovery
+   refreshes the inventory.
+2. **MOVE.** Read the rows where `selected` is true. For each, run
+   `SELECT * FROM <db>.<schema>.<table>` in Snowflake, fetch the result as one
+   Arrow table with `cursor.fetch_arrow_all()`, register that Arrow object with
+   the DuckDB connection, and `CREATE OR REPLACE TABLE
+   <TARGET_DB>.<TARGET_SCHEMA>.<table> AS SELECT * FROM <arrow>`. Each table is
+   idempotent (replace on re-run). A failure on one table is recorded and the run
+   continues. Every move (including dry-run skips) writes one row to the ledger:
+   source table, dest table, row count, status, detail, run timestamp, dry-run
+   flag.
+
+`MODE=all` runs DISCOVER then MOVE in a single run.
+
+## Questions to answer
+
+- What is in scope: one Snowflake database (set `SNOWFLAKE_DATABASE`), or every visible database (leave it unset)? And optionally one schema?
+- Which account, user, warehouse, and role should the Flight connect with, and are the credentials stored as a MotherDuck Flights secret? Discovery needs a warehouse.
+- Where should the inventory, ledger, and moved tables live in MotherDuck (`TARGET_DB`, `TARGET_SCHEMA`, `CONTROL_SCHEMA`)?
+- After discovery, which tables should actually move? Edit the `selected` column, or accept the default rule (base tables only).
+- Are any in-scope tables large enough to need staging or a `MAX_ROWS_PER_TABLE` sample first?
+- Which service account token can write to `TARGET_DB`?
+
+## Caveats
+
+- **No credential-free smoke test.** Unlike the `sample_data`-backed templates
+  here, this Flight needs a real, reachable Snowflake account even to discover.
+  There is no offline dry run of the Snowflake side; the closest thing is
+  `DRY_RUN=true`, which still discovers but does not copy data.
+- **Discovery needs an active warehouse.** `SHOW TERSE DATABASES` runs without
+  one, but `INFORMATION_SCHEMA.TABLES` does not: with no warehouse every
+  per-database scan fails with "No active warehouse selected" and is skipped, so
+  the inventory comes back empty. Set `SNOWFLAKE_WAREHOUSE` (or give the connecting
+  user a default warehouse). Verified live: an account-wide scan of 4 databases
+  found 315 tables once a warehouse was set, and 0 before.
+- **Account-wide scan includes shared and system databases.** Leaving
+  `SNOWFLAKE_DATABASE` unset scans everything `SHOW TERSE DATABASES` returns,
+  which can include `SNOWFLAKE` (account views) and `SNOWFLAKE_SAMPLE_DATA`. Only
+  base tables are pre-`selected`, so views are inventoried but not moved by
+  default. Curate `selected` before moving, and note that the move destination is
+  keyed on table name alone, so same-named tables across databases or schemas
+  would collide in `TARGET_DB`.
+- **Re-discovery resets manual `selected` edits.** DISCOVER does a
+  `CREATE OR REPLACE` of the inventory, so any hand edits to `selected` are lost
+  on the next discover. To keep a curated selection, either stop re-discovering,
+  apply a deterministic `UPDATE ... SET selected = (...)` rule after each
+  discover, or maintain your selection in a separate table you join against.
+- **Snowflake compute and egress cost money.** Every discover query and every
+  `SELECT *` runs on a Snowflake warehouse and transfers data out. Use a small
+  warehouse, scope tightly with `SNOWFLAKE_SCHEMA`, and consider
+  `MAX_ROWS_PER_TABLE` for a sampled first pass.
+- **`ACCOUNT_USAGE` lags.** The account-wide alternative,
+  `SNOWFLAKE.ACCOUNT_USAGE.TABLES`, spans all databases but is delayed by up to
+  ~90 minutes and lists dropped tables until purged. This template uses the live,
+  exact `INFORMATION_SCHEMA.TABLES`, which is scoped to one database.
+- **Very large tables use memory.** MOVE fetches each table's full result into
+  one in-memory Arrow table. A Flight has a ~16GB RAM ceiling and ~150GB of local
+  scratch on `/tmp`. For a table that will not fit in memory, stage it to local
+  Parquet on `/tmp` first (`COPY ... TO '/tmp/...parquet'` from Snowflake or a
+  paged Arrow write), then load from Parquet, instead of one big `fetch_arrow_all`.
+- **`DRY_RUN` defaults to true.** MOVE writes real tables, so the first deploy
+  logs the move plan and writes ledger rows without copying. Set `DRY_RUN=false`
+  once you have reviewed the inventory.
+
 ## What you'll adjust
 
 Every knob is read from Flight config/env, so you adapt this template by setting
@@ -57,15 +133,6 @@ plain config.
 | `DRY_RUN` | config / env | `true` | When true, MOVE logs the plan and writes ledger rows without copying data. Set `false` to copy for real. |
 | `SNOWFLAKE_PASSWORD` | Flight secret / env var | (required) | The Snowflake credential. Add it through a MotherDuck Flights secret (in the UI, see below), never in code or config. As a Flight the secret arrives as `<secret_name>_SNOWFLAKE_PASSWORD`; `flight.py` resolves either name. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for MotherDuck. Select a token on the Flight; never hard-code it. |
-
-## Questions to answer
-
-- What is in scope: one Snowflake database (set `SNOWFLAKE_DATABASE`), or every visible database (leave it unset)? And optionally one schema?
-- Which account, user, warehouse, and role should the Flight connect with, and are the credentials stored as a MotherDuck Flights secret? Discovery needs a warehouse.
-- Where should the inventory, ledger, and moved tables live in MotherDuck (`TARGET_DB`, `TARGET_SCHEMA`, `CONTROL_SCHEMA`)?
-- After discovery, which tables should actually move? Edit the `selected` column, or accept the default rule (base tables only).
-- Are any in-scope tables large enough to need staging or a `MAX_ROWS_PER_TABLE` sample first?
-- Which service account token can write to `TARGET_DB`?
 
 ## Run it
 
@@ -153,73 +220,6 @@ Create the Flight with `MODE=discover`, trigger one manual run with
 listed by `MD_FLIGHTS()`), and confirm the inventory lands in MotherDuck. Curate `selected`, then run
 `MODE=move` with `DRY_RUN=false` (a config change, not a new Flight version) to
 copy. Schedule it only if you want a recurring refresh.
-
-## How it works
-
-`flight.py` connects to MotherDuck (`md:`), creates `TARGET_DB`, the control
-schema, and the target schema if missing, then runs one or both phases:
-
-1. **DISCOVER.** Determine the databases in scope: just `SNOWFLAKE_DATABASE` when
-   set, otherwise every database the connection can see (via `SHOW TERSE
-   DATABASES`). For each, query its `INFORMATION_SCHEMA.TABLES` (optionally
-   filtered to `SNOWFLAKE_SCHEMA`), listing `table_catalog, table_schema,
-   table_name, row_count, bytes, table_type`, and skip any database the role
-   cannot read. Write the combined result to the inventory control table with an
-   added `selected BOOLEAN` (defaulted to `table_type = 'BASE TABLE'`) and a
-   `discovered_at` timestamp. The write is a `CREATE OR REPLACE`, so re-discovery
-   refreshes the inventory.
-2. **MOVE.** Read the rows where `selected` is true. For each, run
-   `SELECT * FROM <db>.<schema>.<table>` in Snowflake, fetch the result as one
-   Arrow table with `cursor.fetch_arrow_all()`, register that Arrow object with
-   the DuckDB connection, and `CREATE OR REPLACE TABLE
-   <TARGET_DB>.<TARGET_SCHEMA>.<table> AS SELECT * FROM <arrow>`. Each table is
-   idempotent (replace on re-run). A failure on one table is recorded and the run
-   continues. Every move (including dry-run skips) writes one row to the ledger:
-   source table, dest table, row count, status, detail, run timestamp, dry-run
-   flag.
-
-`MODE=all` runs DISCOVER then MOVE in a single run.
-
-## Caveats
-
-- **No credential-free smoke test.** Unlike the `sample_data`-backed templates
-  here, this Flight needs a real, reachable Snowflake account even to discover.
-  There is no offline dry run of the Snowflake side; the closest thing is
-  `DRY_RUN=true`, which still discovers but does not copy data.
-- **Discovery needs an active warehouse.** `SHOW TERSE DATABASES` runs without
-  one, but `INFORMATION_SCHEMA.TABLES` does not: with no warehouse every
-  per-database scan fails with "No active warehouse selected" and is skipped, so
-  the inventory comes back empty. Set `SNOWFLAKE_WAREHOUSE` (or give the connecting
-  user a default warehouse). Verified live: an account-wide scan of 4 databases
-  found 315 tables once a warehouse was set, and 0 before.
-- **Account-wide scan includes shared and system databases.** Leaving
-  `SNOWFLAKE_DATABASE` unset scans everything `SHOW TERSE DATABASES` returns,
-  which can include `SNOWFLAKE` (account views) and `SNOWFLAKE_SAMPLE_DATA`. Only
-  base tables are pre-`selected`, so views are inventoried but not moved by
-  default. Curate `selected` before moving, and note that the move destination is
-  keyed on table name alone, so same-named tables across databases or schemas
-  would collide in `TARGET_DB`.
-- **Re-discovery resets manual `selected` edits.** DISCOVER does a
-  `CREATE OR REPLACE` of the inventory, so any hand edits to `selected` are lost
-  on the next discover. To keep a curated selection, either stop re-discovering,
-  apply a deterministic `UPDATE ... SET selected = (...)` rule after each
-  discover, or maintain your selection in a separate table you join against.
-- **Snowflake compute and egress cost money.** Every discover query and every
-  `SELECT *` runs on a Snowflake warehouse and transfers data out. Use a small
-  warehouse, scope tightly with `SNOWFLAKE_SCHEMA`, and consider
-  `MAX_ROWS_PER_TABLE` for a sampled first pass.
-- **`ACCOUNT_USAGE` lags.** The account-wide alternative,
-  `SNOWFLAKE.ACCOUNT_USAGE.TABLES`, spans all databases but is delayed by up to
-  ~90 minutes and lists dropped tables until purged. This template uses the live,
-  exact `INFORMATION_SCHEMA.TABLES`, which is scoped to one database.
-- **Very large tables use memory.** MOVE fetches each table's full result into
-  one in-memory Arrow table. A Flight has a ~16GB RAM ceiling and ~150GB of local
-  scratch on `/tmp`. For a table that will not fit in memory, stage it to local
-  Parquet on `/tmp` first (`COPY ... TO '/tmp/...parquet'` from Snowflake or a
-  paged Arrow write), then load from Parquet, instead of one big `fetch_arrow_all`.
-- **`DRY_RUN` defaults to true.** MOVE writes real tables, so the first deploy
-  logs the move plan and writes ledger rows without copying. Set `DRY_RUN=false`
-  once you have reviewed the inventory.
 
 ## Security
 

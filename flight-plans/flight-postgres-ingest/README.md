@@ -30,6 +30,50 @@ Full refresh is the simplest correct choice for mutable tables;
 If you have very large tables (billions of rows), consider incremental/append/CDC
 and use a different Flight template or modify this one heavily.
 
+## How it works
+
+`flight.py` runs a fixed sequence:
+
+1. **Connect.** Set `motherduck_host` if `MOTHERDUCK_HOST` given, `duckdb.connect("md:")`.
+2. **Attach Postgres read-only.** Export `pg_*` to libpq env vars, `INSTALL`/`LOAD postgres`, `ATTACH '' AS pg (TYPE postgres, READ_ONLY)`. `READ_ONLY` lets the extension parallelize reads; the empty connection string keeps the password in env, never in SQL.
+3. **Ensure target.** `CREATE DATABASE IF NOT EXISTS` plus creating the `main.flight_tracker` audit table.
+4. **Discover base tables** List base tables (`information_schema.tables WHERE table_type = 'BASE TABLE'` via `postgres_query`), keep those passing the gates.
+5. **Load each table.** Pre-create schemas, then per table run `CREATE OR REPLACE ... AS SELECT *` under a tenacity retry (jittered exponential backoff, transient errors). Log a `flight_tracker` row on success; on failure after retries, log and continue (per-table isolation). Exit non-zero if anything failed.
+
+## Questions to answer
+
+- Postgres source: host, port, database, user, SSL mode — and which password? Enter as a MotherDuck secret.
+- Which schemas/tables to mirror: everything non-system, one schema, or an explicit allow/deny list?
+- Which `TARGET_DATABASE` should receive the mirror?
+- Is a full refresh per run acceptable given table sizes? (See [Caveats](#caveats).)
+- What schedule (cron, UTC) matches source change rate and freshness needs?
+- Any exotic Postgres column types that the DuckDB Postgres extension can't map that should be excluded?
+
+## Caveats
+
+- **Full refresh re-reads the whole table every run.** Cost scales with table
+  size, not change volume. Updates and deletes are reflected, but a table
+  **dropped** from the source is NOT dropped from the target — remove it yourself
+  or recreate the target database. For very large/slowly-changing tables, an
+  incremental pattern is cheaper.
+- **The upload is single threaded and sequential by design.** Testing a ~90M-row database showed
+  no improvement when parallelizing the load of multiple large tables.
+  Testing also showed that adjusting DuckDB `threads`, `pg_pages_per_task`,
+  `pg_connection_limit`, `pg_pool_max_connections`, and using multiple Python threads all
+  leave total time unchanged - hence the simple sequential loop.
+  If performance is critical, consider the added dependency of an AWS S3 bucket in your MotherDuck region and
+  staging Postgres data in Parquet in S3 and ingest server-side
+  (`read_parquet('s3://…')` runs in the MotherDuck duckling).
+  This Flight avoids the dependency on an S3 bucket to keep things simpler.
+- **`SELECT *` relies on the extension's type mapping.** Exotic Postgres types
+  (custom enums, ranges, `hstore`, composite arrays) may surface as `VARCHAR` or
+  error — exclude such tables or fork `load_table` to project columns.
+- **Base tables only.** Discovery filters `table_type = 'BASE TABLE'`; views,
+  materialized views, and foreign tables are skipped by design.
+- **Client-side extension.** The Postgres scan runs in the Flight container and rows upload to MotherDuck from there.
+- **Old tables are not dropped.** The target database is not cleared out at the start of the run,
+  so old tables can persist. A separate command would be required to clear out the target database.
+
 ## What you'll adjust
 
 No code edits are required (code edits are optional). 
@@ -61,15 +105,6 @@ Two gotchas with the `pg` secret:
   `pg_HOST`), which `flight.py` reads via `PG_PARAMS`.
 - **Code edits are required to use a name other than `pg`.** DuckDB lowercases the secret name into the prefix.
   Rename the secret only if you also change `SECRET_NAME` in `flight.py`.
-
-## Questions to answer
-
-- Postgres source: host, port, database, user, SSL mode — and which password? Enter as a MotherDuck secret.
-- Which schemas/tables to mirror: everything non-system, one schema, or an explicit allow/deny list?
-- Which `TARGET_DATABASE` should receive the mirror?
-- Is a full refresh per run acceptable given table sizes? (See [Caveats](#caveats).)
-- What schedule (cron, UTC) matches source change rate and freshness needs?
-- Any exotic Postgres column types that the DuckDB Postgres extension can't map that should be excluded?
 
 ## Run it
 
@@ -136,41 +171,6 @@ Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
 id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and confirm
 `<TARGET_DATABASE>.main.flight_tracker` has one row per table. 
 Get feedback from the user about whether or not a schedule is desired and what it should be.
-
-## How it works
-
-`flight.py` runs a fixed sequence:
-
-1. **Connect.** Set `motherduck_host` if `MOTHERDUCK_HOST` given, `duckdb.connect("md:")`.
-2. **Attach Postgres read-only.** Export `pg_*` to libpq env vars, `INSTALL`/`LOAD postgres`, `ATTACH '' AS pg (TYPE postgres, READ_ONLY)`. `READ_ONLY` lets the extension parallelize reads; the empty connection string keeps the password in env, never in SQL.
-3. **Ensure target.** `CREATE DATABASE IF NOT EXISTS` plus creating the `main.flight_tracker` audit table.
-4. **Discover base tables** List base tables (`information_schema.tables WHERE table_type = 'BASE TABLE'` via `postgres_query`), keep those passing the gates.
-5. **Load each table.** Pre-create schemas, then per table run `CREATE OR REPLACE ... AS SELECT *` under a tenacity retry (jittered exponential backoff, transient errors). Log a `flight_tracker` row on success; on failure after retries, log and continue (per-table isolation). Exit non-zero if anything failed.
-
-## Caveats
-
-- **Full refresh re-reads the whole table every run.** Cost scales with table
-  size, not change volume. Updates and deletes are reflected, but a table
-  **dropped** from the source is NOT dropped from the target — remove it yourself
-  or recreate the target database. For very large/slowly-changing tables, an
-  incremental pattern is cheaper.
-- **The upload is single threaded and sequential by design.** Testing a ~90M-row database showed 
-  no improvement when parallelizing the load of multiple large tables.
-  Testing also showed that adjusting DuckDB `threads`, `pg_pages_per_task`,
-  `pg_connection_limit`, `pg_pool_max_connections`, and using multiple Python threads all
-  leave total time unchanged - hence the simple sequential loop. 
-  If performance is critical, consider the added dependency of an AWS S3 bucket in your MotherDuck region and 
-  staging Postgres data in Parquet in S3 and ingest server-side 
-  (`read_parquet('s3://…')` runs in the MotherDuck duckling).
-  This Flight avoids the dependency on an S3 bucket to keep things simpler.
-- **`SELECT *` relies on the extension's type mapping.** Exotic Postgres types
-  (custom enums, ranges, `hstore`, composite arrays) may surface as `VARCHAR` or
-  error — exclude such tables or fork `load_table` to project columns.
-- **Base tables only.** Discovery filters `table_type = 'BASE TABLE'`; views,
-  materialized views, and foreign tables are skipped by design.
-- **Client-side extension.** The Postgres scan runs in the Flight container and rows upload to MotherDuck from there.
-- **Old tables are not dropped.** The target database is not cleared out at the start of the run, 
-  so old tables can persist. A separate command would be required to clear out the target database.
 
 ## Security
 

@@ -95,13 +95,27 @@ ORDER BY 1
  └──────────────┘          └────────────────────────┘
 ```
 
-## Security
+## Questions to answer
 
-Sanitize input on every endpoint that accepts it:
+- Which MotherDuck share or database holds the analytics, and what is its share URI?
+- What is the schema: a locations table, a per-day fact table, and a top-N dimension, plus the column names to use in the three queries?
+- What region is the account in, so you set the right `MOTHERDUCK_HOST`?
+- What is the voting question and the candidate list (8 to 12 items, kebab-case `id` values)?
+- What lat/lon coordinates back each location and candidate city?
+- What brand palette, copy, and assets should the frontend use?
+- What Worker name and cache TTL do you want?
 
-1. Parameterize queries. Every route uses numbered parameters, e.g. `WHERE location_id = $1::BIGINT`, rather than string interpolation.
-2. Validate inputs. `days` is parsed as an integer and clamped to `[7, 365]`; `location_id` is parsed and rejected with a 400 if it is not a valid integer; `candidate_id` must be one of the 10 hardcoded candidates; `session_id` must be a string of at most 64 characters.
-3. Read-only warehouse workload. The Worker only issues `SELECT` statements against the attached share, so there is no path from user input to a MotherDuck write. Votes live entirely in the Durable Object.
+## Caveats
+
+- The share URI is interpolated into the `ATTACH` statement, not parameterized. `DUCKOFFEE_SHARE` is operator-controlled config in `wrangler.toml`, not user input, so keep it that way: do not wire it to a request parameter or you reintroduce SQL injection on the attach.
+- Do not put the token in `wrangler.toml`. `MOTHERDUCK_TOKEN` is a Wrangler secret (`wrangler secret put`) in production and lives in `.dev.vars` locally; `.dev.vars` should be gitignored. The `[vars]` block is for non-secret config (host, db, share) only.
+- `nodejs_compat` is required and fails silently if dropped. Remove the flag and the `pg` import breaks at runtime, not at build time. If you see module-resolution errors for `pg`, this is the first thing to check.
+- The Postgres host is region-specific. `pg.us-east-1-aws.motherduck.com` only works for accounts in that region. Point `MOTHERDUCK_HOST` at your own region's endpoint or connections will fail.
+- Sample-data cities have no coordinates. `duckoffee.locations` stores city names but no lat/lon, so any city missing from `CITY_COORDS` returns `lon: null, lat: null` and silently will not plot on the map. Add a coordinate entry for every location you query.
+- Candidate `id` is a permanent key. The `id` in `CANDIDATES` is the value stored in the Durable Object. Renaming it after votes exist orphans those votes under the old key, so pick a stable kebab-case `id` up front.
+- Each browser tab is a distinct voter. The session ID is `sessionStorage`-backed, so two tabs count as two voters, and clearing storage creates a fresh voter. This is fine for a demo, not a substitute for real auth.
+- One client per request. `withClient` opens and closes a `pg` connection per call rather than pooling; that is the simple, correct pattern for the Workers request model, but it is not a high-throughput connection pool.
+- Edge cache hides fresh data. The three SQL endpoints are cached for `DATA_CACHE_TTL_SECONDS` (15 minutes) via the Cloudflare cache, so updates to the share will not appear until the TTL expires. Lower it while developing if you expect the data to change.
 
 ## What you'll adjust
 
@@ -118,16 +132,6 @@ Sanitize input on every endpoint that accepts it:
 | `DATA_CACHE_TTL_SECONDS` (`src/index.ts`) | Edge cache TTL for the three SQL endpoints | `15 * 60` (15 minutes) |
 | `days` clamp in `handleSales` | Range and default for the daily series window | default 90, clamped to `[7, 365]` |
 | Brand colors / assets (`public/style.css`, `public/assets/`) | Look and feel of the SPA | CSS custom properties at top of `style.css`; swap SVGs in `public/assets/` |
-
-## Questions to answer
-
-- Which MotherDuck share or database holds the analytics, and what is its share URI?
-- What is the schema: a locations table, a per-day fact table, and a top-N dimension, plus the column names to use in the three queries?
-- What region is the account in, so you set the right `MOTHERDUCK_HOST`?
-- What is the voting question and the candidate list (8 to 12 items, kebab-case `id` values)?
-- What lat/lon coordinates back each location and candidate city?
-- What brand palette, copy, and assets should the frontend use?
-- What Worker name and cache TTL do you want?
 
 ## Run it
 
@@ -154,6 +158,14 @@ npx wrangler deploy
 
 The first deploy creates the `duckoffee-map` Worker, uploads `./public` through the `[assets]` binding, and provisions the `VoteTracker` Durable Object via the `[[migrations]]` entry (`new_sqlite_classes = ["VoteTracker"]`). Subsequent deploys just upload new code.
 
+## Security
+
+Sanitize input on every endpoint that accepts it:
+
+1. Parameterize queries. Every route uses numbered parameters, e.g. `WHERE location_id = $1::BIGINT`, rather than string interpolation.
+2. Validate inputs. `days` is parsed as an integer and clamped to `[7, 365]`; `location_id` is parsed and rejected with a 400 if it is not a valid integer; `candidate_id` must be one of the 10 hardcoded candidates; `session_id` must be a string of at most 64 characters.
+3. Read-only warehouse workload. The Worker only issues `SELECT` statements against the attached share, so there is no path from user input to a MotherDuck write. Votes live entirely in the Durable Object.
+
 ## Files
 
 - [`src/index.ts`](src/index.ts) - the whole Worker: the `withClient` Postgres helper, the three read-only SQL handlers, the `/api/votes` routes, the `CITY_COORDS` and `CANDIDATES` lookups, and the `VoteTracker` Durable Object class.
@@ -166,18 +178,6 @@ The first deploy creates the `duckoffee-map` Worker, uploads `./public` through 
 - [`public/style.css`](public/style.css) - the SPA styling, with the brand palette as CSS custom properties at the top.
 - [`public/assets/`](public/assets/) - the hero image (`duckoffee.jpg`), duck and database SVGs, and the `AeonikMono-Regular.woff2` font used by the frontend.
 - [`PROMPT.md`](PROMPT.md) - a self-contained prompt you can paste into a coding agent to rebuild this Worker plus Durable Object plus MotherDuck architecture with your own brand, dataset, and voting question.
-
-## Caveats
-
-- The share URI is interpolated into the `ATTACH` statement, not parameterized. `DUCKOFFEE_SHARE` is operator-controlled config in `wrangler.toml`, not user input, so keep it that way: do not wire it to a request parameter or you reintroduce SQL injection on the attach.
-- Do not put the token in `wrangler.toml`. `MOTHERDUCK_TOKEN` is a Wrangler secret (`wrangler secret put`) in production and lives in `.dev.vars` locally; `.dev.vars` should be gitignored. The `[vars]` block is for non-secret config (host, db, share) only.
-- `nodejs_compat` is required and fails silently if dropped. Remove the flag and the `pg` import breaks at runtime, not at build time. If you see module-resolution errors for `pg`, this is the first thing to check.
-- The Postgres host is region-specific. `pg.us-east-1-aws.motherduck.com` only works for accounts in that region. Point `MOTHERDUCK_HOST` at your own region's endpoint or connections will fail.
-- Sample-data cities have no coordinates. `duckoffee.locations` stores city names but no lat/lon, so any city missing from `CITY_COORDS` returns `lon: null, lat: null` and silently will not plot on the map. Add a coordinate entry for every location you query.
-- Candidate `id` is a permanent key. The `id` in `CANDIDATES` is the value stored in the Durable Object. Renaming it after votes exist orphans those votes under the old key, so pick a stable kebab-case `id` up front.
-- Each browser tab is a distinct voter. The session ID is `sessionStorage`-backed, so two tabs count as two voters, and clearing storage creates a fresh voter. This is fine for a demo, not a substitute for real auth.
-- One client per request. `withClient` opens and closes a `pg` connection per call rather than pooling; that is the simple, correct pattern for the Workers request model, but it is not a high-throughput connection pool.
-- Edge cache hides fresh data. The three SQL endpoints are cached for `DATA_CACHE_TTL_SECONDS` (15 minutes) via the Cloudflare cache, so updates to the share will not appear until the TTL expires. Lower it while developing if you expect the data to change.
 
 ## Learn more
 

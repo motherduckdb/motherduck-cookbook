@@ -80,6 +80,35 @@ into the separate native MotherDuck database `my_db`.
 developing against a local DuckLake file instead of MotherDuck; switch with
 `dbt build --target local`.
 
+## Questions to answer
+
+- Source: keep the public `devrel-test-data` TPC-DS bucket, or point at your own parquet and scale factor?
+- DuckLake database: which database name and `DATA_PATH` (S3/object-store prefix) should hold the raw tables?
+- Analytics target: which native MotherDuck database should the query models land in (default `my_db`)?
+- Scope: run all 99 queries plus 25 raw tables, or a subset via `--select` / `--exclude`?
+- Full vs partial: rebuild raw tables every run, or only refresh the query layer?
+- Credentials: MotherDuck token, and read access to the S3 source bucket.
+
+## Caveats
+
+- Create the DuckLake database before the first run. `CREATE DATABASE dbt_ducklake
+  (TYPE ducklake, DATA_PATH '...')` and `my_db` must already exist; dbt does not
+  create them. A missing `dbt_ducklake` fails the run, and a missing `my_db`
+  fails the query layer.
+- `is_ducklake: true` is required, not optional. Without it, the raw tables
+  silently write to native MotherDuck storage instead of your `DATA_PATH` object
+  store, defeating the point of this example. There is no error, just the wrong
+  storage backend.
+- `profiles.yml`'s profile name must match the `profile:` key in `dbt_project.yml`
+  (`dbt_ducklake`). A mismatch makes dbt fail to find a profile.
+- TPC-DS Scale Factor 100 is large. A full `dbt build` materializes 25 raw tables
+  plus 99 query tables and can take a while and consume meaningful memory. For
+  iteration, scope with `--select tag:raw` / `--select tag:queries` or a single
+  model (`--select query_1`).
+- The S3 source bucket needs read access. The public `devrel-test-data` bucket is
+  readable without credentials; if you swap in your own bucket, configure object
+  storage credentials (a MotherDuck/DuckDB secret) or the raw layer fails.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -91,15 +120,6 @@ developing against a local DuckLake file instead of MotherDuck; switch with
 | `dbt_project.yml` raw/queries `+materialized`, `+schema`, `+tags` | Materialization and tagging per layer | raw: `table` in schema `raw`; queries: `table` |
 | `models/tpcds/raw/_sources.yml` `meta.external_location` | S3 location of the TPC-DS parquet | `s3://devrel-test-data/tpcds/sf100/{name}.parquet`; swap for your own bucket or scale factor |
 | dbt selector (`--select` / `--exclude`) | Limit which models run | e.g. `tag:raw`, `tag:queries`, a single `query_1` |
-
-## Questions to answer
-
-- Source: keep the public `devrel-test-data` TPC-DS bucket, or point at your own parquet and scale factor?
-- DuckLake database: which database name and `DATA_PATH` (S3/object-store prefix) should hold the raw tables?
-- Analytics target: which native MotherDuck database should the query models land in (default `my_db`)?
-- Scope: run all 99 queries plus 25 raw tables, or a subset via `--select` / `--exclude`?
-- Full vs partial: rebuild raw tables every run, or only refresh the query layer?
-- Credentials: MotherDuck token, and read access to the S3 source bucket.
 
 ## Run it
 
@@ -137,26 +157,6 @@ TPC-DS Scale Factor 100 is heavy. For iteration, scope the run with
 - [`.python-version`](.python-version) - pins the local Python version (3.12) for uv.
 - [`.user.yml`](.user.yml) / [`.gitignore`](.gitignore) - dbt anonymous-usage user id, and ignore rules for `target/`, `dbt_packages/`, `logs/`, and `*.db`.
 - [`analyses/`](analyses/), [`macros/`](macros/), [`seeds/`](seeds/), [`snapshots/`](snapshots/), [`tests/`](tests/) - empty standard dbt scaffold directories (each holds a `.gitkeep`).
-
-## Caveats
-
-- Create the DuckLake database before the first run. `CREATE DATABASE dbt_ducklake
-  (TYPE ducklake, DATA_PATH '...')` and `my_db` must already exist; dbt does not
-  create them. A missing `dbt_ducklake` fails the run, and a missing `my_db`
-  fails the query layer.
-- `is_ducklake: true` is required, not optional. Without it, the raw tables
-  silently write to native MotherDuck storage instead of your `DATA_PATH` object
-  store, defeating the point of this example. There is no error, just the wrong
-  storage backend.
-- `profiles.yml`'s profile name must match the `profile:` key in `dbt_project.yml`
-  (`dbt_ducklake`). A mismatch makes dbt fail to find a profile.
-- TPC-DS Scale Factor 100 is large. A full `dbt build` materializes 25 raw tables
-  plus 99 query tables and can take a while and consume meaningful memory. For
-  iteration, scope with `--select tag:raw` / `--select tag:queries` or a single
-  model (`--select query_1`).
-- The S3 source bucket needs read access. The public `devrel-test-data` bucket is
-  readable without credentials; if you swap in your own bucket, configure object
-  storage credentials (a MotherDuck/DuckDB secret) or the raw layer fails.
 
 ## Learn more
 

@@ -81,6 +81,24 @@ The history loader coerces each OHLCV value defensively because `yfinance` may r
 
 - Audits run at execution time: `UNIQUE_COMBINATION_OF_COLUMNS`, `NOT_NULL`, and `UNIQUE_VALUES`. A failed audit blocks the model from being promoted, which is how data quality is enforced rather than just reported.
 
+## Questions to answer
+
+- Which tickers or source dataset should the pipeline load (replace `symbols.txt`, or swap dlt for a different source)?
+- What MotherDuck database and schema are the target? Set both the dlt `destination` database and `transform/config.yaml` `database`, and keep them in sync.
+- Full refresh or incremental, and what is the backfill start date for time-based models?
+- How often should models run (the `@daily` cron, or a different cadence)?
+- Where will the MotherDuck token come from (the `MOTHERDUCK_TOKEN` env var and `.dlt/secrets.toml`)?
+
+## Caveats
+
+- **Keep the two database names in sync.** SQLMesh reads the raw tables from the same MotherDuck database dlt wrote to. If `transform/config.yaml` `database` does not match the dlt destination database (`dlt_test_db` by default), `sqlmesh plan` will fail to resolve `stock_data.*`.
+- **Token must be in the right place for the right tool.** dlt reads the token from `.dlt/secrets.toml`; SQLMesh reads it from `MOTHERDUCK_TOKEN`. Setting only one will make the other step fail. Do not commit the token; keep it in `.dlt/secrets.toml` (gitignored) and your shell env, not in `config.yaml`.
+- **Regenerate external models after schema changes.** `external_models.yaml` is a static snapshot of the dlt output columns. `yfinance` periodically adds or renames `stock_info` fields, so a new load can drift from the declared schema. Re-run `sqlmesh create_external_models` after loads that change the raw shape, or SQLMesh will reference columns that no longer match.
+- **`write_disposition="replace"` is a full reload.** Every `dlt` run truncates and reloads the raw tables. The SCD type 2 history in SQLMesh comes from the `_dlt_load_time` snapshots, not from dlt itself, so you only capture change history if you load on a schedule (each load is one snapshot in time).
+- **`yfinance` is unofficial and rate-limited.** Symbols are validated with a 1-day history probe before fetching, and resources swallow per-symbol exceptions and print to stdout rather than failing the run. A symbol that returns no data is skipped silently, so check the load output if a ticker is missing downstream. Large symbol lists, especially option chains, can be slow and may hit Yahoo throttling.
+- **History defaults to a 360-day window.** `stock_history_resource` only pulls the trailing 360 days, while the incremental model's `start` is `'2023-01-01'`. Backfilling earlier than what dlt loaded produces empty slices, not older data; widen the dlt window first.
+- **The interim layer is hand-maintained typed SQL.** Each interim model casts every column explicitly (for example `close::DOUBLE`, `symbol::TEXT`). If you add tickers with new `stock_info` fields you want downstream, you must add the casts to the interim model yourself; the raw-to-interim mapping is not automatic.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -96,14 +114,6 @@ The history loader coerces each OHLCV value defensively because `yfinance` may r
 | `cron` per model | How often SQLMesh refreshes the model | `'@daily'` on the interim, conformed, and full models |
 | `audits (...)` per model | Data quality checks enforced at run time | `UNIQUE_COMBINATION_OF_COLUMNS`, `NOT_NULL`, `UNIQUE_VALUES` |
 | `transform/external_models.yaml` | Declares the raw dlt tables (and their columns) as external sources | regenerate with `sqlmesh create_external_models` after a load |
-
-## Questions to answer
-
-- Which tickers or source dataset should the pipeline load (replace `symbols.txt`, or swap dlt for a different source)?
-- What MotherDuck database and schema are the target? Set both the dlt `destination` database and `transform/config.yaml` `database`, and keep them in sync.
-- Full refresh or incremental, and what is the backfill start date for time-based models?
-- How often should models run (the `@daily` cron, or a different cadence)?
-- Where will the MotherDuck token come from (the `MOTHERDUCK_TOKEN` env var and `.dlt/secrets.toml`)?
 
 ## Run it
 
@@ -143,16 +153,6 @@ If SQLMesh cannot find your token during `info`/`plan`, make sure `MOTHERDUCK_TO
 - [`transform/`](transform/) - the SQLMesh root, also holding empty scaffold dirs (`audits/`, `macros/`, `seeds/`, `tests/`) for project growth.
 - [`pyproject.toml`](pyproject.toml) - the uv project definition: pins dlt, duckdb, sqlmesh (with the web UI extra), and yfinance.
 - [`uv.lock`](uv.lock) - the pinned dependency lockfile for reproducible `uv sync`.
-
-## Caveats
-
-- **Keep the two database names in sync.** SQLMesh reads the raw tables from the same MotherDuck database dlt wrote to. If `transform/config.yaml` `database` does not match the dlt destination database (`dlt_test_db` by default), `sqlmesh plan` will fail to resolve `stock_data.*`.
-- **Token must be in the right place for the right tool.** dlt reads the token from `.dlt/secrets.toml`; SQLMesh reads it from `MOTHERDUCK_TOKEN`. Setting only one will make the other step fail. Do not commit the token; keep it in `.dlt/secrets.toml` (gitignored) and your shell env, not in `config.yaml`.
-- **Regenerate external models after schema changes.** `external_models.yaml` is a static snapshot of the dlt output columns. `yfinance` periodically adds or renames `stock_info` fields, so a new load can drift from the declared schema. Re-run `sqlmesh create_external_models` after loads that change the raw shape, or SQLMesh will reference columns that no longer match.
-- **`write_disposition="replace"` is a full reload.** Every `dlt` run truncates and reloads the raw tables. The SCD type 2 history in SQLMesh comes from the `_dlt_load_time` snapshots, not from dlt itself, so you only capture change history if you load on a schedule (each load is one snapshot in time).
-- **`yfinance` is unofficial and rate-limited.** Symbols are validated with a 1-day history probe before fetching, and resources swallow per-symbol exceptions and print to stdout rather than failing the run. A symbol that returns no data is skipped silently, so check the load output if a ticker is missing downstream. Large symbol lists, especially option chains, can be slow and may hit Yahoo throttling.
-- **History defaults to a 360-day window.** `stock_history_resource` only pulls the trailing 360 days, while the incremental model's `start` is `'2023-01-01'`. Backfilling earlier than what dlt loaded produces empty slices, not older data; widen the dlt window first.
-- **The interim layer is hand-maintained typed SQL.** Each interim model casts every column explicitly (for example `close::DOUBLE`, `symbol::TEXT`). If you add tickers with new `stock_info` fields you want downstream, you must add the casts to the interim model yourself; the raw-to-interim mapping is not automatic.
 
 ## Learn more
 

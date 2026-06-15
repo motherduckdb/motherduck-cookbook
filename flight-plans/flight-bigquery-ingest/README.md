@@ -72,6 +72,86 @@ result. If you flip to `"query"`, push the date filter into the query's `WHERE`
 on a partitioned column so BigQuery still prunes partitions; a query that scans
 the whole table every run gets expensive fast.
 
+## How it works
+
+`flight.py` runs a fixed sequence; only the USER-EDIT BLOCKS change its inputs:
+
+1. Materialize GCP credentials. If `GOOGLE_APPLICATION_CREDENTIALS` already
+   points at a file (local run), use it. Otherwise read the SA JSON from the
+   resolved secret env var, validate it parses as JSON, write it to a private
+   temp file, and set `GOOGLE_APPLICATION_CREDENTIALS` to that path.
+2. Connect DuckDB in memory with community extensions enabled, `INSTALL`/`LOAD`
+   the `bigquery` extension, `LOAD motherduck`, `ATTACH 'md:'`, and set
+   `preserve_insertion_order = FALSE`.
+3. Ensure the destination exists. Create the database and schema, then bootstrap
+   the table by running the source read (`bigquery_scan` or `bigquery_query`,
+   per `READ_MODE`) over a 1970-01-01 window (BigQuery prunes the partitioned
+   scan to nothing, so the probe is nearly free) with
+   `CREATE TABLE IF NOT EXISTS ... AS SELECT ... LIMIT 0`, which takes the result
+   schema without rows.
+4. Resolve the partition window. Priority: explicit `start_dt`+`end_dt`
+   (inclusive backfill range), then `target_dt` (single day), otherwise watermark
+   mode (`prev_max = MAX(partition column)`; load
+   `[prev_max + 1 - OVERLAP_DAYS, prev_max + 1]`; cold start at `COLD_START_DT`
+   when empty).
+5. For each day in the window, run one transaction: `DELETE` rows matching
+   `MD_DELETE_PREDICATE` for that day, then `INSERT` the day's source read
+   (`bigquery_scan(SCAN_TABLE, filter=...)` in scan mode, or
+   `bigquery_query(GCP_PROJECT_ID, QUERY)` in query mode). Commit on success,
+   roll back on error. Per-phase timing (DELETE, then BigQuery read plus
+   MotherDuck insert) is logged to stdout, which Flight logs capture.
+
+The DELETE plus INSERT per partition is what makes a re-run safe: re-loading a
+day clears its rows first, so you never get duplicates, and a failed day rolls
+back cleanly rather than leaving a half-loaded partition.
+
+## Questions to answer
+
+- Do you actually need GoogleSQL (a join, aggregation, function, derived column, or a view)? If not, keep `READ_MODE = "scan"`. If so, switch to `"query"`. See [Which read mode?](#which-read-mode-bigquery_scan-vs-bigquery_query).
+- Which BigQuery table do you want to load (scan mode: `SCAN_TABLE` + `SCAN_COLUMNS`; query mode: the `FROM` in `QUERY`), and which result column is the partition date?
+- Is the source partitioned on that date column so the `{start_dt}`/`{end_dt}` filter actually prunes scans?
+- What is the destination `database.schema.table` in MotherDuck?
+- What is your GCP billing project (the project charged for the read), and is it the right one for cost attribution?
+- How far back should a cold start go (`COLD_START_DT`), and how many days of overlap heal late-arriving data (`OVERLAP_DAYS`)?
+- Do the active read filter (`SCAN_FILTER` or `QUERY`) and `MD_DELETE_PREDICATE` filter on exactly the same predicates, so the DELETE never clears rows you are not re-loading?
+- Which service account can run the read, and how is its JSON key stored (a file locally, a `TYPE flights` secret when deployed)?
+- What schedule (cron, UTC) matches how often the source data lands?
+
+## Caveats
+
+- **No credential-free smoke test.** Unlike the `sample_data` templates here,
+  this Flight needs a real BigQuery source: a GCP billing project and a
+  service-account key. There is no public dataset path that exercises the whole
+  flow without credentials.
+- **BigQuery costs money — scan is the cheaper default.** In scan mode,
+  `bigquery_scan` reads through the Storage Read API, billed on the storage-read
+  meter; the `SCAN_FILTER` row restriction on a partitioned column prunes
+  partitions so you only read the days you load. In query mode, `bigquery_query`
+  runs through the Jobs API, billed by bytes scanned (~5–6× the per-byte rate of
+  the storage-read meter) — push the date filter into `QUERY`'s WHERE on a
+  partitioned column so BigQuery still prunes. Either way, a read that scans the
+  full table every run gets expensive fast. Prefer scan unless you need GoogleSQL
+  (see [Which read mode?](#which-read-mode-bigquery_scan-vs-bigquery_query)).
+- **Predicate mirroring is a footgun.** `MD_DELETE_PREDICATE` must select exactly
+  the rows one partition's read produces. If the active read filter (`SCAN_FILTER`
+  or `QUERY`) filters on `event_source` but the DELETE does not, the DELETE clears
+  rows you are not re-loading and you lose data. Keep them in lockstep, and note
+  the quoting difference: the BigQuery-side `SCAN_FILTER`/`QUERY` use double quotes
+  for string literals, the DuckDB-side `MD_DELETE_PREDICATE` uses single quotes.
+- **Watermark and time zones.** The watermark is computed from
+  `MAX(PARTITION_DATE_COLUMN)`, a date, so it is timezone-free as long as the
+  column is a true partition DATE. Scan mode reads the stored DATE column
+  directly. In query mode, if your partition date is derived from a timestamp,
+  derive it the same way in `QUERY` every run (for example `DATE(event_timestamp)`
+  in a consistent zone), or the day boundaries will drift. A deployed Flight runs
+  in UTC; a local `uv run` uses your machine's timezone.
+- **`OVERLAP_DAYS` trades cost for freshness.** A larger overlap heals
+  later-arriving data but re-scans and re-loads more partitions every run. Set it
+  to the longest delay you expect for late rows, no more.
+- **Cold start can be large.** A watermark cold start loads a single day
+  (`COLD_START_DT`). To backfill history, run once with `start_dt`/`end_dt`
+  spanning the range before you rely on the watermark.
+
 ## What you'll adjust
 
 The read mode, source, and destination live in USER-EDIT BLOCKS at the top of
@@ -99,18 +179,6 @@ GCP billing project, and the service-account credentials.
 | `start_dt` / `end_dt` / `target_dt` | env var (optional) | (unset) | Override the window: explicit inclusive backfill range, or a single day. Unset = watermark mode. |
 | `BIGQUERY_DEST_DB` | Flight config / env var (optional) | `DEFAULT_DB` | Override the destination database without editing code. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth. Select a token on the Flight; never hard-code it. |
-
-## Questions to answer
-
-- Do you actually need GoogleSQL (a join, aggregation, function, derived column, or a view)? If not, keep `READ_MODE = "scan"`. If so, switch to `"query"`. See [Which read mode?](#which-read-mode-bigquery_scan-vs-bigquery_query).
-- Which BigQuery table do you want to load (scan mode: `SCAN_TABLE` + `SCAN_COLUMNS`; query mode: the `FROM` in `QUERY`), and which result column is the partition date?
-- Is the source partitioned on that date column so the `{start_dt}`/`{end_dt}` filter actually prunes scans?
-- What is the destination `database.schema.table` in MotherDuck?
-- What is your GCP billing project (the project charged for the read), and is it the right one for cost attribution?
-- How far back should a cold start go (`COLD_START_DT`), and how many days of overlap heal late-arriving data (`OVERLAP_DAYS`)?
-- Do the active read filter (`SCAN_FILTER` or `QUERY`) and `MD_DELETE_PREDICATE` filter on exactly the same predicates, so the DELETE never clears rows you are not re-loading?
-- Which service account can run the read, and how is its JSON key stored (a file locally, a `TYPE flights` secret when deployed)?
-- What schedule (cron, UTC) matches how often the source data lands?
 
 ## Run it
 
@@ -189,74 +257,6 @@ add a schedule (for example `0 6 * * *`, daily at 06:00 UTC) by updating the
 Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates are
 metadata-only and do not create a new Flight version. For a one-off backfill, set `start_dt`/`end_dt` (or `target_dt`)
 in the run config.
-
-## How it works
-
-`flight.py` runs a fixed sequence; only the USER-EDIT BLOCKS change its inputs:
-
-1. Materialize GCP credentials. If `GOOGLE_APPLICATION_CREDENTIALS` already
-   points at a file (local run), use it. Otherwise read the SA JSON from the
-   resolved secret env var, validate it parses as JSON, write it to a private
-   temp file, and set `GOOGLE_APPLICATION_CREDENTIALS` to that path.
-2. Connect DuckDB in memory with community extensions enabled, `INSTALL`/`LOAD`
-   the `bigquery` extension, `LOAD motherduck`, `ATTACH 'md:'`, and set
-   `preserve_insertion_order = FALSE`.
-3. Ensure the destination exists. Create the database and schema, then bootstrap
-   the table by running the source read (`bigquery_scan` or `bigquery_query`,
-   per `READ_MODE`) over a 1970-01-01 window (BigQuery prunes the partitioned
-   scan to nothing, so the probe is nearly free) with
-   `CREATE TABLE IF NOT EXISTS ... AS SELECT ... LIMIT 0`, which takes the result
-   schema without rows.
-4. Resolve the partition window. Priority: explicit `start_dt`+`end_dt`
-   (inclusive backfill range), then `target_dt` (single day), otherwise watermark
-   mode (`prev_max = MAX(partition column)`; load
-   `[prev_max + 1 - OVERLAP_DAYS, prev_max + 1]`; cold start at `COLD_START_DT`
-   when empty).
-5. For each day in the window, run one transaction: `DELETE` rows matching
-   `MD_DELETE_PREDICATE` for that day, then `INSERT` the day's source read
-   (`bigquery_scan(SCAN_TABLE, filter=...)` in scan mode, or
-   `bigquery_query(GCP_PROJECT_ID, QUERY)` in query mode). Commit on success,
-   roll back on error. Per-phase timing (DELETE, then BigQuery read plus
-   MotherDuck insert) is logged to stdout, which Flight logs capture.
-
-The DELETE plus INSERT per partition is what makes a re-run safe: re-loading a
-day clears its rows first, so you never get duplicates, and a failed day rolls
-back cleanly rather than leaving a half-loaded partition.
-
-## Caveats
-
-- **No credential-free smoke test.** Unlike the `sample_data` templates here,
-  this Flight needs a real BigQuery source: a GCP billing project and a
-  service-account key. There is no public dataset path that exercises the whole
-  flow without credentials.
-- **BigQuery costs money — scan is the cheaper default.** In scan mode,
-  `bigquery_scan` reads through the Storage Read API, billed on the storage-read
-  meter; the `SCAN_FILTER` row restriction on a partitioned column prunes
-  partitions so you only read the days you load. In query mode, `bigquery_query`
-  runs through the Jobs API, billed by bytes scanned (~5–6× the per-byte rate of
-  the storage-read meter) — push the date filter into `QUERY`'s WHERE on a
-  partitioned column so BigQuery still prunes. Either way, a read that scans the
-  full table every run gets expensive fast. Prefer scan unless you need GoogleSQL
-  (see [Which read mode?](#which-read-mode-bigquery_scan-vs-bigquery_query)).
-- **Predicate mirroring is a footgun.** `MD_DELETE_PREDICATE` must select exactly
-  the rows one partition's read produces. If the active read filter (`SCAN_FILTER`
-  or `QUERY`) filters on `event_source` but the DELETE does not, the DELETE clears
-  rows you are not re-loading and you lose data. Keep them in lockstep, and note
-  the quoting difference: the BigQuery-side `SCAN_FILTER`/`QUERY` use double quotes
-  for string literals, the DuckDB-side `MD_DELETE_PREDICATE` uses single quotes.
-- **Watermark and time zones.** The watermark is computed from
-  `MAX(PARTITION_DATE_COLUMN)`, a date, so it is timezone-free as long as the
-  column is a true partition DATE. Scan mode reads the stored DATE column
-  directly. In query mode, if your partition date is derived from a timestamp,
-  derive it the same way in `QUERY` every run (for example `DATE(event_timestamp)`
-  in a consistent zone), or the day boundaries will drift. A deployed Flight runs
-  in UTC; a local `uv run` uses your machine's timezone.
-- **`OVERLAP_DAYS` trades cost for freshness.** A larger overlap heals
-  later-arriving data but re-scans and re-loads more partitions every run. Set it
-  to the longest delay you expect for late rows, no more.
-- **Cold start can be large.** A watermark cold start loads a single day
-  (`COLD_START_DT`). To backfill history, run once with `start_dt`/`end_dt`
-  spanning the range before you rely on the watermark.
 
 ## Security
 

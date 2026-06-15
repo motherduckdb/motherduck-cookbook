@@ -56,6 +56,24 @@ loads the `dive.tsx` source with DuckDB `read_text()`, substitutes the database
 and `_mart` schema into the source, and creates or updates the Dive in MotherDuck
 with the `MD_CREATE_DIVE` / `MD_UPDATE_DIVE_CONTENT` functions.
 
+## Questions to answer
+
+- Which target domain(s) should the link graph and HN coverage focus on (`commoncrawl_domains`)?
+- Which MotherDuck database and base schema, and dev or prod (`DBT_DUCKDB_PATH`, `DBT_SCHEMA`, `--target`)?
+- Which Common Crawl snapshot, and how many HN stories per domain (`commoncrawl_snapshot`, `hackernews_max_stories_per_domain`)?
+- Is the large Common Crawl edges download acceptable (see Caveats), or should the scope be narrowed first?
+- Deploy the Dive, and as a preview or to production?
+- Is a MotherDuck account and token available, with access to the Hacker News share?
+
+## Caveats
+
+- The Common Crawl edges file is large (~14GB). `stg_commoncrawl__domain_edges` is materialized incrementally so it is not re-downloaded on every run; avoid a casual `--full-refresh` of that model.
+- `DBT_DUCKDB_PATH` and `DBT_SCHEMA` must match between the dbt build and the Dive deploy. If they differ, the Dive points at a database/`_mart` schema that the build did not populate and renders empty.
+- The Hacker News staging model attaches a MotherDuck share (`md:_share/hacker_news/...`); the run needs access to that share.
+- `scripts/deploy-dive.sh` requires the `duckdb` CLI and `jq` on PATH and `MOTHERDUCK_TOKEN` set; it exits early if any are missing.
+- The deploy expects a unique Dive title: if more than one Dive already shares the title it errors instead of guessing which to update. Use `PREVIEW_BRANCH` for non-production deploys.
+- `threads: 24` in `profiles.yml` is aggressive; lower it for smaller machines or plans.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -70,15 +88,6 @@ with the `MD_CREATE_DIVE` / `MD_UPDATE_DIVE_CONTENT` functions.
 | `MOTHERDUCK_TOKEN` (env) | MotherDuck access token for dbt and the Dive deploy. | a token from the MotherDuck UI |
 | `dives/backlinks-hn/dive.tsx` + `dive-manifest.json` | The Dive's React/SQL source and its title/description. | edit tiles, queries, title |
 | `PREVIEW_BRANCH` (env, deploy) | Appends a branch name to the Dive title so a preview does not overwrite production. | `$(git branch --show-current)` |
-
-## Questions to answer
-
-- Which target domain(s) should the link graph and HN coverage focus on (`commoncrawl_domains`)?
-- Which MotherDuck database and base schema, and dev or prod (`DBT_DUCKDB_PATH`, `DBT_SCHEMA`, `--target`)?
-- Which Common Crawl snapshot, and how many HN stories per domain (`commoncrawl_snapshot`, `hackernews_max_stories_per_domain`)?
-- Is the large Common Crawl edges download acceptable (see Caveats), or should the scope be narrowed first?
-- Deploy the Dive, and as a preview or to production?
-- Is a MotherDuck account and token available, with access to the Hacker News share?
 
 ## Run it
 
@@ -143,15 +152,6 @@ The script prints the deployed Dive URL.
 - [`scripts/deploy-dive.sh`](scripts/deploy-dive.sh) - deploys a Dive from `dives/<name>/` via the DuckDB CLI and the `MD_CREATE_DIVE` / `MD_UPDATE_DIVE_CONTENT` functions.
 - [`pyproject.toml`](pyproject.toml) / [`uv.lock`](uv.lock) - Python dependencies (dbt-duckdb) managed with `uv`.
 - [`assets/backlinks-hn-dive.png`](assets/backlinks-hn-dive.png) - screenshot of the deployed Dive.
-
-## Caveats
-
-- The Common Crawl edges file is large (~14GB). `stg_commoncrawl__domain_edges` is materialized incrementally so it is not re-downloaded on every run; avoid a casual `--full-refresh` of that model.
-- `DBT_DUCKDB_PATH` and `DBT_SCHEMA` must match between the dbt build and the Dive deploy. If they differ, the Dive points at a database/`_mart` schema that the build did not populate and renders empty.
-- The Hacker News staging model attaches a MotherDuck share (`md:_share/hacker_news/...`); the run needs access to that share.
-- `scripts/deploy-dive.sh` requires the `duckdb` CLI and `jq` on PATH and `MOTHERDUCK_TOKEN` set; it exits early if any are missing.
-- The deploy expects a unique Dive title: if more than one Dive already shares the title it errors instead of guessing which to update. Use `PREVIEW_BRANCH` for non-production deploys.
-- `threads: 24` in `profiles.yml` is aggressive; lower it for smaller machines or plans.
 
 ## Learn more
 

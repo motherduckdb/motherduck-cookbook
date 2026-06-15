@@ -86,6 +86,78 @@ publicly trusted certificate, so no custom CA is needed. Do not set
 `rejectUnauthorized: false`; it disables verification and exposes the connection
 to man-in-the-middle attacks.
 
+## How it works
+
+- `src/lib/motherduck.ts`: the shared `pg.Pool`, the `attachDatabasePool`
+  cleanup hook, and the `withClient` checkout/release helper.
+- `src/app/api/trips/route.ts` and `src/app/api/stats/route.ts`: the two API
+  handlers, including the `YYYY-MM-DD` validation and the parameterized `$1`/`$2`
+  aggregate.
+
+## Questions to answer
+
+- Which MotherDuck database and schema should the routes read from (default is `sample_data.nyc.taxi`)?
+- Which region is the account in, so the right `MOTHERDUCK_HOST` is set (US vs EU)?
+- What tables and columns do the API routes need to expose, and what query parameters drive them?
+- How will the token be provisioned in production: manual `vercel env add` or the MotherDuck Native Integration on Vercel?
+- What concurrency is expected, so the pool `max` and idle timeout can be tuned?
+
+## Caveats
+
+- The token is a credential. Keep it in `.env.local` (gitignored) for local dev
+  and in Vercel environment variables for deploy. Do not commit it or expose it
+  in client-side code; these queries run only in server-side API routes.
+- `src/lib/motherduck.ts` throws at import time if `MOTHERDUCK_TOKEN` is unset.
+  Locally that surfaces immediately; on Vercel a missing variable fails the
+  function at runtime, so set the env var before relying on the routes.
+- The pool is module-level so it can be reused across warm invocations, but
+  serverless instances are not shared. Under burst traffic many instances each
+  open up to `max: 10` connections; size `max` against your MotherDuck plan's
+  connection limits rather than assuming a single global pool.
+- Identifiers (table and column names) cannot be parameterized with `$1`. Only
+  values can. If a route needs a dynamic table or column name, validate it
+  against an allow-list instead of interpolating user input.
+- The stats route binds dates as timestamp strings (`YYYY-MM-DD 00:00:00`), and
+  the regex enforces that shape. If you loosen the input format, keep the bound
+  value a type MotherDuck can compare against `tpep_pickup_datetime`, or the
+  query errors or returns nothing.
+- The `nyc.taxi` data is historical, so `ORDER BY tpep_pickup_datetime DESC` in
+  `/api/trips` returns the latest rows in the dataset, not today's trips. Pick a
+  date range that actually exists in the data when testing `/api/stats`.
+
+## What you'll adjust
+
+| Setting | Purpose | Options / example |
+| --- | --- | --- |
+| `MOTHERDUCK_TOKEN` env var | MotherDuck access token used as the connection password | Service-account token from your MotherDuck settings |
+| `MOTHERDUCK_HOST` env var | Postgres endpoint host, selects the region | `pg.us-east-1-aws.motherduck.com` (default), `pg.eu-central-1-aws.motherduck.com` for EU |
+| `MOTHERDUCK_DB` env var | Database in the connection string | `sample_data` (default), or your own database |
+| `connectionString` in `src/lib/motherduck.ts` | How the pool authenticates, fixed at port `5432` | `postgresql://user:${token}@${host}:5432/${db}` |
+| Pool options in `src/lib/motherduck.ts` | Pooling behavior for serverless concurrency | `max: 10`, `idleTimeoutMillis: 5000` |
+| `ssl` option in `src/lib/motherduck.ts` | TLS verification level | `{ rejectUnauthorized: true }` (equivalent to `sslmode=verify-full`) |
+| SQL in `src/app/api/trips/route.ts` | The "recent trips" query and row limit | Change `FROM nyc.taxi`, columns, `LIMIT 20` |
+| SQL in `src/app/api/stats/route.ts` | The aggregate query and its `$1`/`$2` date params | Swap the table, columns, and the `datePattern` validation regex |
+
+## Run it
+
+Prerequisites: Node.js v18+, a MotherDuck account and access token, and (for deploy) a Vercel account.
+
+```sh
+npm install
+cp .env.local.example .env.local   # then set MOTHERDUCK_TOKEN
+npm run dev                         # http://localhost:3000
+```
+
+Build and deploy to Vercel:
+
+```sh
+npm run build
+npx vercel deploy
+npx vercel env add MOTHERDUCK_TOKEN   # if not using the MotherDuck Native Integration
+```
+
+If you install the [MotherDuck Native Integration](https://vercel.com/marketplace/motherduck) on Vercel, the access token is injected as an environment variable automatically.
+
 ## Security
 
 Always sanitize anything that comes from a request before it reaches SQL. This
@@ -123,47 +195,6 @@ const result = await client.query(
 );
 ```
 
-## What you'll adjust
-
-| Setting | Purpose | Options / example |
-| --- | --- | --- |
-| `MOTHERDUCK_TOKEN` env var | MotherDuck access token used as the connection password | Service-account token from your MotherDuck settings |
-| `MOTHERDUCK_HOST` env var | Postgres endpoint host, selects the region | `pg.us-east-1-aws.motherduck.com` (default), `pg.eu-central-1-aws.motherduck.com` for EU |
-| `MOTHERDUCK_DB` env var | Database in the connection string | `sample_data` (default), or your own database |
-| `connectionString` in `src/lib/motherduck.ts` | How the pool authenticates, fixed at port `5432` | `postgresql://user:${token}@${host}:5432/${db}` |
-| Pool options in `src/lib/motherduck.ts` | Pooling behavior for serverless concurrency | `max: 10`, `idleTimeoutMillis: 5000` |
-| `ssl` option in `src/lib/motherduck.ts` | TLS verification level | `{ rejectUnauthorized: true }` (equivalent to `sslmode=verify-full`) |
-| SQL in `src/app/api/trips/route.ts` | The "recent trips" query and row limit | Change `FROM nyc.taxi`, columns, `LIMIT 20` |
-| SQL in `src/app/api/stats/route.ts` | The aggregate query and its `$1`/`$2` date params | Swap the table, columns, and the `datePattern` validation regex |
-
-## Questions to answer
-
-- Which MotherDuck database and schema should the routes read from (default is `sample_data.nyc.taxi`)?
-- Which region is the account in, so the right `MOTHERDUCK_HOST` is set (US vs EU)?
-- What tables and columns do the API routes need to expose, and what query parameters drive them?
-- How will the token be provisioned in production: manual `vercel env add` or the MotherDuck Native Integration on Vercel?
-- What concurrency is expected, so the pool `max` and idle timeout can be tuned?
-
-## Run it
-
-Prerequisites: Node.js v18+, a MotherDuck account and access token, and (for deploy) a Vercel account.
-
-```sh
-npm install
-cp .env.local.example .env.local   # then set MOTHERDUCK_TOKEN
-npm run dev                         # http://localhost:3000
-```
-
-Build and deploy to Vercel:
-
-```sh
-npm run build
-npx vercel deploy
-npx vercel env add MOTHERDUCK_TOKEN   # if not using the MotherDuck Native Integration
-```
-
-If you install the [MotherDuck Native Integration](https://vercel.com/marketplace/motherduck) on Vercel, the access token is injected as an environment variable automatically.
-
 ## Files
 
 - [`src/lib/motherduck.ts`](src/lib/motherduck.ts) - the shared `pg.Pool` (reads `MOTHERDUCK_TOKEN`/`MOTHERDUCK_HOST`/`MOTHERDUCK_DB`), the `attachDatabasePool` cleanup hook, and the `withClient` checkout/release helper.
@@ -174,35 +205,7 @@ If you install the [MotherDuck Native Integration](https://vercel.com/marketplac
 - [`next.config.ts`](next.config.ts) - Next.js config (currently empty defaults).
 - [`tsconfig.json`](tsconfig.json) - TypeScript config, including the `@/*` to `src/*` path alias.
 
-## Caveats
+## Learn more
 
-- The token is a credential. Keep it in `.env.local` (gitignored) for local dev
-  and in Vercel environment variables for deploy. Do not commit it or expose it
-  in client-side code; these queries run only in server-side API routes.
-- `src/lib/motherduck.ts` throws at import time if `MOTHERDUCK_TOKEN` is unset.
-  Locally that surfaces immediately; on Vercel a missing variable fails the
-  function at runtime, so set the env var before relying on the routes.
-- The pool is module-level so it can be reused across warm invocations, but
-  serverless instances are not shared. Under burst traffic many instances each
-  open up to `max: 10` connections; size `max` against your MotherDuck plan's
-  connection limits rather than assuming a single global pool.
-- Identifiers (table and column names) cannot be parameterized with `$1`. Only
-  values can. If a route needs a dynamic table or column name, validate it
-  against an allow-list instead of interpolating user input.
-- The stats route binds dates as timestamp strings (`YYYY-MM-DD 00:00:00`), and
-  the regex enforces that shape. If you loosen the input format, keep the bound
-  value a type MotherDuck can compare against `tpep_pickup_datetime`, or the
-  query errors or returns nothing.
-- The `nyc.taxi` data is historical, so `ORDER BY tpep_pickup_datetime DESC` in
-  `/api/trips` returns the latest rows in the dataset, not today's trips. Pick a
-  date range that actually exists in the data when testing `/api/stats`.
-
-## How it works / Learn more
-
-- `src/lib/motherduck.ts`: the shared `pg.Pool`, the `attachDatabasePool`
-  cleanup hook, and the `withClient` checkout/release helper.
-- `src/app/api/trips/route.ts` and `src/app/api/stats/route.ts`: the two API
-  handlers, including the `YYYY-MM-DD` validation and the parameterized `$1`/`$2`
-  aggregate.
 - Postgres endpoint reference: [authenticating and connecting via the Postgres endpoint](https://motherduck.com/docs/key-tasks/authenticating-and-connecting-to-motherduck/postgres-endpoint).
 - For deeper MotherDuck or DuckDB SQL questions, use the `ask_docs_question` MCP tool or the MotherDuck docs.

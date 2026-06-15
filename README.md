@@ -108,14 +108,20 @@ tags: [dbt]                     # curated lowercase slugs: significant third-par
 The body follows a consistent, skimmable structure:
 
 1. `# <title>` and one paragraph on what it is and the MotherDuck pattern it shows.
-2. `## What you'll adjust` - a table of the real knobs found in the code, each with
-   its purpose and options or an example value.
+2. `## How it works` - the concrete pattern, architecture, or files that explain
+   what the example does before readers start changing values.
 3. `## Questions to answer` - the inputs needed before adapting the example.
-4. `## Run it` - exact commands for the project's runtime (plus a
+4. `## Caveats` - footguns, limitations, and cases where the example is the
+   wrong tool.
+5. `## What you'll adjust` - a table of the real knobs found in the code, each
+   with its purpose and options or an example value.
+6. `## Run it` - exact commands for the project's runtime (plus a
    `### Deploy as a Flight` subsection for any flight-capable example).
-5. `## How it works / Learn more` - progressive disclosure: links to extra
-   in-folder files, and pointers to the MotherDuck MCP guides (`get_flight_guide`,
-   `get_dive_guide`) and `ask_docs_question` instead of duplicating them.
+7. `## Security` - credential handling, SQL safety, access-control notes, and
+   other security-specific concerns when relevant.
+8. `## Learn more` - progressive disclosure: links to extra in-folder files, and
+   pointers to the MotherDuck MCP guides (`get_flight_guide`, `get_dive_guide`)
+   and `ask_docs_question` instead of duplicating them.
 
 ## Authoring and validation
 

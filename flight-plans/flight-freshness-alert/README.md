@@ -26,6 +26,74 @@ the top of `flight.py` (much like you replace `repo_rows()` in
 and fires one Slack message. That doubles as a built-in test that your webhook is
 wired up. Swap `CHECKS` for your own tables before you add a schedule.
 
+## How it works
+
+`flight.py` runs a fixed sequence; only the `CHECKS` list changes its inputs:
+
+1. Connect to MotherDuck (`md:`).
+2. For each check, run `SELECT max(column), date_diff('hour', max(column), now())`
+   and assign `pass` / `warn` / `error` from the two thresholds. The comparison
+   is done in SQL against the runtime clock, so it follows the runtime timezone
+   (see [Time zones](#time-zones)). A missing table/column or an empty table is
+   recorded as `error` for that one check, not raised, so a single typo does not
+   hide the other checks.
+3. Write one ledger row per check to `RESULTS_TABLE` (its database and schema are
+   created on first run, since `sample_data` is read-only).
+4. Print the report. If any check is at or above `ALERT_LEVEL` and
+   `SLACK_WEBHOOK_URL` is set, POST a Slack Block Kit message listing each stale
+   table with its lag and severity.
+
+## Time zones
+
+Freshness is `now() - MAX(column)`, computed in the database, so the comparison
+uses the **runtime's clock and timezone**. A deployed Flight runs in **UTC**; a
+local `uv run` uses your machine's timezone. Two consequences:
+
+- **`TIMESTAMPTZ` columns are unambiguous.** They carry an offset, so the age and
+  the stored `max_timestamp` are correct no matter where the code runs. Prefer
+  these.
+- **Naive `TIMESTAMP` columns are read in the runtime timezone.** A value like
+  `2024-01-01 09:00:00` with no offset is treated as 09:00 *in the runtime tz*
+  (UTC on a Flight). If your naive timestamps are actually stored in another
+  timezone, the computed age is off by that UTC offset, and the `max_timestamp`
+  written to the ledger reflects the runtime tz. Deploy as a Flight (UTC) for
+  consistent results, or store source timestamps as `TIMESTAMPTZ`.
+
+**Why `pytz` is a dependency.** Reading a `TIMESTAMPTZ` value back into Python as a
+tz-aware `datetime` requires `pytz`. The duckdb wheel ships with no required
+dependencies (timezone math inside the engine uses the bundled ICU extension), so
+`pytz` is not installed automatically; without it, a check on a `TIMESTAMPTZ`
+column fails with `Required module 'pytz' failed to import`. It is pinned next to
+`duckdb` in `requirements.txt` so checks work on tz-aware columns.
+
+## Questions to answer
+
+- Which tables need monitoring, and which column on each records when its rows arrive (load time, event time, ingest time)?
+- What `warn`/`error` age thresholds match each table's expected update cadence?
+- Should the alert fire on `warn`, or only on `error`?
+- Which Slack channel receives the alert, and is its Incoming Webhook stored as a MotherDuck secret?
+- Which service account token can read the checked tables and write the ledger?
+- What schedule (cron, UTC) matches how often the data should refresh?
+
+## Caveats
+
+- **The default `CHECKS` always alert.** `sample_data` is a read-only ~2022
+  snapshot, so both default checks report `error` every run. This is intentional:
+  it proves a fresh deploy can reach Slack. Replace `CHECKS` with your own tables
+  before adding a schedule, or you will get a Slack message on every run.
+- **Pick the right column.** Freshness is `MAX(column)`. Use the column that
+  records when a row landed (load, ingest, or event time), not an unrelated date.
+- **Failures degrade per check.** A missing table/column or an empty table is
+  recorded as `error` for that check with the reason, rather than aborting the run.
+- **A broken webhook fails the run.** A configured `SLACK_WEBHOOK_URL` that returns
+  an error raises after the ledger is written, so a broken alert path shows up as a
+  FAILED run instead of silently dropping the alert.
+- **The ledger needs a writable database.** `RESULTS_TABLE` must live in a database
+  you can write to; the Flight creates `flights_demo` if it is missing. Set
+  `RESULTS_TABLE = ""` to skip the ledger.
+- **Keep secrets out of code.** Put the webhook in a MotherDuck secret and select a
+  token on the Flight; never hard-code either.
+
 ## What you'll adjust
 
 The freshness checks live in the `CHECKS` list at the top of `flight.py`; two
@@ -42,15 +110,6 @@ and the MotherDuck token come from outside the code.
 | `RESULTS_TABLE` | top of `flight.py` | `flights_demo.main.freshness_check_runs` | Audit ledger target as `database.schema.table`. Must be a writable database. `""` disables the ledger. |
 | `SLACK_WEBHOOK_URL` | Flight secret / env var | (unset) | Slack Incoming Webhook URL. Provide it through a MotherDuck secret, never in code. As a Flight the secret arrives as `<secret_name>_SLACK_WEBHOOK_URL`; `flight.py` resolves either name. Unset → the run prints the report and skips Slack. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth. Select a token on the Flight; never hard-code it. |
-
-## Questions to answer
-
-- Which tables need monitoring, and which column on each records when its rows arrive (load time, event time, ingest time)?
-- What `warn`/`error` age thresholds match each table's expected update cadence?
-- Should the alert fire on `warn`, or only on `error`?
-- Which Slack channel receives the alert, and is its Incoming Webhook stored as a MotherDuck secret?
-- Which service account token can read the checked tables and write the ledger?
-- What schedule (cron, UTC) matches how often the data should refresh?
 
 ## Run it
 
@@ -146,65 +205,6 @@ Then edit `CHECKS` to your real tables and add a schedule (for example
 `0 * * * *`, hourly) by updating the Flight's `schedule_cron` with
 `MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and do not create a new
 Flight version.
-
-## How it works
-
-`flight.py` runs a fixed sequence; only the `CHECKS` list changes its inputs:
-
-1. Connect to MotherDuck (`md:`).
-2. For each check, run `SELECT max(column), date_diff('hour', max(column), now())`
-   and assign `pass` / `warn` / `error` from the two thresholds. The comparison
-   is done in SQL against the runtime clock, so it follows the runtime timezone
-   (see [Time zones](#time-zones)). A missing table/column or an empty table is
-   recorded as `error` for that one check, not raised, so a single typo does not
-   hide the other checks.
-3. Write one ledger row per check to `RESULTS_TABLE` (its database and schema are
-   created on first run, since `sample_data` is read-only).
-4. Print the report. If any check is at or above `ALERT_LEVEL` and
-   `SLACK_WEBHOOK_URL` is set, POST a Slack Block Kit message listing each stale
-   table with its lag and severity.
-
-## Time zones
-
-Freshness is `now() - MAX(column)`, computed in the database, so the comparison
-uses the **runtime's clock and timezone**. A deployed Flight runs in **UTC**; a
-local `uv run` uses your machine's timezone. Two consequences:
-
-- **`TIMESTAMPTZ` columns are unambiguous.** They carry an offset, so the age and
-  the stored `max_timestamp` are correct no matter where the code runs. Prefer
-  these.
-- **Naive `TIMESTAMP` columns are read in the runtime timezone.** A value like
-  `2024-01-01 09:00:00` with no offset is treated as 09:00 *in the runtime tz*
-  (UTC on a Flight). If your naive timestamps are actually stored in another
-  timezone, the computed age is off by that UTC offset, and the `max_timestamp`
-  written to the ledger reflects the runtime tz. Deploy as a Flight (UTC) for
-  consistent results, or store source timestamps as `TIMESTAMPTZ`.
-
-**Why `pytz` is a dependency.** Reading a `TIMESTAMPTZ` value back into Python as a
-tz-aware `datetime` requires `pytz`. The duckdb wheel ships with no required
-dependencies (timezone math inside the engine uses the bundled ICU extension), so
-`pytz` is not installed automatically; without it, a check on a `TIMESTAMPTZ`
-column fails with `Required module 'pytz' failed to import`. It is pinned next to
-`duckdb` in `requirements.txt` so checks work on tz-aware columns.
-
-## Caveats
-
-- **The default `CHECKS` always alert.** `sample_data` is a read-only ~2022
-  snapshot, so both default checks report `error` every run. This is intentional:
-  it proves a fresh deploy can reach Slack. Replace `CHECKS` with your own tables
-  before adding a schedule, or you will get a Slack message on every run.
-- **Pick the right column.** Freshness is `MAX(column)`. Use the column that
-  records when a row landed (load, ingest, or event time), not an unrelated date.
-- **Failures degrade per check.** A missing table/column or an empty table is
-  recorded as `error` for that check with the reason, rather than aborting the run.
-- **A broken webhook fails the run.** A configured `SLACK_WEBHOOK_URL` that returns
-  an error raises after the ledger is written, so a broken alert path shows up as a
-  FAILED run instead of silently dropping the alert.
-- **The ledger needs a writable database.** `RESULTS_TABLE` must live in a database
-  you can write to; the Flight creates `flights_demo` if it is missing. Set
-  `RESULTS_TABLE = ""` to skip the ledger.
-- **Keep secrets out of code.** Put the webhook in a MotherDuck secret and select a
-  token on the Flight; never hard-code either.
 
 ## Security
 

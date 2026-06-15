@@ -76,6 +76,23 @@ FROM winelist
 WHERE vintage > 1000;
 ```
 
+## Questions to answer
+
+- What CSV (or other source) are you loading, and where does it live (local upload, S3, HTTPS)?
+- Which database and schema should the resulting table live in?
+- Which columns need cleaning, and what are their real formats (delimiters, currency symbols, units)?
+- Do you want to keep the cleaned result as a new table (`CREATE TABLE ... AS`) or just explore?
+- What analysis question are you trying to answer, and which columns drive the ranking or aggregation?
+
+## Caveats
+
+- **The exercise depends on a table the script does not build.** Running the final `with cte_cheap_but_good ... ` block before creating `winelist_clean` fails with a "table does not exist" (Catalog) error. Persist the cleaned `SELECT` as `winelist_clean` first.
+- **Column names are case- and whitespace-sensitive.** The raw CSV header has `Wine name`, `Quantity`, and a price column written as ` Offer Price ` (note the surrounding spaces). `read_csv_auto` normalizes some of this, but the script refers to identifiers like `"Wine Name"` and `"Offer price"`. If a `SELECT` errors on an unknown column, run `SUMMARIZE winelist` (or `DESCRIBE winelist`) and copy the exact column name, including spaces, into double quotes. Double quotes are for identifiers; single quotes are for string literals like `'$'`.
+- **The unit-size parser assumes a fixed format.** `substr(..., length(...) - instr(..., 'x') - 2)` hard-codes a 2-character trailing unit (`cl`). A value like `1x150cl` parses, but a different unit (`ml`, `L`) or a missing `x` delimiter will silently produce a wrong number or fail the `integer` cast. Validate `qty` and `volume_cl` against the source before trusting the derived prices.
+- **`price_per_75cl` divides by `qty * volume_cl`.** If either parses to `0` or `NULL`, you get a division-by-zero or `NULL`. Confirm the parse step is clean before computing the ratio.
+- **`WHERE vintage > 1000` is a blunt filter,** kept only to drop obviously-junk vintages. It is not a real validity check; adjust it for your data rather than assuming it cleans everything.
+- **The example is built for the UI's run-one-query-at-a-time flow.** Running the whole `script.sql` in a CLI in one go defeats the inspect-each-step purpose and surfaces the `winelist_clean` error immediately.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -87,14 +104,6 @@ WHERE vintage > 1000;
 | `"Offer price"` cleanup | `replace(...)` strips `$` and `,` before casting to `decimal(10,2)` | Change the symbols stripped, the precision/scale, and the source column name |
 | `WHERE vintage > 1000` | Filter that removes obvious bad rows | Replace with your own validity filter, or drop it |
 | Exercise thresholds | The analysis query filters `Vintage >= 1990` and ranks on `coalesce(coalesce("WA score","Vinous score"),-1)` and `price_per_bottle` | Change the year cutoff, scoring columns, and ranking metric for your question |
-
-## Questions to answer
-
-- What CSV (or other source) are you loading, and where does it live (local upload, S3, HTTPS)?
-- Which database and schema should the resulting table live in?
-- Which columns need cleaning, and what are their real formats (delimiters, currency symbols, units)?
-- Do you want to keep the cleaned result as a new table (`CREATE TABLE ... AS`) or just explore?
-- What analysis question are you trying to answer, and which columns drive the ranking or aggregation?
 
 ## Run it
 
@@ -110,15 +119,6 @@ You can also run the script from the DuckDB or MotherDuck CLI, but it is written
 
 - [`script.sql`](script.sql) - the guided SQL walkthrough: loads the CSV, runs `SUMMARIZE`, builds up the cleaning `SELECT` step by step (drop bad rows, parse `Unit size`, normalize the price), and ends with the exercise query.
 - [`winelist_sample.csv`](winelist_sample.csv) - the intentionally messy source data: ~2,450 rows of wine merchant offers with country, region, producer, wine name, vintage, unit size (e.g. `6x75cl`), WA and Vinous scores, quantity, and a dollar-formatted offer price.
-
-## Caveats
-
-- **The exercise depends on a table the script does not build.** Running the final `with cte_cheap_but_good ... ` block before creating `winelist_clean` fails with a "table does not exist" (Catalog) error. Persist the cleaned `SELECT` as `winelist_clean` first.
-- **Column names are case- and whitespace-sensitive.** The raw CSV header has `Wine name`, `Quantity`, and a price column written as ` Offer Price ` (note the surrounding spaces). `read_csv_auto` normalizes some of this, but the script refers to identifiers like `"Wine Name"` and `"Offer price"`. If a `SELECT` errors on an unknown column, run `SUMMARIZE winelist` (or `DESCRIBE winelist`) and copy the exact column name, including spaces, into double quotes. Double quotes are for identifiers; single quotes are for string literals like `'$'`.
-- **The unit-size parser assumes a fixed format.** `substr(..., length(...) - instr(..., 'x') - 2)` hard-codes a 2-character trailing unit (`cl`). A value like `1x150cl` parses, but a different unit (`ml`, `L`) or a missing `x` delimiter will silently produce a wrong number or fail the `integer` cast. Validate `qty` and `volume_cl` against the source before trusting the derived prices.
-- **`price_per_75cl` divides by `qty * volume_cl`.** If either parses to `0` or `NULL`, you get a division-by-zero or `NULL`. Confirm the parse step is clean before computing the ratio.
-- **`WHERE vintage > 1000` is a blunt filter,** kept only to drop obviously-junk vintages. It is not a real validity check; adjust it for your data rather than assuming it cleans everything.
-- **The example is built for the UI's run-one-query-at-a-time flow.** Running the whole `script.sql` in a CLI in one go defeats the inspect-each-step purpose and surfaces the `winelist_clean` error immediately.
 
 ## Learn more
 

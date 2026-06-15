@@ -39,6 +39,26 @@ A local Grafana setup that connects to MotherDuck through the `motherduck-duckdb
 - `provisioning/dashboards/dashboards.yaml`: registers the file provider that loads every dashboard from `/etc/grafana/provisioning/dashboards/json`.
 - `provisioning/dashboards/json/`: holds the dashboard definitions. `nyc_services.json` groups `sample_data.nyc.service_requests` by `created_date`; `nyc_rideshare.json` groups `sample_data.nyc.rideshare` by `request_datetime`.
 
+## Questions to answer
+
+- Which MotherDuck database(s) and schema(s) should be attached (the `initSql` `ATTACH` target)?
+- Which tables or queries power the dashboards, and what is the time column for time-series panels?
+- Is a MotherDuck access token available, and should it be a read-scaling token (recommended for read-only dashboard traffic)?
+- Should this stay a local Docker setup, or be adapted for a hosted Grafana deployment?
+- Are there existing dashboard JSON exports to drop into `provisioning/dashboards/json/`?
+
+## Caveats
+
+- **Token in the environment, not the config.** The token is injected through `$__env{motherduck_token}` and the Docker `-e` flag at runtime. Do not hardcode it into `sample_data.yaml`, which is committed to the repo.
+- **Token must be exported before `setup.sh`.** If `motherduck_token` is unset the script exits before starting Grafana. If you start Grafana some other way without the variable, the datasource provisions but every query fails to authenticate.
+- **Windows is not supported by the script.** It exits on `CYGWIN`/`MINGW`/`MSYS`. On Windows, download and unzip the plugin into the Grafana plugin folder manually and run the container yourself.
+- **Port 3000 must be free.** The script stops a prior Grafana container on that port, but if anything else is listening on 3000 it aborts. Change the `-p` mapping if 3000 is taken.
+- **Unsigned plugin.** The datasource is loaded via `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`. Grafana will refuse to load it without that allow-list entry.
+- **Time-series panels need a time column.** The panel format defaults to a table view; switch it to **time series** and make sure the query returns a timestamp/date column (`created_date`, `request_datetime`), or the panel renders nothing useful.
+- **Builder mode does not write DuckDB SQL for you.** Switch the query editor to **code** mode to run DuckDB syntax; the visual builder will not produce the MotherDuck-specific queries.
+- **`plugins/` is downloaded, not committed.** A fresh clone has no plugin until `setup.sh` runs and reaches GitHub; an offline machine cannot provision the datasource.
+- **`sample_data` is a public MotherDuck share.** The example dashboards read from it. To query your own data, change the `initSql` `ATTACH` target and the panel `rawSql` to your database and tables.
+
 ## What you'll adjust
 
 | Setting | Purpose | Options / example |
@@ -52,14 +72,6 @@ A local Grafana setup that connects to MotherDuck through the `motherduck-duckdb
 | `provisioning/dashboards/dashboards.yaml` `path` | Where Grafana looks for dashboard JSON inside the container | `/etc/grafana/provisioning/dashboards/json` |
 | Grafana port mapping in `setup.sh` | Host port Grafana is published on | `-p 3000:3000` |
 | Grafana image tag in `setup.sh` | Grafana version that runs in the container | `grafana/grafana:latest-ubuntu` |
-
-## Questions to answer
-
-- Which MotherDuck database(s) and schema(s) should be attached (the `initSql` `ATTACH` target)?
-- Which tables or queries power the dashboards, and what is the time column for time-series panels?
-- Is a MotherDuck access token available, and should it be a read-scaling token (recommended for read-only dashboard traffic)?
-- Should this stay a local Docker setup, or be adapted for a hosted Grafana deployment?
-- Are there existing dashboard JSON exports to drop into `provisioning/dashboards/json/`?
 
 ## Run it
 
@@ -99,18 +111,6 @@ To add your own dashboard, export it from the Grafana UI (the **Export** button,
   - [`provisioning/dashboards/json/`](provisioning/dashboards/json/) - the example dashboard definitions (2 files): `nyc_services.json` (NYC Services, service requests by `created_date`) and `nyc_rideshare.json` (NYC_rideshare, rideshare totals).
 - [`image.png`](image.png) - screenshot showing where to set the time-series format and the code-mode query editor when building a panel.
 - `.gitignore` - excludes the downloaded `plugins/` directory and `.DS_Store`, so the plugin is fetched fresh by `setup.sh` and never committed.
-
-## Caveats
-
-- **Token in the environment, not the config.** The token is injected through `$__env{motherduck_token}` and the Docker `-e` flag at runtime. Do not hardcode it into `sample_data.yaml`, which is committed to the repo.
-- **Token must be exported before `setup.sh`.** If `motherduck_token` is unset the script exits before starting Grafana. If you start Grafana some other way without the variable, the datasource provisions but every query fails to authenticate.
-- **Windows is not supported by the script.** It exits on `CYGWIN`/`MINGW`/`MSYS`. On Windows, download and unzip the plugin into the Grafana plugin folder manually and run the container yourself.
-- **Port 3000 must be free.** The script stops a prior Grafana container on that port, but if anything else is listening on 3000 it aborts. Change the `-p` mapping if 3000 is taken.
-- **Unsigned plugin.** The datasource is loaded via `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`. Grafana will refuse to load it without that allow-list entry.
-- **Time-series panels need a time column.** The panel format defaults to a table view; switch it to **time series** and make sure the query returns a timestamp/date column (`created_date`, `request_datetime`), or the panel renders nothing useful.
-- **Builder mode does not write DuckDB SQL for you.** Switch the query editor to **code** mode to run DuckDB syntax; the visual builder will not produce the MotherDuck-specific queries.
-- **`plugins/` is downloaded, not committed.** A fresh clone has no plugin until `setup.sh` runs and reaches GitHub; an offline machine cannot provision the datasource.
-- **`sample_data` is a public MotherDuck share.** The example dashboards read from it. To query your own data, change the `initSql` `ATTACH` target and the panel `rawSql` to your database and tables.
 
 ## Learn more
 

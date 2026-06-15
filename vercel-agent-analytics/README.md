@@ -42,14 +42,6 @@ Why this shape:
 - **Native MotherDuck table**: the simplest write path and the fastest reads. If you want open Parquet under the hood and snapshot isolation instead, see the DuckLake variant note in Caveats.
 - **Classifier in code, rules in YAML**: `bots.yaml` is the source of truth for AI identification. Update it and redeploy; the raw payload is stored on every row so you can reclassify history in SQL.
 
-## Security
-
-- **HMAC verification is mandatory.** `src/signature.ts` recomputes HMAC-SHA1 of the raw body with `VERCEL_DRAIN_SECRET` and compares it with the `x-vercel-signature` header using a constant-time `timingSafeEqual`. A missing or mismatched signature returns `401` and nothing is written. The secret in the Vercel drain config must match `VERCEL_DRAIN_SECRET` exactly, otherwise every delivery is rejected.
-- **Verification happens on the raw body before parsing.** Sign the unmodified body bytes; the local test script does this with `openssl dgst -sha1 -hmac`. Any middleware that re-serializes the body before it reaches the handler will break the signature.
-- **The collector builds SQL by string concatenation, not bound parameters.** String values are escaped via `sqlStr` (doubling single quotes) and identifiers via `quoteIdent` (doubling double quotes), and `MD_DESTINATION` is validated to be exactly `<database>.<schema>`. This is the trust boundary that keeps log content from breaking out of the `INSERT`. If you add columns or new value types, route them through `sqlStr` / `sqlTs` / `quoteIdent`, do not interpolate raw strings.
-- **Do not put secrets in `vercel.json` or commit them.** `MOTHERDUCK_TOKEN` and `VERCEL_DRAIN_SECRET` are read from the environment only.
-- **Client IPs are anonymized by default.** `anonymizeIp` zeroes the last IPv4 octet (`203.0.113.42` becomes `203.0.113.0`) before insert. IPv6 and non-IPv4 strings pass through unchanged, so adjust the function if you need IPv6 handling or full IPs for a legitimate reason.
-
 ## How it works
 
 - `src/signature.ts`: HMAC-SHA1 verification of the raw body, constant-time comparison.
@@ -84,11 +76,33 @@ Save `sql/02_dive_queries.sql` as a MotherDuck Dive. Each block is one tile:
 - Daily AI share of traffic, last 30 days.
 - Top pages by AI category, last 24h.
 
-The queries default to `agent_analytics.raw.vercel_request_logs`; if you changed `MD_DESTINATION` or `MD_TABLE`, update the identifiers in the file before saving it. For Dive authoring, sharing, and embedding, run the `get_dive_guide` MCP tool.
+The queries default to `agent_analytics.raw.vercel_request_logs`; if you changed `MD_DESTINATION` or `MD_TABLE`, update the identifiers in the file before saving it.
 
 ## When to turn on `BOTS_ONLY`
 
 Start with `BOTS_ONLY=false` so you have a real baseline that includes human traffic: you can measure AI share of traffic, see which pages humans land on from AI UIs, and so on. Flip it to `true` once the table has grown large enough that dropping non-AI rows is worth it. Because the raw payload is not retained for dropped rows, you cannot recover human traffic after the fact, so keep the baseline long enough first.
+
+## Questions to answer
+
+- Which Vercel project's traffic should be captured, and is there permission to create a log drain on it?
+- Target MotherDuck database and schema (`MD_DESTINATION`) and table name (`MD_TABLE`).
+- All traffic for a baseline, or AI-only (`BOTS_ONLY`)? Start with all traffic, see "When to turn on BOTS_ONLY".
+- Which AI crawlers, agents, and AI referers matter, so `bots.yaml` can be tuned.
+- Should client IPs be anonymized (the default) or kept in full.
+- Where the MotherDuck token and the shared drain secret will be stored as Vercel environment variables (never commit them to `vercel.json` or the repo).
+
+## Caveats
+
+- **Cold start**: the first invocation after idle pays a roughly 500 ms to 1 s MotherDuck extension load. Vercel Fluid Compute keeps functions warm well enough that this is rare in practice. For high-QPS sites, ping the function every few minutes or enable always-warm via Vercel's Fluid config.
+- **`HOME` can be empty on Vercel**: MotherDuck needs a writable extension cache. `src/db.ts` pins `HOME` and `DUCKDB_EXTENSION_DIRECTORY` to a temp path; if you change that code, keep it writable or the connection fails silently on cold start.
+- **Bundle size**: `@duckdb/node-api` ships a native binary. Fluid Compute gives you the headroom; classic Serverless Functions may hit the 50 MB zipped limit.
+- **No appender on native MotherDuck tables (yet)**: the example uses a multi-row `INSERT` instead. With roughly 500 rows per batch that is one network round-trip per drain POST, which is plenty fast. If you need the appender path or open Parquet storage with snapshot isolation, build the DuckLake variant of this collector instead (run `ask_docs_question` for DuckLake).
+- **At-least-once delivery**: on a 5xx response Vercel redelivers the batch, and the handler deliberately returns `503` on a failed write so Vercel retries. If you care about exact counts, dedupe on `event_id` in your queries.
+- **Agentic browsers that spoof user agents**: the classifier only sees what the bot tells it. AI agents using plain Chromium UAs fall into the `null` bucket and are counted as human unless their referer matches.
+- **`bots.yaml` must be bundled**: `vercel.json` sets `includeFiles: "bots.yaml"`. If you remove that, `src/classify.ts` throws "bots.yaml not found" at cold start and the function fails.
+- **Don't sign or transform the body before the handler**: signature verification runs on the raw bytes. Any body rewrite breaks the HMAC check and every delivery returns `401`.
+- **`INSERT` column order is load-bearing**: the value tuples in `src/db.ts` must match the `CREATE TABLE` order in `sql/01_setup.sql`. Adding a column means editing both, in the same order.
+- **`MD_DESTINATION` parsing is strict**: it must be exactly `<database>.<schema>` with two non-empty parts, or the function throws at cold start. A bare database name or a three-part name is rejected.
 
 ## What you'll adjust
 
@@ -105,15 +119,6 @@ Start with `BOTS_ONLY=false` so you have a real baseline that includes human tra
 | `anonymizeIp` (`src/handler.ts`) | Zeroes the last IPv4 octet before insert | remove or change if you need full IPs or IPv6 handling |
 | `maxDuration` / `includeFiles` (`vercel.json`) | Function timeout and which non-code files get bundled | `maxDuration: 30`; `includeFiles: "bots.yaml"` |
 | `PORT` (env, local only) | Port for the local dev harness `src/local-server.ts` | default `8787` |
-
-## Questions to answer
-
-- Which Vercel project's traffic should be captured, and is there permission to create a log drain on it?
-- Target MotherDuck database and schema (`MD_DESTINATION`) and table name (`MD_TABLE`).
-- All traffic for a baseline, or AI-only (`BOTS_ONLY`)? Start with all traffic, see "When to turn on BOTS_ONLY".
-- Which AI crawlers, agents, and AI referers matter, so `bots.yaml` can be tuned.
-- Should client IPs be anonymized (the default) or kept in full.
-- Where the MotherDuck token and the shared drain secret will be stored as Vercel environment variables (never commit them to `vercel.json` or the repo).
 
 ## Run it
 
@@ -160,6 +165,14 @@ SELECT * FROM agent_analytics.raw.vercel_request_logs
 ORDER BY event_ts DESC LIMIT 20;
 ```
 
+## Security
+
+- **HMAC verification is mandatory.** `src/signature.ts` recomputes HMAC-SHA1 of the raw body with `VERCEL_DRAIN_SECRET` and compares it with the `x-vercel-signature` header using a constant-time `timingSafeEqual`. A missing or mismatched signature returns `401` and nothing is written. The secret in the Vercel drain config must match `VERCEL_DRAIN_SECRET` exactly, otherwise every delivery is rejected.
+- **Verification happens on the raw body before parsing.** Sign the unmodified body bytes; the local test script does this with `openssl dgst -sha1 -hmac`. Any middleware that re-serializes the body before it reaches the handler will break the signature.
+- **The collector builds SQL by string concatenation, not bound parameters.** String values are escaped via `sqlStr` (doubling single quotes) and identifiers via `quoteIdent` (doubling double quotes), and `MD_DESTINATION` is validated to be exactly `<database>.<schema>`. This is the trust boundary that keeps log content from breaking out of the `INSERT`. If you add columns or new value types, route them through `sqlStr` / `sqlTs` / `quoteIdent`, do not interpolate raw strings.
+- **Do not put secrets in `vercel.json` or commit them.** `MOTHERDUCK_TOKEN` and `VERCEL_DRAIN_SECRET` are read from the environment only.
+- **Client IPs are anonymized by default.** `anonymizeIp` zeroes the last IPv4 octet (`203.0.113.42` becomes `203.0.113.0`) before insert. IPv6 and non-IPv4 strings pass through unchanged, so adjust the function if you need IPv6 handling or full IPs for a legitimate reason.
+
 ## Files
 
 - [`api/drain.ts`](api/drain.ts) - the Vercel Function entry point: reads the raw POST body, pulls the `x-vercel-signature` header, hands off to `handleDrain`, returns `405` for non-POST.
@@ -172,19 +185,6 @@ ORDER BY event_ts DESC LIMIT 20;
 - [`vercel.json`](vercel.json) - the Vercel Function config: `maxDuration: 30` and `includeFiles: "bots.yaml"` so the classifier rules get bundled.
 - [`package.json`](package.json) - dependencies (`@duckdb/node-api`, `yaml`) and scripts (`dev`, `typecheck`); `package-lock.json` pins the lockfile.
 - [`tsconfig.json`](tsconfig.json) - strict TypeScript config (ES2022, ESNext modules) covering `api/` and `src/`.
-
-## Caveats
-
-- **Cold start**: the first invocation after idle pays a roughly 500 ms to 1 s MotherDuck extension load. Vercel Fluid Compute keeps functions warm well enough that this is rare in practice. For high-QPS sites, ping the function every few minutes or enable always-warm via Vercel's Fluid config.
-- **`HOME` can be empty on Vercel**: MotherDuck needs a writable extension cache. `src/db.ts` pins `HOME` and `DUCKDB_EXTENSION_DIRECTORY` to a temp path; if you change that code, keep it writable or the connection fails silently on cold start.
-- **Bundle size**: `@duckdb/node-api` ships a native binary. Fluid Compute gives you the headroom; classic Serverless Functions may hit the 50 MB zipped limit.
-- **No appender on native MotherDuck tables (yet)**: the example uses a multi-row `INSERT` instead. With roughly 500 rows per batch that is one network round-trip per drain POST, which is plenty fast. If you need the appender path or open Parquet storage with snapshot isolation, build the DuckLake variant of this collector instead (run `ask_docs_question` for DuckLake).
-- **At-least-once delivery**: on a 5xx response Vercel redelivers the batch, and the handler deliberately returns `503` on a failed write so Vercel retries. If you care about exact counts, dedupe on `event_id` in your queries.
-- **Agentic browsers that spoof user agents**: the classifier only sees what the bot tells it. AI agents using plain Chromium UAs fall into the `null` bucket and are counted as human unless their referer matches.
-- **`bots.yaml` must be bundled**: `vercel.json` sets `includeFiles: "bots.yaml"`. If you remove that, `src/classify.ts` throws "bots.yaml not found" at cold start and the function fails.
-- **Don't sign or transform the body before the handler**: signature verification runs on the raw bytes. Any body rewrite breaks the HMAC check and every delivery returns `401`.
-- **`INSERT` column order is load-bearing**: the value tuples in `src/db.ts` must match the `CREATE TABLE` order in `sql/01_setup.sql`. Adding a column means editing both, in the same order.
-- **`MD_DESTINATION` parsing is strict**: it must be exactly `<database>.<schema>` with two non-empty parts, or the function throws at cold start. A bare database name or a three-part name is rejected.
 
 ## Learn more
 
