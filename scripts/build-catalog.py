@@ -86,8 +86,11 @@ ALLOWED_TAGS = {
     "sqlite",
     "snowflake",
     "bigquery",
+    # SaaS / external data sources
+    "google-sheets",
     # data movement patterns
     "ingest",
+    "export",
     "migrate",
 }
 ALLOWED_KEYS = {
