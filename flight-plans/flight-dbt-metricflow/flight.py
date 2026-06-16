@@ -56,6 +56,12 @@ def read_config() -> dict[str, str]:
         ),
         "GIT_REF": os.environ.get("GIT_REF", "main"),  # branch or tag
         "REPO_SUBDIR": os.environ.get("REPO_SUBDIR", "dbt-metricflow"),
+        # Whether this Flight builds the models. "true" (default) runs
+        # `dbt seed` + `dbt run` so the demo is self-contained. Set "false" when a
+        # separate dbt job already builds the tables: the Flight then only runs
+        # `dbt parse` (read-only — no warehouse writes, so parallel runs never
+        # conflict) and queries the existing tables.
+        "BUILD_MODELS": os.environ.get("BUILD_MODELS", "true"),
         # What to query — the per-run knobs.
         "METRICS": os.environ.get("METRICS", "revenue,orders,customers"),
         "GROUP_BY": os.environ.get("GROUP_BY", "metric_time__month"),
@@ -190,6 +196,27 @@ def run_cmd(cmd: list[str], cwd: Path | str, env: dict[str, str]) -> None:
         raise SystemExit(f"command failed ({proc.returncode}): {' '.join(cmd)}")
 
 
+def _truthy(value: str) -> bool:
+    """Parse a config string as a boolean (Flight config values are always strings)."""
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def prepare_project(cfg: dict[str, str], dbt: str, project_dir: Path, env: dict[str, str]) -> None:
+    """Produce the ``target/semantic_manifest.json`` that ``mf query`` requires.
+
+    ``mf`` reads that manifest and raises if it is missing — but any dbt command
+    that compiles the project writes it. When ``BUILD_MODELS`` is true the Flight
+    owns the build (``dbt seed`` + ``dbt run`` materialize the tables); when false
+    a separate dbt job owns the tables, so the Flight only runs ``dbt parse`` —
+    read-only, no warehouse writes, so concurrent runs never conflict."""
+    if _truthy(cfg["BUILD_MODELS"]):
+        run_cmd([dbt, "seed", "--target", "motherduck"], project_dir, env)
+        run_cmd([dbt, "run", "--target", "motherduck"], project_dir, env)
+    else:
+        log.info("BUILD_MODELS=false — parsing only; expecting tables built elsewhere")
+        run_cmd([dbt, "parse", "--target", "motherduck"], project_dir, env)
+
+
 # ---------------------------------------------------------------------------
 # Persisting the result as an append-only snapshot
 # ---------------------------------------------------------------------------
@@ -255,8 +282,7 @@ def main() -> None:
         env["HOME"] = str(root)
 
         dbt = _tool("dbt")
-        run_cmd([dbt, "seed", "--target", "motherduck"], project_dir, env)
-        run_cmd([dbt, "run", "--target", "motherduck"], project_dir, env)
+        prepare_project(cfg, dbt, project_dir, env)
 
         csv_path = root / "mf_result.csv"
         run_cmd(

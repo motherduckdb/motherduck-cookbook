@@ -46,10 +46,14 @@ only — no clone) and shells out to the `dbt` and `mf` CLIs against it:
    GitHub API tarball endpoint (`api.github.com/repos/<owner>/<repo>/tarball/<ref>`).
 4. Discover the dbt project (`dbt_project.yml`) and the profile (`profiles.yml`)
    in the checkout by globbing, so any layout works.
-5. `dbt seed` and `dbt run --target motherduck` to build the models. The fetched
-   project's own `profiles.yml` is used as-is; its MotherDuck path reads the
-   database name from `MD_DATABASE` via dbt's `env_var()`, so nothing is written
-   from scratch.
+5. Produce the semantic manifest `mf query` needs. With `BUILD_MODELS=true`
+   (default) the Flight owns the build — `dbt seed` + `dbt run --target motherduck`
+   materialize the tables. With `BUILD_MODELS=false` it runs `dbt parse` only —
+   read-only, no warehouse writes — and expects a separate dbt job to have built
+   the tables (see [When a separate dbt job owns the build](#when-a-separate-dbt-job-owns-the-build)).
+   The fetched project's own `profiles.yml` is used as-is; its MotherDuck path
+   reads the database name from `MD_DATABASE` via dbt's `env_var()`, so nothing is
+   written from scratch.
 6. `mf query --metrics … --group-by … --start-time … --end-time …`, writing a CSV.
 7. Append each result row to the snapshot table, tagged with `run_at` and config.
 
@@ -121,6 +125,22 @@ To query your own metrics, point these at your dbt repo. Your project needs a
 example uses `path: "md:{{ env_var('MD_DATABASE', 'ecommerce_test_db') }}"`, which
 the Flight feeds through `MD_DATABASE`. No code in `flight.py` changes.
 
+### When a separate dbt job owns the build
+
+`mf query` needs two things: the project's **parsed semantic manifest**
+(`target/semantic_manifest.json`) and the **materialized tables** in the
+warehouse. Only the manifest must be produced by this Flight — the tables just
+have to exist. `dbt seed`/`dbt run` materialize them, but so does any other job.
+
+If a separate dbt job already builds the models into MotherDuck (a dbt Cloud job,
+Airflow, another Flight), set `BUILD_MODELS=false`. The Flight then runs **`dbt
+parse` only** — which writes the manifest locally and touches the warehouse not at
+all — and `mf query` reads the tables your dbt job built. This avoids rebuilding
+the models every run, avoids clobbering your real fact tables with the demo seed,
+and makes runs **read-only**, so any number can run concurrently without the
+write-write conflicts that shared-table rebuilds cause. Point `GIT_REPO`/`GIT_REF`
+at the same repo your dbt job uses, so the semantic definitions match the tables.
+
 ### Private repositories
 
 A public repo needs no credentials. For a **private** GitHub repo, store a
@@ -170,8 +190,13 @@ token in an `Authorization` header (never in the URL, so it stays out of the log
   `2024-01-01` to `2025-12-31`. `START_DATE`/`END_DATE` outside that window, or
   grouping by `metric_time__*` beyond it, returns no rows. Widen the spine in your
   project.
-- **Build runs every time.** Each run does `dbt seed` + `dbt run` against a fresh
-  checkout, so a large project makes every run slower.
+- **The build runs every time, and concurrent builds conflict.** With
+  `BUILD_MODELS=true`, each run does `dbt seed` + `dbt run` against the same
+  database, so a large project is slower and **parallel runs collide** on the
+  shared tables (MotherDuck rejects the losers with a write-write conflict). For
+  fan-out or when a separate job owns the build, set `BUILD_MODELS=false` to run
+  `dbt parse` only — read-only and parallel-safe (see
+  [When a separate dbt job owns the build](#when-a-separate-dbt-job-owns-the-build)).
 - **Derived metrics reference metric names, not measures.** `revenue_per_customer`
   is `revenue / customers`, both metrics. A raw measure name in a derived `expr`
   will not resolve.
@@ -189,6 +214,7 @@ model itself lives in the git repo you point the Flight at, not in `flight.py`.
 | `GIT_REPO` | `…/motherduck-cookbook.git` | GitHub repo holding the dbt project. Point at your fork. |
 | `GIT_REF` | `main` | Branch, tag, or commit SHA to download as an archive. |
 | `REPO_SUBDIR` | `dbt-metricflow` | Path within the repo to run from (extracted from the archive). |
+| `BUILD_MODELS` | `true` | `true`: `dbt seed` + `dbt run` build the tables. `false`: `dbt parse` only (read-only, parallel-safe) when a separate dbt job owns the build. |
 | `METRICS` | `revenue,orders,customers` | Comma-separated metric(s) `mf query` computes. Override per run. |
 | `GROUP_BY` | `metric_time__month` | Dimension(s) to slice by, e.g. `metric_time__day`, `order_id__status`. |
 | `START_DATE` | `2024-01-01` | `mf query --start-time`; must fall inside the time spine. |
