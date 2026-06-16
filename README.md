@@ -1,4 +1,6 @@
-<img src="assets/cookbook-duck.png" align="right" width="200" alt="MotherDuck Cookbook — a chef duck cooking code" />
+<p align="center">
+  <img src="assets/cookbook-duck.png" width="320" alt="MotherDuck Cookbook — a chef duck cooking code" />
+</p>
 
 # MotherDuck cookbook
 
