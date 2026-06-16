@@ -1,0 +1,4 @@
+duckdb==1.5.3
+# pytz lets the duckdb Python client return TIMESTAMP WITH TIME ZONE columns as
+# tz-aware datetimes
+pytz==2026.2
