@@ -4,8 +4,9 @@ id: flight-analysis-with-claude
 description: >-
   Schedule an automated agentic analysis in MotherDuck using Claude. Use it when
   you want to trigger Claude to find new insights in your latest data on a
-  recurring schedule. The Flight creates multiple Claude agents each of which 
-  explores the warehouse, analyzes the data, and writes a summary of its findings.
+  recurring schedule. The Flight creates multiple Claude agents each of which
+  explores the warehouse, analyzes the data, and writes a summary of its
+  findings.
 type: template
 category: automation
 features: [flights, mcp]
@@ -18,8 +19,8 @@ This Flight showcases how to schedule an automated agentic analysis in MotherDuc
 using Claude. Use it when you want to trigger Claude to find new insights in your
 latest data on a recurring schedule.
 
-It's composed of a single-file Flight that produces a recurring set of analytical briefs, one per
-entity, where **Claude writes the analysis**.
+It's composed of a single-file Flight that produces a recurring set of
+analytical briefs, one per entity, where **Claude writes the analysis**.
 Each run discovers a list of entities, then fans out one
 [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) agent per
 entity under a concurrency cap. Each agent is given the **read-only tools of the
@@ -126,21 +127,21 @@ infra steps); only the agent's exploration goes through the MCP tools.
 Most knobs are module constants or `config` values at the top of `flight.py`;
 the source query and prompt are functions you edit directly.
 
-| Knob | Where | Default | Purpose |
-|---|---|---|---|
-| Discovery query | `discover_boroughs()` in `flight.py` | top boroughs by volume | The SQL that lists the entities to brief. Replace with your own partition. |
-| `SOURCE_TABLE` | top of `flight.py` | `sample_data.nyc.service_requests` | The table each agent analyzes. Point at your data. |
-| `build_prompt()` | function in `flight.py` | 311 "notable things" prompt | What the agent looks for and how the brief is shaped. The main thing you tune. |
-| `MUTATING_PREFIXES` / `is_read_only_tool` | top of `flight.py` | drop `query_rw` + `save_/update_/delete_/...` | Which hosted MCP tools the agent gets. Tighten for a narrower surface. |
-| `MCP_URL` | env `MD_MCP_URL` | `https://api.motherduck.com/mcp` | The hosted MotherDuck MCP endpoint the bridge calls. |
-| `RESULTS_TABLE` | top of `flight.py` | `flights_demo.main.borough_briefs` | Where briefs are stored, as `database.schema.table`. Must be writable. |
-| `BRIEF_WINDOW_DAYS` | config / env | `7` | Lookback window in days, measured from the anchor date. |
-| `CONCURRENCY` | config / env | `3` | Max simultaneous agents. Bound by CPU/RAM and API rate limits. |
-| `MODEL` | config / env | `claude-opus-4-8` | Claude model id the agents run on. |
-| `MAX_BOROUGHS` | config / env | `0` (all) | Cap the number of entities for a cheap test run. `0` = no cap. |
-| `BOROUGHS` | env | (unset) | Comma-separated override that skips discovery (e.g. `BROOKLYN,QUEENS`). |
-| `ANTHROPIC_API_KEY` | Flight secret / env | (required) | Anthropic API key. A local run sets it directly; a Flight injects it from a secret (see below). |
-| `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for both `duckdb.connect("md:")` (discovery + persistence) and the hosted MCP server (the agent's tools). Select a token on the Flight; never hard-code it. |
+| Knob                                      | Where                                | Default                                       | Purpose |
+| ----------------------------------------- | ------------------------------------ | --------------------------------------------- | --- |
+| Discovery query                           | `discover_boroughs()` in `flight.py` | top boroughs by volume                        | The SQL that lists the entities to brief. Replace with your own partition. |
+| `SOURCE_TABLE`                            | top of `flight.py`                   | `sample_data.nyc.service_requests`            | The table each agent analyzes. Point at your data. |
+| `build_prompt()`                          | function in `flight.py`              | 311 "notable things" prompt                   | What the agent looks for and how the brief is shaped. The main thing you tune. |
+| `MUTATING_PREFIXES` / `is_read_only_tool` | top of `flight.py`                   | drop `query_rw` + `save_/update_/delete_/...` | Which hosted MCP tools the agent gets. Tighten for a narrower surface. |
+| `MCP_URL`                                 | env `MD_MCP_URL`                     | `https://api.motherduck.com/mcp`              | The hosted MotherDuck MCP endpoint the bridge calls. |
+| `RESULTS_TABLE`                           | top of `flight.py`                   | `flights_demo.main.borough_briefs`            | Where briefs are stored, as `database.schema.table`. Must be writable. |
+| `BRIEF_WINDOW_DAYS`                       | config / env                         | `7`                                           | Lookback window in days, measured from the anchor date. |
+| `CONCURRENCY`                             | config / env                         | `3`                                           | Max simultaneous agents. Bound by CPU/RAM and API rate limits. |
+| `MODEL`                                   | config / env                         | `claude-opus-4-8`                             | Claude model id the agents run on. |
+| `MAX_BOROUGHS`                            | config / env                         | `0` (all)                                     | Cap the number of entities for a cheap test run. `0` = no cap. |
+| `BOROUGHS`                                | env                                  | (unset)                                       | Comma-separated override that skips discovery (e.g. `BROOKLYN,QUEENS`). |
+| `ANTHROPIC_API_KEY`                       | Flight secret / env                  | (required)                                    | Anthropic API key. A local run sets it directly; a Flight injects it from a secret (see below). |
+| `MOTHERDUCK_TOKEN`                        | Flight-injected                      | (Flight-injected)                             | Auth for both `duckdb.connect("md:")` (discovery + persistence) and the hosted MCP server (the agent's tools). Select a token on the Flight; never hard-code it. |
 
 ## Run it
 
