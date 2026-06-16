@@ -8,8 +8,11 @@ reads like an agent skill: minimal front matter for discovery, plus a body that
 tells an agent (and a human) exactly what to adapt, what to ask, and how to run
 or deploy it.
 
-The same source feeds several surfaces from one place: GitHub, the docs site, an
-agent via the MotherDuck MCP server, and the `motherduck` CLI.
+Browse the rendered cookbook at **[motherduck.com/docs/cookbook](https://motherduck.com/docs/cookbook/)**.
+
+The same source feeds several surfaces from one place: GitHub, the
+[docs site](https://motherduck.com/docs/cookbook/), and an agent via the
+MotherDuck MCP server.
 
 There are two kinds of entry:
 
