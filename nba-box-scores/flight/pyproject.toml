@@ -33,7 +33,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/motherduckdb/motherduck-examples/tree/main/nba-box-scores"
+Homepage = "https://github.com/motherduckdb/motherduck-cookbook/tree/main/nba-box-scores"
 
 [tool.hatch.metadata]
 allow-direct-references = true

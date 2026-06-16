@@ -1,7 +1,7 @@
 """Bootstrapper for the nba_nightly Flight.
 
 This file is the flight's registered `source_code`. It is deliberately
-thin and stable: it clones the motherduck-examples repo at a branch, `uv sync`s the
+thin and stable: it clones the motherduck-cookbook repo at a branch, `uv sync`s the
 pipeline package, and runs the real entrypoint from the synced venv.
 
 Because the code is fetched at run time, pushing to the branch updates
@@ -23,9 +23,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_URL = "https://github.com/motherduckdb/motherduck-examples"
+REPO_URL = "https://github.com/motherduckdb/motherduck-cookbook"
 DEFAULT_BRANCH = "main"
-REPO_DIR = Path("/app/motherduck-examples")
+REPO_DIR = Path("/app/motherduck-cookbook")
 PROJECT_SUBDIR = REPO_DIR / "nba-box-scores" / "flight"
 ENTRYPOINT_COMMAND = "nightly"
 
