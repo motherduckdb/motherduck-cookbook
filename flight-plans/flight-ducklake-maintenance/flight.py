@@ -12,17 +12,20 @@ Config (env vars):
   DRY_RUN                   'true' = only report what expire/cleanup/orphan would remove
 """
 
+import logging
 import os
 
 import duckdb
 import pytz  # lets the duckdb client return ducklake_expire_snapshots' TIMESTAMPTZ columns
 
+log = logging.getLogger("ducklake_maintenance")
+
 
 def run(con, name, sql, params):
     rows = con.execute(sql, params).fetchall()
-    print(f"{name}: {len(rows)} row(s)")
+    log.info("%s: %d row(s)", name, len(rows))
     for row in rows:
-        print(f"  {row}")
+        log.info("  %s", row)
 
 
 def main():
@@ -33,6 +36,9 @@ def main():
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
 
     con = duckdb.connect("md:")
+    # The runtime may have no system timezone (DuckDB reports 'Etc/Unknown'); pin it
+    # so pytz can localize expire_snapshots' TIMESTAMP WITH TIME ZONE columns.
+    con.execute("SET TimeZone = 'UTC'")
 
     # set_option persists on the catalog; the db name must be an identifier, not a `?`.
     for option, value in [
@@ -41,7 +47,7 @@ def main():
     ]:
         if value:
             con.execute(f"CALL \"{db}\".set_option('{option}', ?)", [value])
-            print(f"set_option {option} = {value}")
+            log.info("set_option %s = %s", option, value)
 
     run(con, "flush_inlined_data",
         "CALL ducklake_flush_inlined_data(?)", [db])
@@ -61,4 +67,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     main()

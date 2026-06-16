@@ -57,7 +57,7 @@ thresholds, not the steps:
 7. **`ducklake_delete_orphaned_files`** — delete data files in the lake's storage
    that the catalog no longer references at all (older than `ORPHAN_OLDER_THAN`).
 
-Each step prints the rows it returned, so the run log doubles as a report of what
+Each step logs the rows it returned, so the run log doubles as a report of what
 maintenance did (`merge_adjacent_files: 1 row(s)` with the table and file counts,
 which snapshots expired, which files were removed). The order matters: flushing and
 expiring first is what gives the merge, rewrite, and cleanup steps something to act
@@ -90,6 +90,11 @@ on, mirroring what a real checkpoint does.
   on managed lakes, so this template is most useful for BYOB lakes, lakes where you
   have turned background maintenance off, or when you want a specific cadence. Running
   it against a managed lake is safe but may find little to do.
+- **`expire_snapshots` reads timestamp columns, so the Flight ships `pytz` and pins a
+  timezone.** Its result includes `TIMESTAMP WITH TIME ZONE` columns; the DuckDB Python
+  client needs `pytz` to read those, and the Flight runtime often has no system zone
+  (DuckDB reports `Etc/Unknown`), so `flight.py` runs `SET TimeZone = 'UTC'`. Without
+  both the step fails with an `UnknownTimeZoneError`.
 
 ## What you'll adjust
 
