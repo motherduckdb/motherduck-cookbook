@@ -1,0 +1,4 @@
+[flight]
+name = "statsbomb-marts"
+schedule_cron = ""
+extra_requirements = ["duckdb==1.5.3"]

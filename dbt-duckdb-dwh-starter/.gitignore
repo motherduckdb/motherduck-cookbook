@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.user.yml
+.venv/
+__pycache__/
+*.py[cod]
+
+# dbt
+target/
+dbt_packages/
+logs/
+
+# DuckDB local state
+*.duckdb
+*.duckdb.wal
+*.db
+*.db.wal

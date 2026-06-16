@@ -1,0 +1,17 @@
+{
+  "name": "cloudflare-workers-duckoffee",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "pg": "^8.18.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "@types/pg": "^8.20.0",
+    "wrangler": "^4.66.0"
+  }
+}

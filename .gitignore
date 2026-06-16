@@ -16,6 +16,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 ENV/
 *.egg-info/
@@ -53,6 +54,11 @@ dbt_modules/
 .coverage
 htmlcov/
 
+# Generated catalog outputs
+.catalog-pages/
+.catalog-preview/
+.catalog-release/
+
 # Node
 node_modules/
 **/node_modules/
@@ -64,3 +70,5 @@ node_modules/
 # OS
 Thumbs.db
 
+# Local agent config (not catalog content)
+.claude/rules/

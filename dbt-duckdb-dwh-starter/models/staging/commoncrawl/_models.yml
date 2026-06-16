@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: stg_commoncrawl__domain_ranks
+    description: Domain-level PageRank and harmonic centrality from the Common Crawl hyperlink graph.
+
+  - name: stg_commoncrawl__domain_vertices
+    description: Domain vertex records filtered to the configured domains.
+
+  - name: stg_commoncrawl__domain_edges
+    description: Sorted domain graph edges where one configured domain is either the source or destination.

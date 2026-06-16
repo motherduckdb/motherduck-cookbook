@@ -7,3 +7,4 @@ local.db
 .venv/
 .env
 .user.yml
+artifacts/

@@ -1,0 +1,35 @@
+name: dbt_duck_starter
+version: 1.0.0
+config-version: 2
+
+profile: dbt_duck_starter
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+vars:
+  commoncrawl_snapshot: cc-main-2026-jan-feb-mar
+  commoncrawl_domains:
+    - motherduck.com
+    - duckdb.org
+  hackernews_max_stories_per_domain: 100
+
+models:
+  dbt_duck_starter:
+    staging:
+      +schema: stg
+      +materialized: view
+      commoncrawl:
+        +materialized: table
+
+    intermediate:
+      +schema: int
+      +materialized: table
+
+    marts:
+      +schema: mart
+      +materialized: table

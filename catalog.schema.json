@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/main/catalog.schema.json",
+  "title": "MotherDuck Examples Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "generated_at",
+    "source",
+    "items"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "ref"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/catalog_item"
+      }
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "catalog_item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "type",
+        "title",
+        "description",
+        "category",
+        "features",
+        "tags",
+        "path",
+        "urls"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "type": {
+          "enum": [
+            "example",
+            "template"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "getting-started",
+            "ingestion",
+            "analytics",
+            "integrations",
+            "end-to-end",
+            "automation"
+          ]
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "admin_api",
+              "dives",
+              "ducklake",
+              "flights",
+              "mcp",
+              "pg_duckdb",
+              "pg_endpoint",
+              "shares",
+              "wasm"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/slug"
+          },
+          "uniqueItems": true
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "urls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "github",
+            "raw_docs"
+          ],
+          "properties": {
+            "github": {
+              "type": "string",
+              "format": "uri"
+            },
+            "raw_docs": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        }
+      }
+    }
+  }
+}

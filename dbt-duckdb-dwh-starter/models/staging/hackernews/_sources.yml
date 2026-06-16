@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: hackernews
+    description: Full MotherDuck Hacker News share for posts and comments.
+    database: hacker_news
+    schema: main
+    tables:
+      - name: hacker_news
+        description: Hacker News table in the full MotherDuck Hacker News share.
+        columns:
+          - name: id
+            description: Hacker News item id.
+          - name: title
+            description: Story title.
+          - name: url
+            description: Story URL.
+          - name: score
+            description: Story score.
+          - name: by
+            description: Author username.
+          - name: timestamp
+            description: Item timestamp.
+          - name: type
+            description: Hacker News item type.

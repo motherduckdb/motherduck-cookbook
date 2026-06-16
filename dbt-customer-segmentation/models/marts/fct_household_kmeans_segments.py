@@ -11,6 +11,9 @@ def model(dbt, session):
     cluster_count = int(dbt.config.get("python_cluster_count"))
     random_state = int(dbt.config.get("python_cluster_random_state"))
 
+    if cluster_count < 2:
+        raise ValueError("python_cluster_count must be at least 2 for silhouette scoring")
+
     feature_matrix = (
         feature_vectors
         .pivot(index="household_id", columns="feature_name", values="feature_value")

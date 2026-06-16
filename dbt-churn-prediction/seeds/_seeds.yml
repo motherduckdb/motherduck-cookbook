@@ -102,28 +102,3 @@ seeds:
               values: ['paid', 'failed']
       - name: amount
         description: "Payment amount."
-
-  - name: churn_risk_rules
-    description: "Interpretable risk rules used to assign risk points, reasons, actions, and offer types in the SQL scoring model."
-    columns:
-      - name: rule_name
-        description: "Stable rule identifier used by fct_customer_churn_scores_daily."
-        data_tests:
-          - not_null
-          - unique
-      - name: segment
-        description: "Segment the rule applies to. Use all when the rule applies to both member and casual customers."
-        data_tests:
-          - not_null
-          - accepted_values:
-              values: ['member', 'casual', 'all']
-      - name: risk_points
-        description: "Interpretable point contribution added when the rule matches a customer."
-        data_tests:
-          - not_null
-      - name: reason
-        description: "Human-readable reason shown in the retention queue."
-      - name: recommended_action
-        description: "Suggested action when this is the highest-priority matched rule."
-      - name: offer_type
-        description: "Suggested offer or outreach type when this is the highest-priority matched rule."

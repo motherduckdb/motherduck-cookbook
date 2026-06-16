@@ -1,0 +1,7 @@
+[flight]
+name = "statsbomb-core-transform"
+schedule_cron = ""
+extra_requirements = ["duckdb==1.5.3"]
+
+# Optional: rebuild a single match instead of the full corpus by setting
+# MATCH_IDS (comma-separated) as a per-run config override, e.g. "3869117".

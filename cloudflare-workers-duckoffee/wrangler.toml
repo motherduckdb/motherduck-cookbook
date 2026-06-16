@@ -1,0 +1,22 @@
+name = "duckoffee-map"
+main = "src/index.ts"
+compatibility_date = "2026-02-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[vars]
+MOTHERDUCK_HOST = "pg.us-east-1-aws.motherduck.com"
+MOTHERDUCK_DB = "sample_data"
+DUCKOFFEE_SHARE = "md:_share/duckoffee/1877e7c6-96ea-4f88-a01f-3fed396ea7b8"
+
+[[durable_objects.bindings]]
+name = "VOTES"
+class_name = "VoteTracker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VoteTracker"]

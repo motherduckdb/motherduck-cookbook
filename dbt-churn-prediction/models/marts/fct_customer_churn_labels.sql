@@ -1,7 +1,5 @@
 with label_dates(as_of_date) as (
-    values
-        (date '2026-01-31'),
-        (date '2026-02-15')
+    {{ churn_label_dates() }}
 ),
 
 customer_dates as (

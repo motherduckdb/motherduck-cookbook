@@ -1,0 +1,8 @@
+[flight]
+name = "nba_backfill"
+description = "On-demand historical-season backfill. Triggered via run_flight; v3 starts pre-populated by the Phase 0 clone."
+md_token_name = "dives-loader-nba"
+# No schedule_cron — on-demand only.
+extra_requirements = []
+config = {}
+md_secret_names = []

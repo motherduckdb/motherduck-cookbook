@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/drain.ts": {
+      "maxDuration": 30,
+      "includeFiles": "bots.yaml"
+    }
+  }
+}

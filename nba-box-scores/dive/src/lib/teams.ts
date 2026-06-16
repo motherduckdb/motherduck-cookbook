@@ -1,0 +1,43 @@
+// NBA team abbreviation -> full name. Includes historical abbreviations that
+// appear in the 2000-2025 schedule (relocations / renames).
+const ABBR_TO_NAME: Record<string, string> = {
+  ATL: "Atlanta Hawks",
+  BOS: "Boston Celtics",
+  BKN: "Brooklyn Nets",
+  NJN: "New Jersey Nets",
+  CHA: "Charlotte Hornets",
+  CHH: "Charlotte Hornets",
+  CHI: "Chicago Bulls",
+  CLE: "Cleveland Cavaliers",
+  DAL: "Dallas Mavericks",
+  DEN: "Denver Nuggets",
+  DET: "Detroit Pistons",
+  GSW: "Golden State Warriors",
+  HOU: "Houston Rockets",
+  IND: "Indiana Pacers",
+  LAC: "LA Clippers",
+  LAL: "Los Angeles Lakers",
+  MEM: "Memphis Grizzlies",
+  VAN: "Vancouver Grizzlies",
+  MIA: "Miami Heat",
+  MIL: "Milwaukee Bucks",
+  MIN: "Minnesota Timberwolves",
+  NOP: "New Orleans Pelicans",
+  NOH: "New Orleans Hornets",
+  NOK: "New Orleans/Oklahoma City Hornets",
+  NYK: "New York Knicks",
+  OKC: "Oklahoma City Thunder",
+  SEA: "Seattle SuperSonics",
+  ORL: "Orlando Magic",
+  PHI: "Philadelphia 76ers",
+  PHX: "Phoenix Suns",
+  POR: "Portland Trail Blazers",
+  SAC: "Sacramento Kings",
+  SAS: "San Antonio Spurs",
+  TOR: "Toronto Raptors",
+  UTA: "Utah Jazz",
+  WAS: "Washington Wizards",
+};
+
+export const getTeamName = (abbr: string): string =>
+  ABBR_TO_NAME[abbr] ?? abbr;

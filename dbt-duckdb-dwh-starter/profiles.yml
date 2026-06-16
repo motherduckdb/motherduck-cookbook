@@ -1,0 +1,14 @@
+dbt_duck_starter:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'md:my_db') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_dev') }}"
+      threads: 24
+
+    prod:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'md:dbt_prod') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'dbt_main') }}"
+      threads: 24

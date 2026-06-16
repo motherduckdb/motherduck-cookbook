@@ -1,0 +1,5 @@
+{
+  "title": "Backlinks and Hacker News Coverage",
+  "description": "Interactive view of Common Crawl backlinks and full Hacker News stories for configured domains.",
+  "source": "dive.tsx"
+}

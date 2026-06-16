@@ -8,4 +8,10 @@ dependencies = [
     "dbt-core==1.9.9",
     "dbt-duckdb==1.9.6",
     "duckdb==1.5.1",
+    "joblib==1.5.2",
+    "lifelines==0.30.0",
+    "matplotlib==3.10.7",
+    "numpy==2.3.4",
+    "pandas==2.3.3",
+    "scikit-learn==1.7.2",
 ]

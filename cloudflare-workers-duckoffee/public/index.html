@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Duckoffee, vote for the next city</title>
+    <link rel="icon" href="/assets/duck-normal-front.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/AeonikMono-Regular.woff2" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <img class="brand__logo" src="/assets/duck-normal-front.svg" alt="" />
+        <div>
+          <h1>Duckoffee</h1>
+          <p class="tagline">Cafe data queried live from MotherDuck via the
+      <a href="https://motherduck.com/docs/key-tasks/authenticating-and-connecting-to-motherduck/postgres-endpoint/cloudflare-workers/" target="_blank" rel="noopener">Postgres endpoint</a>,
+      served from a <a href="https://developers.cloudflare.com/workers/">Cloudflare Worker</a>. 
+      Votes tallied in a <a href="https://developers.cloudflare.com/durable-objects/">Durable Object</a>.</p>
+        </div>
+      </div>
+      <div class="live-counter">
+        <span class="live-counter__dot"></span>
+        <span id="vote-count">0</span> votes cast
+      </div>
+    </header>
+
+    <main>
+      <section class="map-card">
+        <div class="map-card__header">
+          <h2>Where should Duckoffee open next?</h2>
+          <div class="legend">
+            <span class="legend__item"><span class="dot dot--cafe"></span>Existing cafe</span>
+            <span class="legend__item"><span class="dot dot--candidate"></span>Candidate city</span>
+            <span class="legend__item"><span class="dot dot--pick"></span>Your pick</span>
+          </div>
+        </div>
+        <div id="map"></div>
+        <p class="hint">
+          <img src="/assets/duck-normal-duckling.svg" alt="" class="hint__duck" />
+          Tap a candidate city to vote, or tap an existing cafe to filter the sales chart.
+        </p>
+
+        <div class="leaderboard">
+          <div class="leaderboard__header">
+            <h3>Live leaderboard</h3>
+            <span class="leaderboard__meta" id="leaderboard-meta">Loading votes&hellip;</span>
+          </div>
+          <ol id="leaderboard"></ol>
+        </div>
+      </section>
+
+      <section class="stats-card">
+        <img class="stats-card__db stats-card__db--top" src="/assets/brand-database-with-feet-big.svg" alt="" aria-hidden="true" />
+        <img class="stats-card__db stats-card__db--bottom" src="/assets/brand-database-with-feet-double.svg" alt="" aria-hidden="true" />
+        <div class="stats-card__header">
+          <h2 id="stats-title">Global sales</h2>
+          <button id="clear-filter" class="btn-clear" hidden>Clear filter</button>
+        </div>
+        <div class="stats-card__body">
+          <div class="stat-grid">
+            <div class="stat">
+              <div class="stat__label">Orders</div>
+              <div class="stat__value" id="stat-orders">&mdash;</div>
+            </div>
+            <div class="stat">
+              <div class="stat__label">Revenue</div>
+              <div class="stat__value" id="stat-revenue">&mdash;</div>
+            </div>
+            <div class="stat">
+              <div class="stat__label">Avg order</div>
+              <div class="stat__value" id="stat-avg">&mdash;</div>
+            </div>
+          </div>
+          <div id="chart"></div>
+          <div class="top-products">
+            <h3>Top sellers</h3>
+            <ol id="top-products"></ol>
+          </div>
+
+          <div class="loader" id="stats-loader" aria-hidden="true">
+            <img class="loader__duck" src="/assets/duck-normal-front.svg" alt="" aria-hidden="true" />
+            <span class="loader__label">Brewing fresh data&hellip;</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <img class="float float--flying" src="/assets/duck-normal-flying.svg" alt="" aria-hidden="true" />
+    <img class="float float--duckling" src="/assets/duck-normal-duckling.svg" alt="" aria-hidden="true" />
+    <img class="float float--holding" src="/assets/duck-holding-object.svg" alt="" aria-hidden="true" />
+
+    <!-- Inline silhouette duck, renders sharp at any size -->
+    <svg class="float float--silhouette" viewBox="0 0 120 90" aria-hidden="true">
+      <g fill="#383838">
+        <path d="M20 70 Q20 44 50 44 Q64 44 72 52 Q82 42 96 48 Q110 54 104 70 Q100 80 82 80 L32 80 Q20 80 20 70 Z" />
+        <path d="M96 48 L116 42 L110 56 Z" fill="#FF9538" />
+        <circle cx="88" cy="56" r="3" fill="#fff" />
+        <circle cx="88" cy="56" r="1.5" />
+      </g>
+    </svg>
+
+    <svg class="float float--cloud-a" viewBox="0 0 120 60" aria-hidden="true">
+      <path d="M20 45 Q10 45 10 35 Q10 25 22 25 Q22 12 38 12 Q52 12 56 22 Q68 18 76 28 Q92 26 96 40 Q100 50 88 50 L22 50 Q20 48 20 45 Z" fill="#fff" stroke="#383838" stroke-width="2.5" stroke-linejoin="round" />
+    </svg>
+    <svg class="float float--cloud-b" viewBox="0 0 120 60" aria-hidden="true">
+      <path d="M20 45 Q10 45 10 35 Q10 25 22 25 Q22 12 38 12 Q52 12 56 22 Q68 18 76 28 Q92 26 96 40 Q100 50 88 50 L22 50 Q20 48 20 45 Z" fill="#fff" stroke="#383838" stroke-width="2.5" stroke-linejoin="round" />
+    </svg>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

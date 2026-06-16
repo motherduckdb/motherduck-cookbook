@@ -1,0 +1,6 @@
+duckdb==1.5.2
+# The [pandas] extra pulls pyarrow, which powers cursor.fetch_arrow_all(): the
+# columnar path from Snowflake into DuckDB. pyarrow is pinned explicitly below so
+# the Arrow object DuckDB registers is reproducible across builds.
+snowflake-connector-python[pandas]==3.18.0
+pyarrow==23.0.1

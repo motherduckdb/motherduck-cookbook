@@ -1,0 +1,2 @@
+duckdb==1.5.3
+sqlglot==30.10.0  # parses each CREATE statement into an AST to build the dependency DAG

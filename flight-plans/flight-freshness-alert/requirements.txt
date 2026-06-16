@@ -1,0 +1,6 @@
+duckdb==1.5.2
+httpx==0.28.1
+# pytz lets the duckdb Python client return TIMESTAMP WITH TIME ZONE columns as
+# tz-aware datetimes; duckdb has no required dependencies, so it is not pulled in
+# automatically. See the README "Time zones" section.
+pytz==2026.2

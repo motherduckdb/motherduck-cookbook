@@ -1,0 +1,138 @@
+# AI bot and agent classifier rules.
+# Evaluated top to bottom; first match wins.
+# Category values used downstream: crawler, agent, human_via_ai.
+#
+# Sources:
+#  - https://github.com/ai-robots-txt/ai.robots.txt (community-maintained robots.json)
+#  - https://platform.openai.com/docs/bots
+#  - https://docs.anthropic.com/en/docs/agents-and-tools/claude-bot
+#  - https://docs.perplexity.ai/guides/bots
+#  - https://developers.cloudflare.com/ai-crawl-control/reference/bots/
+#  - https://darkvisitors.com/ (Known Agents)
+#
+# Category heuristic:
+#   crawler      : background training / indexing fetcher, not tied to a user prompt
+#   agent        : user-triggered fetch, a human asked an AI to visit a page
+#   human_via_ai : matched on referer; a real person arriving from an AI UI
+
+user_agent_patterns:
+  # --- OpenAI -------------------------------------------------------------
+  - { pattern: "GPTBot",                 name: "GPTBot",                 category: crawler }
+  - { pattern: "OAI-SearchBot",          name: "OAI-SearchBot",          category: crawler }
+  - { pattern: "ChatGPT-User",           name: "ChatGPT-User",           category: agent }
+  - { pattern: "ChatGPT Agent",          name: "ChatGPT-Agent",          category: agent }
+  - { pattern: "Operator",               name: "OpenAI-Operator",        category: agent }
+
+  # --- Anthropic ----------------------------------------------------------
+  - { pattern: "ClaudeBot",              name: "ClaudeBot",              category: crawler }
+  - { pattern: "Claude-SearchBot",       name: "Claude-SearchBot",       category: crawler }
+  - { pattern: "Claude-User",            name: "Claude-User",            category: agent }
+  - { pattern: "Claude-Web",             name: "Claude-Web",             category: agent }      # legacy
+  - { pattern: "anthropic-ai",           name: "anthropic-ai",           category: crawler }    # legacy
+
+  # --- Google -------------------------------------------------------------
+  - { pattern: "Google-Extended",        name: "Google-Extended",        category: crawler }
+  - { pattern: "GoogleOther",            name: "GoogleOther",            category: crawler }
+  - { pattern: "Google-CloudVertexBot",  name: "Google-CloudVertexBot",  category: agent }
+  - { pattern: "Google-NotebookLM",      name: "Google-NotebookLM",      category: agent }
+  - { pattern: "NotebookLM",             name: "Google-NotebookLM",      category: agent }
+  - { pattern: "Gemini-Deep-Research",   name: "Gemini-Deep-Research",   category: agent }
+  - { pattern: "GoogleAgent-Mariner",    name: "Google-Mariner",         category: agent }
+  - { pattern: "Google-Agent",           name: "Google-Agent",           category: agent }
+
+  # --- Meta ---------------------------------------------------------------
+  - { pattern: "Meta-ExternalAgent",     name: "Meta-ExternalAgent",     category: crawler }
+  - { pattern: "meta-externalagent",     name: "Meta-ExternalAgent",     category: crawler }
+  - { pattern: "Meta-ExternalFetcher",   name: "Meta-ExternalFetcher",   category: agent }
+  - { pattern: "meta-externalfetcher",   name: "Meta-ExternalFetcher",   category: agent }
+  - { pattern: "FacebookBot",            name: "FacebookBot",            category: crawler }
+
+  # --- Apple --------------------------------------------------------------
+  - { pattern: "Applebot-Extended",      name: "Applebot-Extended",      category: crawler }
+
+  # --- Amazon -------------------------------------------------------------
+  - { pattern: "Amazonbot",              name: "Amazonbot",              category: crawler }
+  - { pattern: "Amzn-SearchBot",         name: "Amzn-SearchBot",         category: crawler }
+  - { pattern: "Amzn-User",              name: "Amzn-User",              category: agent }
+  - { pattern: "AmazonBuyForMe",         name: "AmazonBuyForMe",         category: agent }
+  - { pattern: "NovaAct",                name: "NovaAct",                category: agent }
+  - { pattern: "bedrockbot",             name: "bedrockbot",             category: agent }
+
+  # --- Perplexity ---------------------------------------------------------
+  - { pattern: "PerplexityBot",          name: "PerplexityBot",          category: crawler }
+  - { pattern: "Perplexity-User",        name: "Perplexity-User",        category: agent }
+
+  # --- Mistral / Cohere / DeepSeek ---------------------------------------
+  - { pattern: "MistralAI-User",         name: "MistralAI-User",         category: agent }
+  - { pattern: "cohere-ai",              name: "cohere-ai",              category: agent }
+  - { pattern: "cohere-training-data-crawler", name: "cohere-training-data-crawler", category: crawler }
+  - { pattern: "DeepSeekBot",            name: "DeepSeekBot",            category: crawler }
+
+  # --- ByteDance / Huawei / Yandex / Baidu / Naver ------------------------
+  - { pattern: "Bytespider",             name: "Bytespider",             category: crawler }
+  - { pattern: "TikTokSpider",           name: "TikTokSpider",           category: crawler }
+  - { pattern: "PanguBot",               name: "PanguBot",               category: crawler }
+  - { pattern: "PetalBot",               name: "PetalBot",               category: crawler }
+  - { pattern: "YandexAdditional",       name: "YandexAdditional",       category: crawler }
+  - { pattern: "ICC-Crawler",            name: "ICC-Crawler",            category: crawler }
+
+  # --- AI-native search / assistants -------------------------------------
+  - { pattern: "DuckAssistBot",          name: "DuckAssistBot",          category: crawler }
+  - { pattern: "YouBot",                 name: "YouBot",                 category: crawler }
+  - { pattern: "Bravebot",               name: "Bravebot",               category: crawler }
+  - { pattern: "ExaBot",                 name: "ExaBot",                 category: crawler }
+  - { pattern: "PhindBot",               name: "PhindBot",               category: crawler }
+  - { pattern: "kagi-fetcher",           name: "Kagi",                   category: agent }
+  - { pattern: "AddSearchBot",           name: "AddSearchBot",           category: crawler }
+  - { pattern: "Andibot",                name: "Andibot",                category: crawler }
+  - { pattern: "LinerBot",               name: "LinerBot",               category: agent }
+
+  # --- Research / open datasets ------------------------------------------
+  - { pattern: "CCBot",                  name: "CCBot",                  category: crawler }
+  - { pattern: "AI2Bot",                 name: "AI2Bot",                 category: crawler }
+  - { pattern: "Ai2Bot-Dolma",           name: "AI2Bot-Dolma",           category: crawler }
+  - { pattern: "LAIONDownloader",        name: "LAIONDownloader",        category: crawler }
+  - { pattern: "img2dataset",            name: "img2dataset",            category: crawler }
+  - { pattern: "ImagesiftBot",           name: "ImagesiftBot",           category: crawler }
+
+  # --- Scraping platforms and agent frameworks ---------------------------
+  - { pattern: "FirecrawlAgent",         name: "FirecrawlAgent",         category: agent }
+  - { pattern: "TavilyBot",              name: "TavilyBot",              category: agent }
+  - { pattern: "LinkupBot",              name: "LinkupBot",              category: agent }
+  - { pattern: "Devin",                  name: "Devin",                  category: agent }
+  - { pattern: "Manus-User",             name: "Manus-User",             category: agent }
+  - { pattern: "Crawl4AI",               name: "Crawl4AI",               category: agent }
+  - { pattern: "ApifyBot",               name: "ApifyBot",               category: agent }
+  - { pattern: "Diffbot",                name: "Diffbot",                category: crawler }
+
+  # --- Marketing / SEO AI tooling ---------------------------------------
+  - { pattern: "SemrushBot-OCOB",        name: "Semrush-ContentShake",   category: crawler }
+  - { pattern: "KlaviyoAIBot",           name: "KlaviyoAIBot",           category: crawler }
+  - { pattern: "Webzio-Extended",        name: "Webzio-Extended",        category: crawler }
+  - { pattern: "Timpibot",               name: "Timpibot",               category: crawler }
+
+referer_patterns:
+  # OpenAI
+  - { pattern: "chatgpt.com",            name: "ChatGPT",                category: human_via_ai }
+  - { pattern: "chat.openai.com",        name: "ChatGPT",                category: human_via_ai }
+  # Anthropic
+  - { pattern: "claude.ai",              name: "Claude",                 category: human_via_ai }
+  # Google
+  - { pattern: "gemini.google.com",      name: "Gemini",                 category: human_via_ai }
+  - { pattern: "notebooklm.google.com",  name: "NotebookLM",             category: human_via_ai }
+  # Microsoft
+  - { pattern: "copilot.microsoft.com",  name: "Copilot",                category: human_via_ai }
+  # Perplexity
+  - { pattern: "perplexity.ai",          name: "Perplexity",             category: human_via_ai }
+  # Meta
+  - { pattern: "meta.ai",                name: "Meta-AI",                category: human_via_ai }
+  # Others
+  - { pattern: "you.com",                name: "You.com",                category: human_via_ai }
+  - { pattern: "phind.com",              name: "Phind",                  category: human_via_ai }
+  - { pattern: "kagi.com",               name: "Kagi",                   category: human_via_ai }
+  - { pattern: "poe.com",                name: "Poe",                    category: human_via_ai }
+  - { pattern: "t3.chat",                name: "T3-Chat",                category: human_via_ai }
+  - { pattern: "chat.deepseek.com",      name: "DeepSeek",               category: human_via_ai }
+  - { pattern: "chat.mistral.ai",        name: "LeChat",                 category: human_via_ai }
+  - { pattern: "grok.com",               name: "Grok",                   category: human_via_ai }
+  - { pattern: "grok.x.ai",              name: "Grok",                   category: human_via_ai }

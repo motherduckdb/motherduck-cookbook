@@ -1,0 +1,93 @@
+version: 2
+
+models:
+  - name: mart_domain_backlinks
+    description: Domains linking to configured domains, ordered by PageRank.
+    columns:
+      - name: target_domain
+        description: Configured domain receiving the inbound link.
+        tests:
+          - not_null
+      - name: linking_domain
+        description: Domain that links to the configured target domain.
+        tests:
+          - not_null
+      - name: linking_host_reversed
+        description: Reversed host name for the linking domain.
+      - name: linking_host_count
+        description: Number of hosts represented by the linking domain in the Common Crawl rank data.
+      - name: linking_harmonicc_rank
+        description: Harmonic centrality position for the linking domain. Lower ranks are more central by average graph reachability.
+      - name: linking_pagerank_rank
+        description: PageRank position for the linking domain. Lower ranks indicate more link authority.
+      - name: linking_pagerank_value
+        description: Raw PageRank score for the linking domain. Higher values indicate more link authority.
+      - name: from_id
+        description: Common Crawl domain vertex id for the linking domain.
+        tests:
+          - not_null
+      - name: to_id
+        description: Common Crawl domain vertex id for the configured target domain.
+        tests:
+          - not_null
+
+  - name: mart_domain_link_graph
+    description: Inbound domain graph for domains linking to the configured domains.
+    columns:
+      - name: target_domain
+        description: Configured domain receiving the inbound link.
+      - name: from_domain
+        description: Domain linking to the configured target domain.
+      - name: from_host_reversed
+        description: Reversed host name for the source domain.
+      - name: from_pagerank_rank
+        description: PageRank position for the source domain. Lower ranks indicate more link authority.
+      - name: to_domain
+        description: Configured domain where the inbound link ends.
+      - name: to_host_reversed
+        description: Reversed host name for the destination domain.
+      - name: to_pagerank_rank
+        description: PageRank position for the destination domain. Lower ranks indicate more link authority.
+      - name: from_id
+        description: Common Crawl domain vertex id where the directed edge starts.
+        tests:
+          - not_null
+      - name: to_id
+        description: Common Crawl domain vertex id where the directed edge ends.
+        tests:
+          - not_null
+
+  - name: mart_hackernews_domain_stories
+    description: Top Hacker News stories related to target or linked domains.
+    columns:
+      - name: domain
+        description: Domain matched against a Hacker News story.
+        tests:
+          - not_null
+      - name: host_reversed
+        description: Reversed host name for the matched domain.
+      - name: pagerank_rank
+        description: PageRank position for the matched domain. Lower ranks indicate more link authority.
+      - name: matched_on
+        description: Field that matched the domain to the Hacker News story.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["url_host", "title", "text"]
+      - name: story_id
+        description: Hacker News item id for the story.
+        tests:
+          - not_null
+      - name: title
+        description: Hacker News story title.
+      - name: url
+        description: URL submitted with the Hacker News story.
+      - name: url_host
+        description: Normalized host extracted from the submitted URL.
+      - name: score
+        description: Hacker News story score at dataset capture time.
+      - name: author
+        description: Hacker News username that submitted the story.
+      - name: created_at
+        description: Timestamp when the Hacker News story was created.

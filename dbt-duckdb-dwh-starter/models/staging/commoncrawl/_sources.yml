@@ -1,0 +1,45 @@
+version: 2
+
+sources:
+  - name: commoncrawl
+    description: Common Crawl domain hyperlink graph files served over HTTPS.
+    tables:
+      - name: domain_ranks
+        description: Domain-level rank metrics for the configured Common Crawl snapshot.
+        config:
+          external_location: |
+            read_csv('https://data.commoncrawl.org/projects/hyperlinkgraph/{{ var("commoncrawl_snapshot") }}/domain/{{ var("commoncrawl_snapshot") }}-domain-ranks.txt.gz', delim = '\t', header = true, columns = {'#harmonicc_pos': 'BIGINT', '#harmonicc_val': 'DOUBLE', '#pr_pos': 'BIGINT', '#pr_val': 'DOUBLE', '#host_rev': 'VARCHAR', '#n_hosts': 'BIGINT'})
+          formatter: oldstyle
+        columns:
+          - name: "#host_rev"
+            description: Reversed host name, such as com.motherduck.
+          - name: "#pr_pos"
+            description: PageRank position.
+
+      - name: domain_vertices
+        description: Domain graph vertices for the configured Common Crawl snapshot.
+        config:
+          external_location: |
+            read_csv('https://data.commoncrawl.org/projects/hyperlinkgraph/{{ var("commoncrawl_snapshot") }}/domain/{{ var("commoncrawl_snapshot") }}-domain-vertices.txt.gz', delim = '\t', header = false, columns = {'column0': 'BIGINT', 'column1': 'VARCHAR', 'column2': 'BIGINT'})
+          formatter: oldstyle
+        columns:
+          - name: column0
+            description: Domain vertex id.
+          - name: column1
+            description: Reversed host name.
+          - name: column2
+            description: Host count for the domain.
+
+      - name: domain_edges
+        description: |
+            Domain graph directed edges for the configured Common Crawl snapshot.
+            Note: this file is ~14GB compressed and may take a while to download.
+        config:
+          external_location: |
+            read_csv('https://data.commoncrawl.org/projects/hyperlinkgraph/{{ var("commoncrawl_snapshot") }}/domain/{{ var("commoncrawl_snapshot") }}-domain-edges.txt.gz', delim = '\t', header = false, columns = {'column0': 'BIGINT', 'column1': 'BIGINT'})
+          formatter: oldstyle
+        columns:
+          - name: column0
+            description: Source domain vertex id.
+          - name: column1
+            description: Destination domain vertex id.

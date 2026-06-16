@@ -1,0 +1,5 @@
+version: 2
+
+models:
+  - name: stg_hackernews__stories
+    description: Hacker News story rows from the full MotherDuck Hacker News share.

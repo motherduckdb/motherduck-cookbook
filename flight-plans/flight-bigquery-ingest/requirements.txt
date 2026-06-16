@@ -1,0 +1,5 @@
+duckdb==1.5.2
+# The `bigquery` extension is a DuckDB community extension loaded at runtime
+# (INSTALL bigquery FROM community), not a pip package, so it is not listed
+# here. There is no pip BigQuery client dependency: all BigQuery access goes
+# through that extension. duckdb has no required dependencies of its own.

@@ -1,0 +1,6 @@
+duckdb==1.5.2
+# `tenacity` provides the jittered exponential-backoff retry wrapper around each
+# per-table load. The `postgres` extension is a DuckDB CORE extension loaded at
+# runtime (INSTALL postgres; LOAD postgres), not a pip package, so it is not
+# listed here; there is no pip Postgres client dependency.
+tenacity==9.0.0

@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: int_domain_edges
+    description: Domain graph edges where the configured target domain is the destination.
+    columns:
+      - name: source_domain_id
+        tests:
+          - not_null
+      - name: target_domain_id
+        tests:
+          - not_null
+
+  - name: int_domain_edges_with_rank
+    description: Target-domain inbound edges enriched with Common Crawl rank metrics for source and target domains.
+    columns:
+      - name: source_domain_id
+        tests:
+          - not_null
+      - name: target_domain_id
+        tests:
+          - not_null
+
+  - name: int_hackernews_domain_stories
+    description: Hacker News stories matched to target or linked domains.
+    columns:
+      - name: domain_id
+        tests:
+          - not_null
+      - name: story_id
+        tests:
+          - not_null
+      - name: matched_on
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["url_host", "title", "text"]

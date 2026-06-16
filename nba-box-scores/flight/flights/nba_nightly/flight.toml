@@ -1,0 +1,8 @@
+[flight]
+name = "nba_nightly"
+description = "NBA current-season ingest. Replaces the legacy GH Actions nightly-sync workflow."
+md_token_name = "dives-loader-nba"
+schedule_cron = "0 16 * * *"  # daily 16:00 UTC, matches the legacy cron
+extra_requirements = []
+config = {}
+md_secret_names = []

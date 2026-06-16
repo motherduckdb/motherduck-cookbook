@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node bundle.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

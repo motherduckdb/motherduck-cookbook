@@ -1,0 +1,20 @@
+{
+  "name": "vercel-agent-analytics",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vercel log drain collector that writes AI bot + agent traffic to MotherDuck",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/local-server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.4.4-r.1",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.6.0"
+  }
+}

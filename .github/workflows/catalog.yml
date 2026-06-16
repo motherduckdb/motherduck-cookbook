@@ -1,0 +1,247 @@
+name: Catalog
+
+on:
+  pull_request:
+    paths:
+      - "**/README.md"
+      - "catalog.schema.json"
+      - "scripts/build-catalog.py"
+      - "tests/test_build_catalog.py"
+      - "tests/test_catalog_workflow.py"
+      - ".github/workflows/catalog.yml"
+  push:
+    paths:
+      - "**/README.md"
+      - "catalog.schema.json"
+      - "scripts/build-catalog.py"
+      - "tests/test_build_catalog.py"
+      - "tests/test_catalog_workflow.py"
+      - ".github/workflows/catalog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate catalog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run catalog tests
+        run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py -q
+
+      - name: Build catalog preview
+        run: |
+          ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          mkdir -p .catalog-preview
+          uv run scripts/build-catalog.py \
+            --output .catalog-preview/catalog.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${ref}" \
+            --schema-url "catalog.schema.json"
+          cp catalog.schema.json .catalog-preview/catalog.schema.json
+
+      - name: Validate catalog preview schema
+        run: uv run --with check-jsonschema check-jsonschema --schemafile catalog.schema.json .catalog-preview/catalog.json
+
+      - name: Detect changed catalog READMEs
+        id: catalog-source-changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "+${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --depth=1
+
+          mapfile -t changed < <(
+            git diff --name-status "origin/${{ github.base_ref }}" HEAD |
+              while IFS=$'\t' read -r status first second; do
+                candidate="${second:-$first}"
+
+                if [[ "$candidate" != "README.md" && "$candidate" != */README.md ]]; then
+                  continue
+                fi
+
+                if [[ -f "$candidate" ]] && head -n 1 "$candidate" | grep -qx -- "---"; then
+                  printf '%s\n' "$candidate"
+                  continue
+                fi
+
+                if [[ ! -f "$candidate" ]] && git show "origin/${{ github.base_ref }}:$candidate" 2>/dev/null | head -n 1 | grep -qx -- "---"; then
+                  printf '%s (removed)\n' "$candidate"
+                fi
+              done |
+              sort -u
+          )
+
+          item_count="$(uv run python -c 'import json; from pathlib import Path; print(len(json.loads(Path(".catalog-preview/catalog.json").read_text())["items"]))')"
+
+          if [[ "${#changed[@]}" -gt 0 ]]; then
+            echo "has_changes=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_changes=false" >> "${GITHUB_OUTPUT}"
+          fi
+          echo "item_count=${item_count}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "changed_files<<EOF"
+            printf '%s\n' "${changed[@]}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload catalog preview
+        id: upload-catalog-preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-preview
+          path: .catalog-preview/
+          include-hidden-files: true
+
+      - name: Comment catalog preview
+        if: github.event_name == 'pull_request' && steps.catalog-source-changes.outputs.has_changes == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          ARTIFACT_URL: ${{ steps.upload-catalog-preview.outputs.artifact-url }}
+          CHANGED_FILES: ${{ steps.catalog-source-changes.outputs.changed_files }}
+          ITEM_COUNT: ${{ steps.catalog-source-changes.outputs.item_count }}
+        with:
+          script: |
+            const marker = '<!-- motherduck-catalog-preview -->'
+            const artifactUrl = process.env.ARTIFACT_URL
+            const changedFiles = process.env.CHANGED_FILES
+              .split('\n')
+              .map((file) => file.trim())
+              .filter(Boolean)
+            const changedList = changedFiles.map((file) => `- \`${file}\``).join('\n')
+            const body = [
+              marker,
+              '## Catalog Preview',
+              '',
+              `Artifact: [catalog-preview](${artifactUrl})`,
+              '',
+              `Catalog items: ${process.env.ITEM_COUNT}`,
+              '',
+              'Changed catalog README files:',
+              '',
+              changedList,
+            ].join('\n')
+
+            const { owner, repo } = context.repo
+            const issue_number = context.payload.pull_request.number
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            })
+            const previous = comments.data.find((comment) => comment.body?.includes(marker))
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: previous.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              })
+            }
+
+      - name: Remove stale catalog preview comment
+        if: github.event_name == 'pull_request' && steps.catalog-source-changes.outputs.has_changes != 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- motherduck-catalog-preview -->'
+            const { owner, repo } = context.repo
+            const issue_number = context.payload.pull_request.number
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            })
+            for (const comment of comments.data.filter((comment) => comment.body?.includes(marker))) {
+              await github.rest.issues.deleteComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+              })
+            }
+
+  release:
+    name: Publish catalog release
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build release catalog
+        run: |
+          mkdir -p .catalog-release
+          uv run scripts/build-catalog.py \
+            --output .catalog-release/catalog.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${GITHUB_SHA}" \
+            --schema-url "catalog.schema.json"
+
+      - name: Validate release catalog schema
+        run: uv run --with check-jsonschema check-jsonschema --schemafile catalog.schema.json .catalog-release/catalog.json
+
+      - name: Prepare release metadata
+        id: release-metadata
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          tag="catalog-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-${short_sha}"
+          item_count="$(uv run python -c 'import json; from pathlib import Path; print(len(json.loads(Path(".catalog-release/catalog.json").read_text())["items"]))')"
+          {
+            echo "tag=${tag}"
+            echo "title=Catalog ${short_sha}"
+            echo "item_count=${item_count}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "Catalog generated from ${GITHUB_REPOSITORY}@${GITHUB_SHA}."
+            echo
+            echo "Items: ${item_count}"
+            echo
+            echo "Download latest catalog:"
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/catalog.json"
+          } > .catalog-release/release-notes.md
+
+      - name: Create catalog release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.release-metadata.outputs.tag }}" \
+            "./.catalog-release/catalog.json#catalog.json" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${{ steps.release-metadata.outputs.title }}" \
+            --notes-file .catalog-release/release-notes.md \
+            --target "${GITHUB_SHA}" \
+            --latest
