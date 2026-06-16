@@ -1,10 +1,13 @@
-"""MotherDuck Flight: query dbt MetricFlow metrics, fetching the project from git.
+"""MotherDuck Flight: query dbt MetricFlow metrics, fetching the project over HTTPS.
 
-A Flight runs as a single ``main.py`` in a fresh, torn-down container. Rather than
-embed a copy of the dbt project (which would drift from the canonical example),
-this Flight **fetches the dbt + MetricFlow project from git at run time** and runs
-the ``dbt`` and ``mf`` CLIs against it. Point ``GIT_REPO``/``GIT_REF`` at your own
-dbt repo to query your own semantic model — the engine here never changes.
+A Flight runs as a single ``main.py`` in a fresh, torn-down container with no git
+binary. Rather than embed a copy of the dbt project (which would drift from the
+canonical example), this Flight **downloads the dbt + MetricFlow project as a
+GitHub archive at run time** (stdlib only — no clone) and runs the ``dbt`` and
+``mf`` CLIs against it. Point ``GIT_REPO``/``GIT_REF`` at your own dbt repo to
+query your own semantic model; for a private repo, store a token in a MotherDuck
+``TYPE flights`` secret (param ``GIT_TOKEN``) and the authenticated GitHub API
+archive endpoint is used instead. The engine here never changes.
 
 The metric, grouping, and date window are chosen **per run through Flight config**.
 A Flight's ``config`` MAP is injected as environment variables; override it per run
@@ -65,44 +68,47 @@ def read_config() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Fetch the dbt project from git (with a tarball fallback if git is absent)
+# Fetch the dbt project as a GitHub archive over HTTPS (no git, stdlib only)
 # ---------------------------------------------------------------------------
 def fetch_project(cfg: dict[str, str], dest: Path) -> Path:
     """Materialize ``REPO_SUBDIR`` of the repo under ``dest`` and return the path
-    to that subdirectory. Prefer a sparse ``git clone``; if no ``git`` binary is
-    present, download the ref tarball over HTTPS (stdlib only) so the Flight still
-    runs in a minimal container."""
-    if shutil.which("git"):
-        checkout = _git_sparse_clone(cfg, dest)
-    else:
-        log.warning("no git binary found — falling back to the HTTPS tarball")
-        checkout = _tarball_download(cfg, dest)
+    to that subdirectory. The Flight container ships no git, so we never clone —
+    we download the repo as a gzip archive with the stdlib and extract it. Public
+    vs private is chosen at run time by whether a ``GIT_TOKEN`` secret resolves."""
+    token = resolve_secret("GIT_TOKEN")
+    url, headers = _archive_request(cfg, token)
+    checkout = _download_and_extract(url, headers, dest)
     return _locate_subdir(checkout, cfg["REPO_SUBDIR"])
 
 
-def _git_sparse_clone(cfg: dict[str, str], dest: Path) -> Path:
-    """Shallow, blobless, sparse clone of just ``REPO_SUBDIR`` — a few hundred KB."""
-    repo = dest / "repo"
-    run_cmd(
-        ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
-         "--branch", cfg["GIT_REF"], cfg["GIT_REPO"], str(repo)],
-        dest, os.environ,
-    )
-    run_cmd(
-        ["git", "-C", str(repo), "sparse-checkout", "set", cfg["REPO_SUBDIR"]],
-        dest, os.environ,
-    )
-    return repo
+def _archive_request(cfg: dict[str, str], token: str) -> tuple[str, dict[str, str]]:
+    """Build the archive URL and headers, deciding public vs private at run time.
 
-
-def _tarball_download(cfg: dict[str, str], dest: Path) -> Path:
-    """Download ``<repo>/archive/<ref>.tar.gz`` and extract it under ``dest``,
-    returning the single top-level directory GitHub wraps the archive in.
-    ``/archive/<ref>`` accepts a branch, tag, or commit SHA."""
+    Public  -> ``github.com/<owner>/<repo>/archive/<ref>.tar.gz`` (no auth).
+    Private -> ``api.github.com/repos/<owner>/<repo>/tarball/<ref>`` with a bearer
+    token, which 302-redirects to a short-lived signed download URL. Both accept a
+    branch, tag, or commit SHA as ``<ref>``. The token rides in the Authorization
+    header — never the URL — so it cannot leak into the Flight logs."""
     base = cfg["GIT_REPO"].removesuffix(".git")
-    url = f"{base}/archive/{cfg['GIT_REF']}.tar.gz"
-    log.info("downloading %s", url)
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 — fixed https host
+    ref = cfg["GIT_REF"]
+    if token:
+        owner_repo = base.removeprefix("https://github.com/")
+        log.info("fetching private repo %s @ %s", owner_repo, ref)
+        url = f"https://api.github.com/repos/{owner_repo}/tarball/{ref}"
+        return url, {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+    log.info("fetching public repo %s @ %s", base, ref)
+    return f"{base}/archive/{ref}.tar.gz", {}
+
+
+def _download_and_extract(url: str, headers: dict[str, str], dest: Path) -> Path:
+    """GET the gzip archive and extract it under ``dest``, returning the single
+    top-level directory GitHub wraps every archive in."""
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 — fixed https github host
         data = resp.read()
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(dest)  # noqa: S202 — trusted GitHub archive
@@ -112,10 +118,27 @@ def _tarball_download(cfg: dict[str, str], dest: Path) -> Path:
     return tops[0]
 
 
+def resolve_secret(param: str) -> str:
+    """Resolve a secret param from a MotherDuck ``TYPE flights`` secret. A local
+    run sets the bare env var (e.g. ``GIT_TOKEN``); deployed as a Flight, the
+    secret injects each param as ``<secret_name>_<PARAM>`` (the lowercased secret
+    name becomes a prefix), so accept the exact name first, then any var ending in
+    ``_<PARAM>``. Returns ``""`` when neither is set — i.e. a public repo. Mirrors
+    resolve_secret_param() in flight-snowflake-ingest."""
+    direct = os.environ.get(param, "").strip()
+    if direct:
+        return direct
+    suffix = f"_{param}"
+    for key, value in os.environ.items():
+        if key.endswith(suffix) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _locate_subdir(checkout: Path, repo_subdir: str) -> Path:
-    """Find ``repo_subdir`` inside the checkout. The git path leaves it at
-    ``<repo>/<subdir>``; the tarball path wraps everything in a ``<repo>-<ref>/``
-    top dir, so match on the trailing path components rather than a fixed prefix."""
+    """Find ``repo_subdir`` inside the checkout. GitHub wraps every archive in a
+    ``<repo>-<ref>/`` top dir, so the subdir sits at ``<top>/<subdir>`` — match on
+    the trailing path components rather than guessing that prefix."""
     target = Path(repo_subdir)
     direct = checkout / target
     if direct.is_dir():
@@ -131,7 +154,7 @@ def discover(subdir: Path) -> tuple[Path, Path]:
     """Within the fetched ``REPO_SUBDIR``, locate the dbt project dir (holds
     ``dbt_project.yml``) and the profiles dir (the nearest ancestor holding
     ``profiles.yml``). Scoping to ``subdir`` keeps it from matching a sibling
-    project elsewhere in the repo (the tarball path extracts the whole repo)."""
+    project elsewhere in the repo (the archive contains the whole repo)."""
     matches = sorted(subdir.rglob("dbt_project.yml"))
     if not matches:
         raise SystemExit(f"no dbt_project.yml found under {subdir}")

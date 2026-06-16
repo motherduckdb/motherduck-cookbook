@@ -2,8 +2,9 @@
 title: Query dbt MetricFlow Metrics as a Flight
 id: flight-dbt-metricflow
 description: >-
-  A reusable Flight that fetches a dbt + MetricFlow project from git, builds it on
-  MotherDuck, and runs mf query for a metric chosen per run through Flight config.
+  A reusable Flight that downloads a dbt + MetricFlow project from a GitHub repo
+  over HTTPS, builds it on MotherDuck, and runs mf query for a metric chosen per
+  run through Flight config.
   Each run appends the result to a snapshot table. Use when your dbt semantic model
   lives in a repo and you want one deployed Flight that answers many metric
   questions and builds a metric time series on a schedule.
@@ -16,10 +17,12 @@ tags: [dbt, metricflow]
 # Query dbt MetricFlow Metrics as a Flight
 
 A single-file Flight that builds a [dbt MetricFlow](https://docs.getdbt.com/docs/build/about-metricflow)
-semantic model on MotherDuck and queries it — fetching the dbt project **from git
-at run time** and choosing the metric, grouping, and date window **per run through
-Flight config**. Point `GIT_REPO`/`GIT_REF` at your own dbt repo to query your own
-model; one deployed Flight then answers many metric questions by overriding config
+semantic model on MotherDuck and queries it — downloading the dbt project as a
+GitHub archive **over HTTPS at run time** (no git binary needed) and choosing the
+metric, grouping, and date window **per run through Flight config**. Point
+`GIT_REPO`/`GIT_REF` at your own dbt repo to query your own model (public, or
+private via a Flights secret); one deployed Flight then answers many metric
+questions by overriding config
 when you trigger a run, no redeploy. Each run appends its result to a snapshot
 table, so a scheduled Flight builds a queryable time series of metric values.
 
@@ -30,16 +33,17 @@ durable.
 
 ## How it works
 
-A Flight runs as a single `flight.py` in a fresh container. Embedding a copy of
-the dbt project would drift from the canonical example, so `flight.py` **fetches
-the project from git at run time** and shells out to the `dbt` and `mf` CLIs
-against it:
+A Flight runs as a single `flight.py` in a fresh container that ships **no git
+binary**. Embedding a copy of the dbt project would drift from the canonical
+example, so `flight.py` **downloads the project over HTTPS at run time** (stdlib
+only — no clone) and shells out to the `dbt` and `mf` CLIs against it:
 
 1. Read config from the environment (Flight `config` keys arrive as env vars).
 2. Connect to MotherDuck (`md:`) and `CREATE DATABASE IF NOT EXISTS` the target.
-3. Fetch `REPO_SUBDIR` from `GIT_REPO`@`GIT_REF` into a temp dir — a sparse,
-   blobless, shallow `git clone` (a few hundred KB), with an HTTPS tarball
-   fallback if the container has no `git` binary.
+3. Download `GIT_REPO`@`GIT_REF` as a gzip archive into a temp dir and extract it.
+   Public vs private is decided at run time: with no `GIT_TOKEN` secret it uses the
+   public `…/archive/<ref>.tar.gz` endpoint; with one it uses the authenticated
+   GitHub API tarball endpoint (`api.github.com/repos/<owner>/<repo>/tarball/<ref>`).
 4. Discover the dbt project (`dbt_project.yml`) and the profile (`profiles.yml`)
    in the checkout by globbing, so any layout works.
 5. `dbt seed` and `dbt run --target motherduck` to build the models. The fetched
@@ -50,8 +54,8 @@ against it:
 7. Append each result row to the snapshot table, tagged with `run_at` and config.
 
 ```
-config (env) ── git fetch project ── dbt seed/run ── mf query ── snapshot table
-  override per run    GIT_REPO@GIT_REF    build on MotherDuck     append, JSON, run_at
+config (env) ── download archive ── dbt seed/run ── mf query ── snapshot table
+  override per run   GIT_REPO@GIT_REF    build on MotherDuck     append, JSON, run_at
 ```
 
 ### The config-override pattern
@@ -117,6 +121,25 @@ To query your own metrics, point these at your dbt repo. Your project needs a
 example uses `path: "md:{{ env_var('MD_DATABASE', 'ecommerce_test_db') }}"`, which
 the Flight feeds through `MD_DATABASE`. No code in `flight.py` changes.
 
+### Private repositories
+
+A public repo needs no credentials. For a **private** GitHub repo, store a
+personal access token (fine-grained, **Contents: Read-only** on that repo) in a
+MotherDuck `TYPE flights` secret with a `GIT_TOKEN` param:
+
+```sql
+CREATE SECRET git_auth IN motherduck (
+  TYPE flights,
+  GIT_TOKEN 'github_pat_...'
+);
+```
+
+`resolve_secret('GIT_TOKEN')` in `flight.py` reads it at run time — the Flight
+injects each secret param as `<secret_name>_GIT_TOKEN`, and the helper accepts
+either that or a bare `GIT_TOKEN` env var (handy locally). When a token is present,
+the Flight switches to the authenticated GitHub API archive endpoint and sends the
+token in an `Authorization` header (never in the URL, so it stays out of the logs).
+
 ## Questions to answer
 
 - Which git repo, ref, and subdirectory hold the dbt project (your fork, or the
@@ -129,14 +152,17 @@ the Flight feeds through `MD_DATABASE`. No code in `flight.py` changes.
 
 ## Caveats
 
-- **Run-time network + git.** The Flight fetches the project at run time, so the
-  container needs egress to the git host. It uses `git` when present and falls
-  back to the `https://<repo>/archive/<ref>.tar.gz` tarball (stdlib only) when it
-  is not. A **private** repo needs an authenticated clone URL or token (use a
-  Flights secret), not the public HTTPS URL.
-- **`GIT_REF` is a branch or tag for the sparse clone.** The git path uses
-  `--branch`, which does not accept a bare commit SHA; the tarball fallback path
-  (`/archive/<ref>`) does accept a SHA. Pin to a tag for reproducible runs.
+- **Run-time network, no git.** The Flight downloads the project archive over
+  HTTPS at run time (stdlib only — the container has no `git`), so it needs egress
+  to GitHub. The archive endpoints are **GitHub-specific**; a non-GitHub host
+  (GitLab, Bitbucket, self-hosted) would need a different fetch.
+- **A private repo needs a `GIT_TOKEN` secret.** Without one, the public
+  `…/archive/<ref>.tar.gz` URL 404s on a private repo. Store a token in a `TYPE
+  flights` secret (see [Private repositories](#private-repositories)); the Flight
+  then uses the authenticated API endpoint.
+- **`GIT_REF` accepts a branch, tag, or commit SHA.** Both the public and
+  authenticated archive endpoints resolve any of the three. Pin to a tag or SHA
+  for reproducible runs.
 - **Override changes values, not keys.** A per-run `config` override only sets new
   values for keys that already exist on the Flight. The defaults include every key
   below; set the value you want.
@@ -160,9 +186,9 @@ model itself lives in the git repo you point the Flight at, not in `flight.py`.
 
 | Config key | Default | Purpose |
 |---|---|---|
-| `GIT_REPO` | `…/motherduck-cookbook.git` | Repo holding the dbt project. Point at your fork. |
-| `GIT_REF` | `main` | Branch or tag to fetch (tarball fallback also accepts a SHA). |
-| `REPO_SUBDIR` | `dbt-metricflow` | Path within the repo to sparse-checkout. |
+| `GIT_REPO` | `…/motherduck-cookbook.git` | GitHub repo holding the dbt project. Point at your fork. |
+| `GIT_REF` | `main` | Branch, tag, or commit SHA to download as an archive. |
+| `REPO_SUBDIR` | `dbt-metricflow` | Path within the repo to run from (extracted from the archive). |
 | `METRICS` | `revenue,orders,customers` | Comma-separated metric(s) `mf query` computes. Override per run. |
 | `GROUP_BY` | `metric_time__month` | Dimension(s) to slice by, e.g. `metric_time__day`, `order_id__status`. |
 | `START_DATE` | `2024-01-01` | `mf query --start-time`; must fall inside the time spine. |
@@ -171,24 +197,31 @@ model itself lives in the git repo you point the Flight at, not in `flight.py`.
 | `SNAPSHOT_TABLE` | `metric_snapshots` | Append-only table of results (`run_at`, config, `result` JSON). |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Never put it in config. |
 
+`GIT_TOKEN` is **not** a config key — it is a secret. Store it in a `TYPE flights`
+secret (see [Private repositories](#private-repositories)) so it never lands in the
+Flight's `config` MAP or the logs. Public repos need no token at all.
+
 ## Run it
 
 You need a MotherDuck account and an access token. The default repo/ref make a
 fresh deploy produce a successful run with no other credentials.
 
-Smoke-test locally before deploying (this fetches the project from git, builds it
-in your account, and appends one batch to `metric_snapshots`):
+Smoke-test locally before deploying (this downloads the project over HTTPS, builds
+it in your account, and appends one batch to `metric_snapshots`):
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
 uv run --with-requirements requirements.txt flight.py
 ```
 
-Override any default inline, for example a different metric and your own repo:
+Override any default inline, for example a different metric and your own repo. For
+a private repo, set `GIT_TOKEN` as a bare env var locally (deployed, it comes from
+the Flights secret instead):
 
 ```bash
 METRICS=revenue_per_customer GROUP_BY=metric_time__month \
 GIT_REPO=https://github.com/you/your-dbt-repo.git GIT_REF=main REPO_SUBDIR=analytics \
+GIT_TOKEN=github_pat_... \
   uv run --with-requirements requirements.txt flight.py
 ```
 
@@ -204,7 +237,9 @@ arguments), passing:
   `GROUP_BY`, `START_DATE`, `END_DATE`, `MD_DATABASE`
 
 A MotherDuck token is attached automatically and injected at run time as
-`MOTHERDUCK_TOKEN`; no token argument is needed.
+`MOTHERDUCK_TOKEN`; no token argument is needed. For a private dbt repo, also
+`CREATE SECRET … (TYPE flights, GIT_TOKEN '…')` first (see
+[Private repositories](#private-repositories)) — the Flight injects it at run time.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := …)` (the id is returned by `MD_CREATE_FLIGHT` and
@@ -224,8 +259,11 @@ updates are metadata-only and do not create a new version.
   result JSON) is written with bound parameters, never string-formatted into SQL.
 - **Fetch a trusted ref.** The Flight runs whatever code the fetched ref contains.
   Point `GIT_REPO`/`GIT_REF` at a repo and branch/tag you control; pin a tag for
-  reproducibility. A private repo's credentials belong in a Flights secret, not
-  in `config`.
+  reproducibility.
+- **Token in a secret, in the header.** A private repo's `GIT_TOKEN` belongs in a
+  `TYPE flights` secret, never in `config` (which is logged and stored on the
+  Flight). At run time the token is sent in the `Authorization` header of the
+  GitHub API request, not in the URL, so it does not reach the Flight logs.
 
 ## Learn more
 
@@ -237,5 +275,5 @@ updates are metadata-only and do not create a new version.
 - MetricFlow CLI reference: [dbt MetricFlow commands](https://docs.getdbt.com/docs/build/metricflow-commands).
 - Deeper MotherDuck or DuckDB questions: the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight that
-  fetches the project from git) and [`requirements.txt`](requirements.txt)
+  downloads the project over HTTPS) and [`requirements.txt`](requirements.txt)
   (`dbt-core`, `dbt-duckdb`, `dbt-metricflow`, `duckdb`).
