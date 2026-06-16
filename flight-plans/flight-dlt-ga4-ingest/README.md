@@ -10,7 +10,7 @@ description: >-
 type: template
 category: ingestion
 features: [flights]
-tags: [dlt, ingest, ga4, google-analytics]
+tags: [dlt, ingest]
 ---
 
 # Ingest Google Analytics 4 into MotherDuck with dlt as a Flight
