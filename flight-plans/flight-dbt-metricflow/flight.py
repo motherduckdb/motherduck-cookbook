@@ -67,18 +67,20 @@ def read_config() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Fetch the dbt project from git (with a tarball fallback if git is absent)
 # ---------------------------------------------------------------------------
-def fetch_project(cfg: dict[str, str], dest: Path) -> None:
-    """Materialize the dbt project under ``dest``. Prefer a sparse ``git clone``;
-    if no ``git`` binary is present, download the ref tarball over HTTPS (stdlib
-    only) so the Flight still runs in a minimal container."""
+def fetch_project(cfg: dict[str, str], dest: Path) -> Path:
+    """Materialize ``REPO_SUBDIR`` of the repo under ``dest`` and return the path
+    to that subdirectory. Prefer a sparse ``git clone``; if no ``git`` binary is
+    present, download the ref tarball over HTTPS (stdlib only) so the Flight still
+    runs in a minimal container."""
     if shutil.which("git"):
-        _git_sparse_clone(cfg, dest)
+        checkout = _git_sparse_clone(cfg, dest)
     else:
         log.warning("no git binary found — falling back to the HTTPS tarball")
-        _tarball_download(cfg, dest)
+        checkout = _tarball_download(cfg, dest)
+    return _locate_subdir(checkout, cfg["REPO_SUBDIR"])
 
 
-def _git_sparse_clone(cfg: dict[str, str], dest: Path) -> None:
+def _git_sparse_clone(cfg: dict[str, str], dest: Path) -> Path:
     """Shallow, blobless, sparse clone of just ``REPO_SUBDIR`` — a few hundred KB."""
     repo = dest / "repo"
     run_cmd(
@@ -90,10 +92,12 @@ def _git_sparse_clone(cfg: dict[str, str], dest: Path) -> None:
         ["git", "-C", str(repo), "sparse-checkout", "set", cfg["REPO_SUBDIR"]],
         dest, os.environ,
     )
+    return repo
 
 
-def _tarball_download(cfg: dict[str, str], dest: Path) -> None:
-    """Download ``<repo>/archive/<ref>.tar.gz`` and extract it under ``dest``.
+def _tarball_download(cfg: dict[str, str], dest: Path) -> Path:
+    """Download ``<repo>/archive/<ref>.tar.gz`` and extract it under ``dest``,
+    returning the single top-level directory GitHub wraps the archive in.
     ``/archive/<ref>`` accepts a branch, tag, or commit SHA."""
     base = cfg["GIT_REPO"].removesuffix(".git")
     url = f"{base}/archive/{cfg['GIT_REF']}.tar.gz"
@@ -102,20 +106,40 @@ def _tarball_download(cfg: dict[str, str], dest: Path) -> None:
         data = resp.read()
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(dest)  # noqa: S202 — trusted GitHub archive
+    tops = [p for p in dest.iterdir() if p.is_dir()]
+    if len(tops) != 1:
+        raise SystemExit(f"unexpected archive layout: {[p.name for p in tops]}")
+    return tops[0]
 
 
-def discover(root: Path) -> tuple[Path, Path]:
-    """Locate the dbt project dir (holds ``dbt_project.yml``) and the profiles
-    dir (the nearest ancestor holding ``profiles.yml``). Globbing makes this work
-    regardless of the checkout's top-level folder name or nesting depth."""
-    matches = sorted(root.rglob("dbt_project.yml"))
+def _locate_subdir(checkout: Path, repo_subdir: str) -> Path:
+    """Find ``repo_subdir`` inside the checkout. The git path leaves it at
+    ``<repo>/<subdir>``; the tarball path wraps everything in a ``<repo>-<ref>/``
+    top dir, so match on the trailing path components rather than a fixed prefix."""
+    target = Path(repo_subdir)
+    direct = checkout / target
+    if direct.is_dir():
+        return direct
+    parts = target.parts
+    for d in checkout.rglob(parts[-1]):
+        if d.is_dir() and d.parts[-len(parts):] == parts:
+            return d
+    raise SystemExit(f"subdirectory {repo_subdir!r} not found in the fetched repo")
+
+
+def discover(subdir: Path) -> tuple[Path, Path]:
+    """Within the fetched ``REPO_SUBDIR``, locate the dbt project dir (holds
+    ``dbt_project.yml``) and the profiles dir (the nearest ancestor holding
+    ``profiles.yml``). Scoping to ``subdir`` keeps it from matching a sibling
+    project elsewhere in the repo (the tarball path extracts the whole repo)."""
+    matches = sorted(subdir.rglob("dbt_project.yml"))
     if not matches:
-        raise SystemExit("no dbt_project.yml found in the fetched project")
+        raise SystemExit(f"no dbt_project.yml found under {subdir}")
     project_dir = matches[0].parent
     for candidate in (project_dir, *project_dir.parents):
         if (candidate / "profiles.yml").exists():
             return project_dir, candidate
-        if candidate == root:
+        if candidate == subdir:
             break
     raise SystemExit("no profiles.yml found near the dbt project")
 
@@ -199,8 +223,8 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        fetch_project(cfg, root)
-        project_dir, profiles_dir = discover(root)
+        subdir = fetch_project(cfg, root)
+        project_dir, profiles_dir = discover(subdir)
         log.info("project=%s profiles=%s", project_dir, profiles_dir)
         env["DBT_PROFILES_DIR"] = str(profiles_dir)
         # dbt/MetricFlow write working files under HOME; a Flight's HOME may be
