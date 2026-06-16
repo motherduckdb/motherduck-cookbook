@@ -1,8 +1,8 @@
+# MotherDuck cookbook
+
 <p align="center">
   <img src="assets/cookbook-duck.png" width="320" alt="MotherDuck Cookbook — a chef duck cooking code" />
 </p>
-
-# MotherDuck cookbook
 
 A cookbook of opinionated, ready-to-use examples for building with MotherDuck.
 Each example is a self-contained folder with working code and a README that
