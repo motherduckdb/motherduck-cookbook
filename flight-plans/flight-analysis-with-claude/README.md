@@ -4,10 +4,8 @@ id: flight-analysis-with-claude
 description: >-
   Schedule an automated agentic analysis in MotherDuck using Claude. Use it when
   you want to trigger Claude to find new insights in your latest data on a
-  recurring schedule instead of hand-coding the SQL. The Flight fans out one
-  Claude Agent SDK agent per entity, each given the read-only tools of the hosted
-  MotherDuck MCP server to explore the warehouse and write a "notable things"
-  brief, then persists every brief.
+  recurring schedule. The Flight creates multiple Claude agents each of which 
+  explores the warehouse, analyzes the data, and writes a summary of its findings.
 type: template
 category: automation
 features: [flights, mcp]
@@ -18,21 +16,19 @@ tags: [claude-agent-sdk, python]
 
 This Flight showcases how to schedule an automated agentic analysis in MotherDuck
 using Claude. Use it when you want to trigger Claude to find new insights in your
-latest data on a recurring schedule, instead of hand-coding the SQL for each
-report.
+latest data on a recurring schedule.
 
-A single-file Flight that produces a recurring set of analytical briefs, one per
-entity, where **Claude writes the analysis instead of you hand-coding the SQL**.
+It's composed of a single-file Flight that produces a recurring set of analytical briefs, one per
+entity, where **Claude writes the analysis**.
 Each run discovers a list of entities, then fans out one
 [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) agent per
 entity under a concurrency cap. Each agent is given the **read-only tools of the
 hosted MotherDuck MCP server** (`query`, `list_tables`, `list_columns`,
 `search_catalog`, `query_context_layer`, ...) and a prompt; it explores the
 warehouse and returns a ranked "notable things" brief grounded in real query
-results. The run stores every brief and logs a batch summary; one entity's
-failure never aborts the batch.
+results. The run stores every brief and logs a batch summary.
 
-The shipped example briefs **NYC 311 service requests by borough** using the
+This example analyzes **NYC 311 service requests by borough** using the
 public `sample_data` dataset, so a fresh deploy runs end to end with no data of
 your own. Swap the discovery query, the source table, and the prompt to point it
 at your entities (customers, regions, services, repos — anything you can
