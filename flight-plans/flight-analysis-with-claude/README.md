@@ -2,11 +2,12 @@
 title: Run Agentic Analysis From a Flight With the Claude Agent SDK
 id: flight-analysis-with-claude
 description: >-
-  A reusable Flight that runs scheduled agentic analysis: it fans out one Claude
-  Agent SDK agent per entity, each given the read-only tools of the hosted
+  Schedule an automated agentic analysis in MotherDuck using Claude. Use it when
+  you want to trigger Claude to find new insights in your latest data on a
+  recurring schedule instead of hand-coding the SQL. The Flight fans out one
+  Claude Agent SDK agent per entity, each given the read-only tools of the hosted
   MotherDuck MCP server to explore the warehouse and write a "notable things"
-  brief, then persists every brief. Use when you want a recurring run where
-  Claude writes the analysis instead of hand-coded SQL.
+  brief, then persists every brief.
 type: template
 category: automation
 features: [flights, mcp]
@@ -14,6 +15,11 @@ tags: [claude-agent-sdk, python]
 ---
 
 # Run Agentic Analysis From a Flight With the Claude Agent SDK
+
+This Flight showcases how to schedule an automated agentic analysis in MotherDuck
+using Claude. Use it when you want to trigger Claude to find new insights in your
+latest data on a recurring schedule, instead of hand-coding the SQL for each
+report.
 
 A single-file Flight that produces a recurring set of analytical briefs, one per
 entity, where **Claude writes the analysis instead of you hand-coding the SQL**.
@@ -25,20 +31,6 @@ hosted MotherDuck MCP server** (`query`, `list_tables`, `list_columns`,
 warehouse and returns a ranked "notable things" brief grounded in real query
 results. The run stores every brief and logs a batch summary; one entity's
 failure never aborts the batch.
-
-**How the agent reaches MCP — and why it's done this way.** The agent does *not*
-connect the SDK to the remote MCP server directly: the Agent SDK's bundled CLI
-cannot talk to the hosted endpoint (its HTTP-MCP client fails with `Connection
-closed`), even though the server is healthy for any standard client. So
-`flight.py` includes a tiny JSON-RPC client (`MotherDuckMCPClient`) that calls
-the hosted server over plain HTTP — which works fine from Python — and wraps each
-hosted **read-only** tool as an *in-process* SDK tool that forwards to it. The
-agent only ever sees in-process tools (which the CLI runs reliably); the HTTP
-hop happens in our code. The hosted tool's own JSON Schema is reused verbatim, so
-new read-only tools the server adds (for example, more context-layer tools)
-appear automatically with no code change. Built-in tools are disabled and only
-read-only tools are mirrored, so the agent cannot shell out or mutate anything —
-least privilege for an unattended, scheduled job.
 
 The shipped example briefs **NYC 311 service requests by borough** using the
 public `sample_data` dataset, so a fresh deploy runs end to end with no data of
@@ -117,18 +109,16 @@ infra steps); only the agent's exploration goes through the MCP tools.
   read-only tool with an unusual name (it would be excluded) or a mutating tool
   with an unusual name (it would slip through). The strongest backstop is still
   the token's permissions — see [Security](#security).
-- **The hosted MCP server can't be used directly through the SDK (today).** It's
-  tempting to set `mcp_servers={"motherduck": {"type": "http", "url":
-  "https://api.motherduck.com/mcp", ...}}` and skip the bridge. With the pinned
-  `claude-agent-sdk` version this fails: the bundled CLI's HTTP-MCP client errors
-  with `Connection closed` on tool calls, even though the server is healthy for a
-  standard client. Worse, if you leave built-in tools enabled
-  (`bypassPermissions` without `tools=[]`), the failure is silently masked — the
-  agent falls back to running SQL through the `Bash` tool, so it looks like it
-  works while the MCP server is never used. The in-process bridge in `flight.py`
-  side-steps this: the CLI only sees in-process tools, and the (working) HTTP
-  call happens in Python. This may become unnecessary if a future SDK fixes the
-  CLI's HTTP-MCP client.
+- **How the agent reaches MCP: an in-process bridge.** The agent does *not* point
+  the SDK at the hosted MCP server directly. With the pinned `claude-agent-sdk`,
+  the bundled CLI's HTTP-MCP client fails with `Connection closed` (even though
+  the server is healthy for a standard client), so `flight.py` calls the hosted
+  server over plain HTTP from Python and mirrors each read-only tool as an
+  in-process SDK tool, which the CLI runs reliably. Gotcha: if you try the direct
+  route and leave built-in tools enabled (no `tools=[]`), the failure is silently
+  masked — the agent falls back to running SQL through `Bash` and never uses the
+  MCP server. The bridge may become unnecessary once a future SDK fixes the CLI's
+  HTTP-MCP client.
 - **Frozen sample data.** `sample_data` ends in 2023 and never changes, so the
   window is anchored to `MAX(created_date)`. If you point this at a live table,
   switch the anchor to `now()` or briefs will drift to a fixed historical window.
