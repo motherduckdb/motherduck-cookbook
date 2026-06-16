@@ -1,4 +1,4 @@
-duckdb==1.5.2
+duckdb==1.5.3
 # pyarrow bridges the export direction: a MotherDuck query result is materialized
 # as an Arrow table in the Flight container, then handed to a local DuckDB
 # connection that writes it to Google Sheets. The `gsheets` extension itself is a
