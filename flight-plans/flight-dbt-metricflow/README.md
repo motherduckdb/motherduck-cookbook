@@ -2,11 +2,11 @@
 title: Query dbt MetricFlow Metrics as a Flight
 id: flight-dbt-metricflow
 description: >-
-  A reusable Flight that bundles a dbt + MetricFlow semantic model, builds it on
+  A reusable Flight that fetches a dbt + MetricFlow project from git, builds it on
   MotherDuck, and runs mf query for a metric chosen per run through Flight config.
-  Each run appends the result to a snapshot table. Use when you want one deployed
-  Flight that answers many metric questions and builds a metric time series on a
-  schedule.
+  Each run appends the result to a snapshot table. Use when your dbt semantic model
+  lives in a repo and you want one deployed Flight that answers many metric
+  questions and builds a metric time series on a schedule.
 type: template
 category: analytics
 features: [flights]
@@ -15,12 +15,12 @@ tags: [dbt, metricflow]
 
 # Query dbt MetricFlow Metrics as a Flight
 
-A single-file Flight that defines metrics once with [dbt MetricFlow](https://docs.getdbt.com/docs/build/about-metricflow)
-and queries them on MotherDuck — with the metric, grouping, and date window
-chosen **per run through Flight config**. One deployed Flight answers many metric
-questions: override `METRICS`, `GROUP_BY`, `START_DATE`, or `END_DATE` when you
-trigger a run and the same semantic model serves a different query, no redeploy
-and no project clone per variant. Each run appends its result to a snapshot
+A single-file Flight that builds a [dbt MetricFlow](https://docs.getdbt.com/docs/build/about-metricflow)
+semantic model on MotherDuck and queries it — fetching the dbt project **from git
+at run time** and choosing the metric, grouping, and date window **per run through
+Flight config**. Point `GIT_REPO`/`GIT_REF` at your own dbt repo to query your own
+model; one deployed Flight then answers many metric questions by overriding config
+when you trigger a run, no redeploy. Each run appends its result to a snapshot
 table, so a scheduled Flight builds a queryable time series of metric values.
 
 This is the Flight counterpart to the local [dbt-metricflow](../../dbt-metricflow)
@@ -30,24 +30,28 @@ durable.
 
 ## How it works
 
-A Flight runs as a single `flight.py` in a fresh container, but a dbt project is
-many files. So `flight.py` **embeds the dbt + MetricFlow project as string
-constants** and materializes it to a temp working directory at run time, then
-shells out to the `dbt` and `mf` CLIs:
+A Flight runs as a single `flight.py` in a fresh container. Embedding a copy of
+the dbt project would drift from the canonical example, so `flight.py` **fetches
+the project from git at run time** and shells out to the `dbt` and `mf` CLIs
+against it:
 
 1. Read config from the environment (Flight `config` keys arrive as env vars).
 2. Connect to MotherDuck (`md:`) and `CREATE DATABASE IF NOT EXISTS` the target.
-3. Write the embedded project to a temp dir and render `profiles.yml` with the
-   target database, pointing dbt and `mf` at the `motherduck` target.
-4. `dbt seed` and `dbt run` to build the orders fact table, time spine, and
-   semantic model.
-5. `mf query --metrics … --group-by … --start-time … --end-time …`, writing a CSV.
-6. Append each result row to the snapshot table, tagged with `run_at` and the
-   exact config used.
+3. Fetch `REPO_SUBDIR` from `GIT_REPO`@`GIT_REF` into a temp dir — a sparse,
+   blobless, shallow `git clone` (a few hundred KB), with an HTTPS tarball
+   fallback if the container has no `git` binary.
+4. Discover the dbt project (`dbt_project.yml`) and the profile (`profiles.yml`)
+   in the checkout by globbing, so any layout works.
+5. `dbt seed` and `dbt run --target motherduck` to build the models. The fetched
+   project's own `profiles.yml` is used as-is; its MotherDuck path reads the
+   database name from `MD_DATABASE` via dbt's `env_var()`, so nothing is written
+   from scratch.
+6. `mf query --metrics … --group-by … --start-time … --end-time …`, writing a CSV.
+7. Append each result row to the snapshot table, tagged with `run_at` and config.
 
 ```
-config (env) -> embedded dbt project -> dbt seed/run -> mf query -> snapshot table
-   override per run                       build on MotherDuck      append, tagged with run_at
+config (env) ── git fetch project ── dbt seed/run ── mf query ── snapshot table
+  override per run    GIT_REPO@GIT_REF    build on MotherDuck     append, JSON, run_at
 ```
 
 ### The config-override pattern
@@ -66,7 +70,8 @@ FROM MD_CREATE_FLIGHT(
     'METRICS': 'revenue,orders,customers',
     'GROUP_BY': 'metric_time__month',
     'START_DATE': '2024-01-01',
-    'END_DATE': '2024-12-31'
+    'END_DATE': '2024-12-31',
+    'MD_DATABASE': 'ecommerce_metrics_flight'
   }
 );
 
@@ -85,8 +90,8 @@ override changes values, it cannot introduce a new key.
 
 `mf query` output columns change with the metric and grouping you ask for, so a
 fixed-column table would break the first time someone overrides `METRICS`. Each
-result row is therefore stored as a `JSON` column, keeping one table usable
-across every run:
+result row is therefore stored as a `JSON` column, keeping one table usable across
+every run:
 
 ```sql
 SELECT run_at, metrics, group_by, result
@@ -99,42 +104,48 @@ FROM ecommerce_metrics_flight.metric_snapshots
 WHERE metrics = 'revenue,orders,customers';
 ```
 
-### The semantic model
+Verified across two runs: a `revenue,orders,customers` run and a
+`revenue_per_customer` override produce different JSON shapes yet coexist in the
+one table, each tagged with the config that produced it.
 
-The embedded project mirrors the local example: an `orders` semantic model over a
-20-row seed (`fct_orders`) with measures (`total_revenue`, `order_count`,
-`unique_customers`, …) and metrics (`revenue`, `orders`, `customers`,
-`avg_order_value`, and the derived `revenue_per_customer`). Edit the
-`SEMANTIC_MODELS_YML`, `FCT_ORDERS_SQL`, and `RAW_ORDERS_CSV` constants in
-`flight.py` to model your own data; point `FCT_ORDERS_SQL` at an existing table
-instead of the seed for a real fact source.
+### Querying your own model
+
+The default `GIT_REPO`/`GIT_REF`/`REPO_SUBDIR` point at this cookbook's
+[dbt-metricflow](../../dbt-metricflow) example so a fresh deploy runs end to end.
+To query your own metrics, point these at your dbt repo. Your project needs a
+`profiles.yml` with a `motherduck` target whose path resolves the database — the
+example uses `path: "md:{{ env_var('MD_DATABASE', 'ecommerce_test_db') }}"`, which
+the Flight feeds through `MD_DATABASE`. No code in `flight.py` changes.
 
 ## Questions to answer
 
+- Which git repo, ref, and subdirectory hold the dbt project (your fork, or the
+  default example)?
 - Which metrics matter, and what dimension and date window should each run query?
-- What is the source fact table and its grain — the bundled seed, or an existing
-  MotherDuck table you point `fct_orders` at?
 - Which target database should hold the built models and the snapshot table?
 - Will runs vary the metric per trigger (config override), run on a fixed
   schedule, or both?
-- Does the time spine range (`2024-01-01` to `2025-12-31`) cover your dates?
+- Does the project's time spine range cover your requested dates?
 
 ## Caveats
 
+- **Run-time network + git.** The Flight fetches the project at run time, so the
+  container needs egress to the git host. It uses `git` when present and falls
+  back to the `https://<repo>/archive/<ref>.tar.gz` tarball (stdlib only) when it
+  is not. A **private** repo needs an authenticated clone URL or token (use a
+  Flights secret), not the public HTTPS URL.
+- **`GIT_REF` is a branch or tag for the sparse clone.** The git path uses
+  `--branch`, which does not accept a bare commit SHA; the tarball fallback path
+  (`/archive/<ref>`) does accept a SHA. Pin to a tag for reproducible runs.
 - **Override changes values, not keys.** A per-run `config` override only sets new
-  values for keys that already exist on the Flight. To query a metric the Flight
-  was not created with, the keys (`METRICS`, …) must exist — they do by default;
-  set the metric name as the value.
-- **Time-dimension queries are bounded by the spine.** The embedded
-  `metricflow_time_spine` generates dates from `2024-01-01` to `2025-12-31`.
-  `START_DATE`/`END_DATE` outside that window, or grouping by `metric_time__*`
-  beyond it, returns no rows. Widen the `generate_series` range in `TIME_SPINE_SQL`.
-- **Build runs every time.** Each run does `dbt seed` + `dbt run` before querying,
-  because the container is fresh. For the small bundled project this is fast; a
-  large project makes every run slower.
-- **`mf query` must produce a CSV.** A misspelled metric or dimension makes `mf`
-  exit non-zero (the Flight fails) or write nothing; check the metric/group-by
-  names against the semantic model.
+  values for keys that already exist on the Flight. The defaults include every key
+  below; set the value you want.
+- **Time-dimension queries are bounded by the spine.** The example spine generates
+  `2024-01-01` to `2025-12-31`. `START_DATE`/`END_DATE` outside that window, or
+  grouping by `metric_time__*` beyond it, returns no rows. Widen the spine in your
+  project.
+- **Build runs every time.** Each run does `dbt seed` + `dbt run` against a fresh
+  checkout, so a large project makes every run slower.
 - **Derived metrics reference metric names, not measures.** `revenue_per_customer`
   is `revenue / customers`, both metrics. A raw measure name in a derived `expr`
   will not resolve.
@@ -145,44 +156,39 @@ instead of the seed for a real fact source.
 
 Every knob is a config/env value read by `read_config()` at the top of
 `flight.py`; set them as Flight config rather than by editing code. The semantic
-model itself lives in the embedded constants you edit once for your data.
+model itself lives in the git repo you point the Flight at, not in `flight.py`.
 
 | Config key | Default | Purpose |
 |---|---|---|
+| `GIT_REPO` | `…/motherduck-cookbook.git` | Repo holding the dbt project. Point at your fork. |
+| `GIT_REF` | `main` | Branch or tag to fetch (tarball fallback also accepts a SHA). |
+| `REPO_SUBDIR` | `dbt-metricflow` | Path within the repo to sparse-checkout. |
 | `METRICS` | `revenue,orders,customers` | Comma-separated metric(s) `mf query` computes. Override per run. |
 | `GROUP_BY` | `metric_time__month` | Dimension(s) to slice by, e.g. `metric_time__day`, `order_id__status`. |
 | `START_DATE` | `2024-01-01` | `mf query --start-time`; must fall inside the time spine. |
 | `END_DATE` | `2024-12-31` | `mf query --end-time`; must fall inside the time spine. |
-| `TARGET_DATABASE` | `ecommerce_metrics_flight` | MotherDuck database the models and snapshot table are built into. Created if missing. |
+| `MD_DATABASE` | `ecommerce_metrics_flight` | Target database; fed to the project's `profiles.yml` `env_var()`. Created if missing. |
 | `SNAPSHOT_TABLE` | `metric_snapshots` | Append-only table of results (`run_at`, config, `result` JSON). |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Never put it in config. |
 
-Edit these constants in `flight.py` to change the model itself:
-
-| Constant | Purpose |
-|---|---|
-| `SEMANTIC_MODELS_YML` | Entities, dimensions, measures, metrics — the source of truth. |
-| `FCT_ORDERS_SQL` | The fact model; point it at an existing table for a real source. |
-| `RAW_ORDERS_CSV` | The bundled seed so a fresh deploy runs end to end. |
-| `TIME_SPINE_SQL` | Date spine backing time dimensions; widen the range as needed. |
-
 ## Run it
 
-You need a MotherDuck account and an access token. The bundled seed makes a fresh
-deploy produce a successful run with no other credentials.
+You need a MotherDuck account and an access token. The default repo/ref make a
+fresh deploy produce a successful run with no other credentials.
 
-Smoke-test locally before deploying:
+Smoke-test locally before deploying (this fetches the project from git, builds it
+in your account, and appends one batch to `metric_snapshots`):
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
 uv run --with-requirements requirements.txt flight.py
 ```
 
-That builds `ecommerce_metrics_flight` in your account and appends one batch of
-results to `metric_snapshots`. Override any default inline, for example:
+Override any default inline, for example a different metric and your own repo:
 
 ```bash
 METRICS=revenue_per_customer GROUP_BY=metric_time__month \
+GIT_REPO=https://github.com/you/your-dbt-repo.git GIT_REF=main REPO_SUBDIR=analytics \
   uv run --with-requirements requirements.txt flight.py
 ```
 
@@ -194,8 +200,8 @@ arguments), passing:
 - `name`: a Flight name, for example `dbt_metricflow`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
-- `config`: `METRICS`, `GROUP_BY`, `START_DATE`, `END_DATE` and any other key
-  from [What you'll adjust](#what-youll-adjust) you want to override
+- `config`: `GIT_REPO`/`GIT_REF`/`REPO_SUBDIR` for your project, plus `METRICS`,
+  `GROUP_BY`, `START_DATE`, `END_DATE`, `MD_DATABASE`
 
 A MotherDuck token is attached automatically and injected at run time as
 `MOTHERDUCK_TOKEN`; no token argument is needed.
@@ -211,13 +217,15 @@ updates are metadata-only and do not create a new version.
 
 ## Security
 
-- **Identifier safety.** `TARGET_DATABASE` and `SNAPSHOT_TABLE` flow into `CREATE`
+- **Identifier safety.** `MD_DATABASE` and `SNAPSHOT_TABLE` flow into `CREATE`
   statements that cannot be parameterized, so each is double-quote-escaped (`_ident`)
   before any SQL runs.
 - **Parameterized data.** The snapshot row (metrics, grouping, dates, and the
   result JSON) is written with bound parameters, never string-formatted into SQL.
-- **Config is not secret.** Flight config is for non-secret values only; metric
-  names and dates are safe to put there. The token stays Flight-injected.
+- **Fetch a trusted ref.** The Flight runs whatever code the fetched ref contains.
+  Point `GIT_REPO`/`GIT_REF` at a repo and branch/tag you control; pin a tag for
+  reproducibility. A private repo's credentials belong in a Flights secret, not
+  in `config`.
 
 ## Learn more
 
@@ -228,6 +236,6 @@ updates are metadata-only and do not create a new version.
   [EXAMPLES.md](../../dbt-metricflow/EXAMPLES.md).
 - MetricFlow CLI reference: [dbt MetricFlow commands](https://docs.getdbt.com/docs/build/metricflow-commands).
 - Deeper MotherDuck or DuckDB questions: the `ask_docs_question` MCP tool.
-- Files in this template: [`flight.py`](flight.py) (the single-file Flight with
-  the embedded dbt project) and [`requirements.txt`](requirements.txt)
+- Files in this template: [`flight.py`](flight.py) (the single-file Flight that
+  fetches the project from git) and [`requirements.txt`](requirements.txt)
   (`dbt-core`, `dbt-duckdb`, `dbt-metricflow`, `duckdb`).
