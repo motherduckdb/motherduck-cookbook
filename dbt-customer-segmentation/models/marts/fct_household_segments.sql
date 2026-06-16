@@ -8,48 +8,67 @@ with ranked_distances as (
         row_number() over (
             partition by household_id
             order by segment_distance, segment_id
-        ) as distance_rank
+        ) as distance_rank,
+        lead(segment_id) over (
+            partition by household_id
+            order by segment_distance, segment_id
+        ) as alternative_segment_id,
+        lead(segment_name) over (
+            partition by household_id
+            order by segment_distance, segment_id
+        ) as alternative_segment_name,
+        lead(segment_distance) over (
+            partition by household_id
+            order by segment_distance, segment_id
+        ) as alternative_segment_distance
     from {{ ref('fct_household_segment_distances') }}
 ),
 
-assigned as (
+nearest_segments as (
     select
         household_id,
-        max(case when distance_rank = 1 then segment_id end) as segment_id,
-        max(case when distance_rank = 1 then segment_name end) as segment_name,
-        max(case when distance_rank = 1 then segment_distance end) as segment_distance,
-        max(case when distance_rank = 2 then segment_id end) as alternative_segment_id,
-        max(case when distance_rank = 2 then segment_name end) as alternative_segment_name,
-        max(case when distance_rank = 2 then segment_distance end) as alternative_segment_distance,
-        max(scored_feature_count) as scored_feature_count
+        segment_id,
+        segment_name,
+        segment_distance,
+        alternative_segment_id,
+        alternative_segment_name,
+        alternative_segment_distance,
+        scored_feature_count
     from ranked_distances
-    group by 1
+    where distance_rank = 1
 )
 
 select
-    assigned.household_id,
+    nearest_segments.household_id,
     cast('{{ var("segmentation_reference_day") }}' as integer) as segmentation_reference_day,
-    assigned.segment_id,
-    assigned.segment_name,
+    nearest_segments.segment_id,
+    nearest_segments.segment_name,
     playbook.segment_label,
     playbook.segment_description,
     playbook.recommended_action,
     playbook.recommended_offer,
-    assigned.segment_distance,
-    assigned.alternative_segment_id,
-    assigned.alternative_segment_name,
-    assigned.alternative_segment_distance,
+    nearest_segments.segment_distance,
+    nearest_segments.alternative_segment_id,
+    nearest_segments.alternative_segment_name,
+    nearest_segments.alternative_segment_distance,
     greatest(
         0.0,
         least(
             1.0,
             case
-                when assigned.alternative_segment_distance is null or assigned.alternative_segment_distance = 0 then 1.0
-                else (assigned.alternative_segment_distance - assigned.segment_distance) / assigned.alternative_segment_distance
+                when nearest_segments.alternative_segment_distance is null
+                    or nearest_segments.alternative_segment_distance = 0
+                    then 1.0
+                else
+                    (
+                        nearest_segments.alternative_segment_distance
+                        - nearest_segments.segment_distance
+                    )
+                    / nearest_segments.alternative_segment_distance
             end
         )
     ) as segment_confidence,
-    assigned.scored_feature_count
-from assigned
+    nearest_segments.scored_feature_count
+from nearest_segments
 left join {{ ref('segment_playbook') }} as playbook
-    on assigned.segment_id = playbook.segment_id
+    on nearest_segments.segment_id = playbook.segment_id

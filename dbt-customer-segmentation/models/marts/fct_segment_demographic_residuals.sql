@@ -1,11 +1,17 @@
 with demographics_long as (
-    select household_id, 'age_bracket' as demographic_field, age_bracket as demographic_value from {{ ref('stg_households') }}
-    union all
-    select household_id, 'income_bracket' as demographic_field, income_bracket as demographic_value from {{ ref('stg_households') }}
-    union all
-    select household_id, 'homeownership' as demographic_field, homeownership as demographic_value from {{ ref('stg_households') }}
-    union all
-    select household_id, 'composition' as demographic_field, composition as demographic_value from {{ ref('stg_households') }}
+    select
+        household_id,
+        demographic_field,
+        demographic_value
+    from {{ ref('stg_households') }}
+    unpivot (
+        demographic_value for demographic_field in (
+            age_bracket,
+            income_bracket,
+            homeownership,
+            composition
+        )
+    )
 ),
 
 assigned_demographics as (
@@ -97,7 +103,10 @@ residuals as (
         segment_totals.segment_total,
         category_totals.category_total,
         field_totals.field_total,
-        (segment_totals.segment_total::double * category_totals.category_total::double) / nullif(field_totals.field_total, 0) as expected_count
+        (
+            segment_totals.segment_total::double
+            * category_totals.category_total::double
+        ) / nullif(field_totals.field_total, 0) as expected_count
     from contingency_grid
     left join observed_counts
         on contingency_grid.segment_id = observed_counts.segment_id
@@ -111,6 +120,26 @@ residuals as (
         and contingency_grid.demographic_value = category_totals.demographic_value
     inner join field_totals
         on contingency_grid.demographic_field = field_totals.demographic_field
+),
+
+residual_scores as (
+    select
+        segment_id,
+        segment_name,
+        segment_label,
+        demographic_field,
+        demographic_value,
+        observed_count,
+        segment_total,
+        category_total,
+        field_total,
+        expected_count,
+        (observed_count - expected_count) / nullif(sqrt(expected_count), 0.0) as pearson_residual,
+        power(
+            observed_count - expected_count,
+            2
+        ) / nullif(expected_count, 0.0) as chi_square_contribution
+    from residuals
 )
 
 select
@@ -124,11 +153,11 @@ select
     category_total,
     field_total,
     expected_count,
-    (observed_count - expected_count) / nullif(sqrt(expected_count), 0.0) as pearson_residual,
-    power(observed_count - expected_count, 2) / nullif(expected_count, 0.0) as chi_square_contribution,
+    pearson_residual,
+    chi_square_contribution,
     case
-        when abs((observed_count - expected_count) / nullif(sqrt(expected_count), 0.0)) >= 4 then 'very strong over/under representation'
-        when abs((observed_count - expected_count) / nullif(sqrt(expected_count), 0.0)) >= 2 then 'notable over/under representation'
+        when abs(pearson_residual) >= 4 then 'very strong over/under representation'
+        when abs(pearson_residual) >= 2 then 'notable over/under representation'
         else 'within expected range'
     end as residual_interpretation
-from residuals
+from residual_scores

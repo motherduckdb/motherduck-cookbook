@@ -9,16 +9,23 @@ with residual_counts as (
 expected_counts as (
     select
         demographics.demographic_field,
-        count(distinct segments.segment_id) * count(distinct demographics.demographic_value) as expected_rows
+        count(distinct segments.segment_id)
+        * count(distinct demographics.demographic_value) as expected_rows
     from {{ ref('fct_household_segments') }} as segments
     inner join (
-        select household_id, 'age_bracket' as demographic_field, age_bracket as demographic_value from {{ ref('stg_households') }}
-        union all
-        select household_id, 'income_bracket' as demographic_field, income_bracket as demographic_value from {{ ref('stg_households') }}
-        union all
-        select household_id, 'homeownership' as demographic_field, homeownership as demographic_value from {{ ref('stg_households') }}
-        union all
-        select household_id, 'composition' as demographic_field, composition as demographic_value from {{ ref('stg_households') }}
+        select
+            household_id,
+            demographic_field,
+            demographic_value
+        from {{ ref('stg_households') }}
+        unpivot (
+            demographic_value for demographic_field in (
+                age_bracket,
+                income_bracket,
+                homeownership,
+                composition
+            )
+        )
     ) as demographics
         on segments.household_id = demographics.household_id
     where demographics.demographic_value is not null
