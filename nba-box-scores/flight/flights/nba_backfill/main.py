@@ -1,7 +1,7 @@
 """Bootstrapper for the nba_backfill Flight.
 
 Thin, stable bootstrapper (see flights/nba_nightly/main.py for the full
-rationale): clones the motherduck-examples repo at a branch, `uv sync`s the pipeline
+rationale): clones the motherduck-cookbook repo at a branch, `uv sync`s the pipeline
 package, and runs the backfill entrypoint from the synced venv.
 
 Env vars consumed here:
@@ -19,9 +19,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_URL = "https://github.com/motherduckdb/motherduck-examples"
+REPO_URL = "https://github.com/motherduckdb/motherduck-cookbook"
 DEFAULT_BRANCH = "main"
-REPO_DIR = Path("/app/motherduck-examples")
+REPO_DIR = Path("/app/motherduck-cookbook")
 PROJECT_SUBDIR = REPO_DIR / "nba-box-scores" / "flight"
 ENTRYPOINT_COMMAND = "backfill"
 

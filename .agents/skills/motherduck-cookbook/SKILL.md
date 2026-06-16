@@ -1,11 +1,11 @@
 ---
-name: motherduck-examples
+name: motherduck-cookbook
 description: Work on MotherDuck example READMEs, Flight Plans, README front matter, catalog generation, catalog release publishing, or the get-starter script. Use when changing this repository's catalog, examples, templates/plans, or agent-facing documentation.
 ---
 
-# MotherDuck Examples
+# MotherDuck Cookbook
 
-Use this skill before changing the MotherDuck examples catalog, README metadata,
+Use this skill before changing the MotherDuck cookbook catalog, README metadata,
 Flight Plans, catalog generation, catalog validation, or starter download flow.
 
 ## Repository Model
@@ -170,7 +170,7 @@ uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test
 The GitHub Actions workflow validates on PRs, uploads a `catalog-preview`
 artifact, and creates a GitHub Release with `catalog.json` attached on pushes to
 `main`. The latest catalog is available at
-`https://github.com/motherduckdb/motherduck-examples/releases/latest/download/catalog.json`;
+`https://github.com/motherduckdb/motherduck-cookbook/releases/latest/download/catalog.json`;
 older catalogs remain available on earlier catalog releases.
 
 ## Starter Script
@@ -181,7 +181,7 @@ resolution for both top-level examples and `flight-plans/<id>`.
 When testing a PR branch:
 
 ```bash
-BRANCH=my-branch curl -fsSL https://raw.githubusercontent.com/motherduckdb/motherduck-examples/my-branch/scripts/get-starter.sh | bash -s dbt-ingestion-s3
+BRANCH=my-branch curl -fsSL https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/my-branch/scripts/get-starter.sh | bash -s dbt-ingestion-s3
 ```
 
 ## Working Guidance

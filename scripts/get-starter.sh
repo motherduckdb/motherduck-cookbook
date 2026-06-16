@@ -1,5 +1,5 @@
 #!/bin/bash
-# get-starter.sh - Download a specific starter project from motherduck-examples repository
+# get-starter.sh - Download a specific starter project from motherduck-cookbook repository
 #
 # Usage:
 #   curl -fsSL https://get.motherduck.com | bash -s <starter-name>
@@ -17,13 +17,13 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="motherduckdb/motherduck-examples"
+REPO="motherduckdb/motherduck-cookbook"
 REPO_URL="https://github.com/${REPO}.git"
 # Default to main, but can be overridden via BRANCH env var for PR testing.
 # When testing a PR branch, fetch the script from that branch too (the
 # get.motherduck.com redirector always serves the main branch version):
 #   BRANCH=my-branch curl -fsSL \
-#     https://raw.githubusercontent.com/motherduckdb/motherduck-examples/my-branch/scripts/get-starter.sh \
+#     https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/my-branch/scripts/get-starter.sh \
 #     | bash -s <starter-name>
 BRANCH="${BRANCH:-main}"
 

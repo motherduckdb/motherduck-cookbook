@@ -1,7 +1,7 @@
 # Agent Guide
 
 This repository is an examples catalog for MotherDuck. Read
-[.agents/skills/motherduck-examples/SKILL.md](.agents/skills/motherduck-examples/SKILL.md)
+[.agents/skills/motherduck-cookbook/SKILL.md](.agents/skills/motherduck-cookbook/SKILL.md)
 before changing README metadata, Flight Plans, the generated catalog workflow,
 or the starter script.
 

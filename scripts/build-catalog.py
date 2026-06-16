@@ -279,7 +279,7 @@ def build_urls(repo: str, ref: str, path: str) -> dict[str, str]:
 def build_catalog(
     repo_root: Path = REPO_ROOT,
     *,
-    repo: str = "motherduckdb/motherduck-examples",
+    repo: str = "motherduckdb/motherduck-cookbook",
     ref: str = "main",
     generated_at: str | None = None,
     schema_url: str = "catalog.schema.json",
@@ -327,7 +327,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--repo",
-        default="motherduckdb/motherduck-examples",
+        default="motherduckdb/motherduck-cookbook",
         help="GitHub repository owner/name.",
     )
     parser.add_argument(

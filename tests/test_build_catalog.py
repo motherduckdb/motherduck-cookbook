@@ -53,7 +53,7 @@ type: example
 
     catalog = build_catalog_module.build_catalog(
         repo_root,
-        repo="motherduckdb/motherduck-examples",
+        repo="motherduckdb/motherduck-cookbook",
         ref="main",
         generated_at="2026-06-03T10:00:00Z",
     )
@@ -61,7 +61,7 @@ type: example
     assert catalog["schema_version"] == 1
     assert catalog["generated_at"] == "2026-06-03T10:00:00Z"
     assert catalog["source"] == {
-        "repo": "motherduckdb/motherduck-examples",
+        "repo": "motherduckdb/motherduck-cookbook",
         "ref": "main",
     }
     assert catalog["items"] == [
@@ -75,8 +75,8 @@ type: example
             "tags": ["python", "pyarrow"],
             "path": "python-ingestion",
             "urls": {
-                "github": "https://github.com/motherduckdb/motherduck-examples/tree/main/python-ingestion",
-                "raw_docs": "https://raw.githubusercontent.com/motherduckdb/motherduck-examples/main/python-ingestion/README.md",
+                "github": "https://github.com/motherduckdb/motherduck-cookbook/tree/main/python-ingestion",
+                "raw_docs": "https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/main/python-ingestion/README.md",
             },
         }
     ]

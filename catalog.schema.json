@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/motherduckdb/motherduck-examples/main/catalog.schema.json",
+  "$id": "https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/main/catalog.schema.json",
   "title": "MotherDuck Examples Catalog",
   "type": "object",
   "additionalProperties": false,

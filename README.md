@@ -1,6 +1,8 @@
-# MotherDuck examples
+<img src="assets/cookbook-duck.png" align="right" width="200" alt="MotherDuck Cookbook — a chef duck cooking code" />
 
-A catalog of opinionated, ready-to-use examples for building with MotherDuck.
+# MotherDuck cookbook
+
+A cookbook of opinionated, ready-to-use examples for building with MotherDuck.
 Each example is a self-contained folder with working code and a README that
 reads like an agent skill: minimal front matter for discovery, plus a body that
 tells an agent (and a human) exactly what to adapt, what to ask, and how to run
@@ -142,7 +144,7 @@ The body follows a consistent, skimmable structure:
   The catalog shape is defined by [`catalog.schema.json`](catalog.schema.json).
 - On pushes to `main`, CI publishes `catalog.json` as a GitHub Release asset.
   Download the latest catalog from
-  `https://github.com/motherduckdb/motherduck-examples/releases/latest/download/catalog.json`;
+  `https://github.com/motherduckdb/motherduck-cookbook/releases/latest/download/catalog.json`;
   earlier versions remain available on earlier catalog releases.
 
 ## Getting an example
@@ -160,13 +162,13 @@ Each example is self-contained. You can:
    **Testing from a PR branch**: set `BRANCH` and fetch the script from that
    branch (since `get.motherduck.com` always serves `main`):
    ```bash
-   BRANCH=my-branch curl -fsSL https://raw.githubusercontent.com/motherduckdb/motherduck-examples/my-branch/scripts/get-starter.sh | bash -s dbt-ingestion-s3
+   BRANCH=my-branch curl -fsSL https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/my-branch/scripts/get-starter.sh | bash -s dbt-ingestion-s3
    ```
 
 2. **Clone the repo** and navigate to a folder:
    ```bash
-   git clone https://github.com/motherduckdb/motherduck-examples.git
-   cd motherduck-examples/dbt-ingestion-s3
+   git clone https://github.com/motherduckdb/motherduck-cookbook.git
+   cd motherduck-cookbook/dbt-ingestion-s3
    ```
 
 3. **Copy a folder** to start your project:
