@@ -1,33 +1,36 @@
-"""MotherDuck Flight: define metrics once with dbt MetricFlow, query them per run.
+"""MotherDuck Flight: query dbt MetricFlow metrics, fetching the project from git.
 
-A Flight runs as a single ``main.py`` in a fresh, torn-down container, but a dbt
-project is many files. So this file *embeds* a small dbt + MetricFlow project as
-string constants, materializes it into a temp working directory at run time, then
-shells out to the ``dbt`` and ``mf`` CLIs against MotherDuck.
+A Flight runs as a single ``main.py`` in a fresh, torn-down container. Rather than
+embed a copy of the dbt project (which would drift from the canonical example),
+this Flight **fetches the dbt + MetricFlow project from git at run time** and runs
+the ``dbt`` and ``mf`` CLIs against it. Point ``GIT_REPO``/``GIT_REF`` at your own
+dbt repo to query your own semantic model — the engine here never changes.
 
-The point is the parameterization. Every knob below is read from an environment
-variable, and a Flight's ``config`` MAP is injected as env vars at run time. So
-one deployed Flight answers many metric questions: override ``METRICS``,
-``GROUP_BY``, ``START_DATE``, or ``END_DATE`` per run with
-``MD_RUN_FLIGHT(flight_id := '…', config := MAP {...})`` — no redeploy, no
-cloning the project per variant. (Override changes *values* of keys that already
-exist on the Flight; it cannot introduce new keys.)
+The metric, grouping, and date window are chosen **per run through Flight config**.
+A Flight's ``config`` MAP is injected as environment variables; override it per run
+with ``MD_RUN_FLIGHT(flight_id := '…', config := MAP {...})`` and the same project
+answers a different metric question — no redeploy. (Override changes *values* of
+keys that already exist on the Flight; it cannot add new keys.)
 
-Each run appends the ``mf query`` result to a snapshot table, tagged with the
-run timestamp and the exact config used, so a scheduled Flight builds a queryable
-time series of metric values. The result is stored as a ``JSON`` column because
-the output columns change with the metric/group-by chosen, and JSON keeps the
-snapshot table schema-stable across any combination.
+The fetched project's own ``profiles.yml`` is used as-is; nothing is written from
+scratch. Its MotherDuck target reads the database name from ``MD_DATABASE`` via
+dbt's ``env_var()``, so the same committed profile serves every target database.
+
+Each run appends the ``mf query`` result to a snapshot table as a ``JSON`` column,
+because the output columns change with the metric/group-by chosen; JSON keeps one
+table usable across every run, tagged with ``run_at`` and the config used.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import shutil
 import subprocess
-import sys
+import tarfile
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import duckdb
@@ -43,187 +46,78 @@ def read_config() -> dict[str, str]:
     env vars; `MD_RUN_FLIGHT(config := MAP {...})` overrides the stored defaults
     for a single run."""
     return {
-        "TARGET_DATABASE": os.environ.get("TARGET_DATABASE", "ecommerce_metrics_flight"),
+        # Where the dbt project lives. Point these at your own fork to run your
+        # own models; the default is this cookbook's dbt-metricflow example.
+        "GIT_REPO": os.environ.get(
+            "GIT_REPO", "https://github.com/motherduckdb/motherduck-cookbook.git"
+        ),
+        "GIT_REF": os.environ.get("GIT_REF", "main"),  # branch or tag
+        "REPO_SUBDIR": os.environ.get("REPO_SUBDIR", "dbt-metricflow"),
+        # What to query — the per-run knobs.
         "METRICS": os.environ.get("METRICS", "revenue,orders,customers"),
         "GROUP_BY": os.environ.get("GROUP_BY", "metric_time__month"),
         "START_DATE": os.environ.get("START_DATE", "2024-01-01"),
         "END_DATE": os.environ.get("END_DATE", "2024-12-31"),
+        # Where results land.
+        "MD_DATABASE": os.environ.get("MD_DATABASE", "ecommerce_metrics_flight"),
         "SNAPSHOT_TABLE": os.environ.get("SNAPSHOT_TABLE", "metric_snapshots"),
     }
 
 
-# ===========================================================================
-# The embedded dbt + MetricFlow project. Edit these to model your own metrics.
-# ===========================================================================
-DBT_PROJECT_YML = """\
-name: 'ecommerce_metrics'
-version: '1.0.0'
-profile: 'ecommerce_metrics'
-
-model-paths: ["models"]
-seed-paths: ["seeds"]
-
-models:
-  ecommerce_metrics:
-    +materialized: table
-
-semantic-models:
-  time-spine:
-    model: metricflow_time_spine
-    time_column: date_day
-    granularities: [day]
-"""
-
-# profiles.yml is rendered at run time because the target database name is config.
-PROFILES_YML_TEMPLATE = """\
-ecommerce_metrics:
-  target: motherduck
-  outputs:
-    motherduck:
-      type: duckdb
-      path: 'md:{database}'
-      threads: 4
-"""
-
-FCT_ORDERS_SQL = """\
-{{ config(materialized='table') }}
-
-SELECT
-    order_id,
-    customer_id,
-    CAST(order_date AS DATE) AS order_date,
-    status,
-    amount
-FROM {{ ref('raw_orders') }}
-"""
-
-TIME_SPINE_SQL = """\
-{{ config(materialized='table') }}
-
-SELECT CAST(date_day AS DATE) AS date_day
-FROM (
-    SELECT UNNEST(generate_series(
-        DATE '2024-01-01', DATE '2025-12-31', INTERVAL '1 day'
-    )) AS date_day
-) dates
-"""
-
-SEMANTIC_MODELS_YML = """\
-time_spines:
-  - name: time_spine
-    model: ref('metricflow_time_spine')
-    time_column: date_day
-    grains:
-      - name: day
-        column: date_day
-
-semantic_models:
-  - name: orders
-    description: E-commerce order transactions
-    model: ref('fct_orders')
-    defaults:
-      agg_time_dimension: order_date
-    entities:
-      - name: order_id
-        type: primary
-        expr: order_id
-      - name: customer
-        type: foreign
-        expr: customer_id
-    dimensions:
-      - name: order_date
-        type: time
-        type_params:
-          time_granularity: day
-      - name: status
-        type: categorical
-    measures:
-      - name: order_count
-        agg: count
-        expr: order_id
-      - name: total_revenue
-        agg: sum
-        expr: amount
-      - name: average_order_value
-        agg: average
-        expr: amount
-      - name: unique_customers
-        agg: count_distinct
-        expr: customer_id
-
-metrics:
-  - name: revenue
-    description: Total revenue from all orders
-    type: simple
-    label: Total Revenue
-    type_params:
-      measure: total_revenue
-  - name: orders
-    description: Total number of orders
-    type: simple
-    label: Order Count
-    type_params:
-      measure: order_count
-  - name: avg_order_value
-    description: Average order value
-    type: simple
-    label: Average Order Value
-    type_params:
-      measure: average_order_value
-  - name: customers
-    description: Count of unique customers
-    type: simple
-    label: Customer Count
-    type_params:
-      measure: unique_customers
-  - name: revenue_per_customer
-    description: Average revenue per customer
-    type: derived
-    label: Revenue Per Customer
-    type_params:
-      expr: revenue / customers
-      metrics:
-        - revenue
-        - customers
-"""
-
-# A thin seed so the Flight runs end-to-end out of the box. Swap for your own
-# source (or replace fct_orders.sql with a model over an existing table).
-RAW_ORDERS_CSV = """\
-order_id,customer_id,order_date,status,amount
-1,101,2024-01-15,completed,150.00
-2,102,2024-01-16,completed,250.50
-3,101,2024-01-17,completed,75.25
-4,103,2024-01-18,cancelled,100.00
-5,104,2024-01-19,completed,320.00
-6,102,2024-01-20,completed,180.75
-7,105,2024-01-21,completed,99.99
-8,103,2024-01-22,completed,450.00
-9,106,2024-01-23,completed,210.30
-10,101,2024-01-24,completed,125.50
-11,107,2024-02-01,completed,300.00
-12,108,2024-02-02,completed,175.25
-13,102,2024-02-03,cancelled,50.00
-14,109,2024-02-04,completed,425.75
-15,104,2024-02-05,completed,89.99
-16,110,2024-02-06,completed,650.00
-17,105,2024-02-07,completed,115.50
-18,111,2024-02-08,completed,275.00
-19,103,2024-02-09,completed,340.25
-20,112,2024-02-10,completed,199.99
-"""
+# ---------------------------------------------------------------------------
+# Fetch the dbt project from git (with a tarball fallback if git is absent)
+# ---------------------------------------------------------------------------
+def fetch_project(cfg: dict[str, str], dest: Path) -> None:
+    """Materialize the dbt project under ``dest``. Prefer a sparse ``git clone``;
+    if no ``git`` binary is present, download the ref tarball over HTTPS (stdlib
+    only) so the Flight still runs in a minimal container."""
+    if shutil.which("git"):
+        _git_sparse_clone(cfg, dest)
+    else:
+        log.warning("no git binary found — falling back to the HTTPS tarball")
+        _tarball_download(cfg, dest)
 
 
-def write_project(root: Path, database: str) -> None:
-    """Materialize the embedded dbt project to disk under ``root``."""
-    (root / "models").mkdir(parents=True, exist_ok=True)
-    (root / "seeds").mkdir(parents=True, exist_ok=True)
-    (root / "dbt_project.yml").write_text(DBT_PROJECT_YML)
-    (root / "profiles.yml").write_text(PROFILES_YML_TEMPLATE.format(database=database))
-    (root / "models" / "fct_orders.sql").write_text(FCT_ORDERS_SQL)
-    (root / "models" / "metricflow_time_spine.sql").write_text(TIME_SPINE_SQL)
-    (root / "models" / "semantic_models.yml").write_text(SEMANTIC_MODELS_YML)
-    (root / "seeds" / "raw_orders.csv").write_text(RAW_ORDERS_CSV)
+def _git_sparse_clone(cfg: dict[str, str], dest: Path) -> None:
+    """Shallow, blobless, sparse clone of just ``REPO_SUBDIR`` — a few hundred KB."""
+    repo = dest / "repo"
+    run_cmd(
+        ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+         "--branch", cfg["GIT_REF"], cfg["GIT_REPO"], str(repo)],
+        dest, os.environ,
+    )
+    run_cmd(
+        ["git", "-C", str(repo), "sparse-checkout", "set", cfg["REPO_SUBDIR"]],
+        dest, os.environ,
+    )
+
+
+def _tarball_download(cfg: dict[str, str], dest: Path) -> None:
+    """Download ``<repo>/archive/<ref>.tar.gz`` and extract it under ``dest``.
+    ``/archive/<ref>`` accepts a branch, tag, or commit SHA."""
+    base = cfg["GIT_REPO"].removesuffix(".git")
+    url = f"{base}/archive/{cfg['GIT_REF']}.tar.gz"
+    log.info("downloading %s", url)
+    with urllib.request.urlopen(url) as resp:  # noqa: S310 — fixed https host
+        data = resp.read()
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        tar.extractall(dest)  # noqa: S202 — trusted GitHub archive
+
+
+def discover(root: Path) -> tuple[Path, Path]:
+    """Locate the dbt project dir (holds ``dbt_project.yml``) and the profiles
+    dir (the nearest ancestor holding ``profiles.yml``). Globbing makes this work
+    regardless of the checkout's top-level folder name or nesting depth."""
+    matches = sorted(root.rglob("dbt_project.yml"))
+    if not matches:
+        raise SystemExit("no dbt_project.yml found in the fetched project")
+    project_dir = matches[0].parent
+    for candidate in (project_dir, *project_dir.parents):
+        if (candidate / "profiles.yml").exists():
+            return project_dir, candidate
+        if candidate == root:
+            break
+    raise SystemExit("no profiles.yml found near the dbt project")
 
 
 # ---------------------------------------------------------------------------
@@ -237,40 +131,16 @@ def _tool(name: str) -> str:
     return path
 
 
-def run_cmd(cmd: list[str], cwd: Path, env: dict[str, str]) -> None:
-    """Run a CLI command, streaming its output into the Flight logs."""
+def run_cmd(cmd: list[str], cwd: Path | str, env: dict[str, str]) -> None:
+    """Run a command, streaming its output into the Flight logs."""
     log.info("$ %s", " ".join(cmd))
-    proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True)
     if proc.stdout:
         log.info(proc.stdout.rstrip())
     if proc.stderr:
         log.info(proc.stderr.rstrip())
     if proc.returncode != 0:
         raise SystemExit(f"command failed ({proc.returncode}): {' '.join(cmd)}")
-
-
-def build_models(root: Path, env: dict[str, str]) -> None:
-    """Load the seed and build the models so MetricFlow has tables to read."""
-    dbt = _tool("dbt")
-    run_cmd([dbt, "seed", "--profiles-dir", str(root)], root, env)
-    run_cmd([dbt, "run", "--profiles-dir", str(root)], root, env)
-
-
-def query_metrics(root: Path, cfg: dict[str, str], env: dict[str, str]) -> Path:
-    """Run ``mf query`` for the configured metrics, writing a CSV result."""
-    out = root / "mf_result.csv"
-    cmd = [
-        _tool("mf"), "query",
-        "--metrics", cfg["METRICS"],
-        "--group-by", cfg["GROUP_BY"],
-        "--start-time", cfg["START_DATE"],
-        "--end-time", cfg["END_DATE"],
-        "--csv", str(out),
-    ]
-    run_cmd(cmd, root, env)
-    if not out.exists():
-        raise SystemExit("mf query produced no CSV — check the metric/group-by names")
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -284,11 +154,10 @@ def _ident(name: str) -> str:
 def append_snapshot(con: duckdb.DuckDBPyConnection, cfg: dict[str, str], csv_path: Path) -> int:
     """Append each result row to the snapshot table as JSON, tagged with the run.
 
-    The result column is JSON because ``mf query`` output columns change with the
-    chosen metric/group-by; JSON keeps one table usable across every run. The
-    aliased subquery (``r``) resolves to a STRUCT of the whole row, which
-    ``to_json`` serializes."""
-    db = _ident(cfg["TARGET_DATABASE"])
+    The aliased subquery (``r``) resolves to a STRUCT of the whole row, which
+    ``to_json`` serializes — so the table holds any metric/group-by combination
+    without a schema change."""
+    db = _ident(cfg["MD_DATABASE"])
     table = _ident(cfg["SNAPSHOT_TABLE"])
     con.execute(
         f"""
@@ -310,7 +179,7 @@ def append_snapshot(con: duckdb.DuckDBPyConnection, cfg: dict[str, str], csv_pat
         """,
         [cfg["METRICS"], cfg["GROUP_BY"], cfg["START_DATE"], cfg["END_DATE"], str(csv_path)],
     )
-    (rows,) = con.execute(f"SELECT count(*) FROM read_csv(?)", [str(csv_path)]).fetchone()
+    (rows,) = con.execute("SELECT count(*) FROM read_csv(?)", [str(csv_path)]).fetchone()
     return rows
 
 
@@ -320,28 +189,43 @@ def main() -> None:
     log.info("config: %s", cfg)
 
     # The Flight runtime injects MOTHERDUCK_TOKEN; dbt-duckdb and the CLIs read it
-    # from the environment. Pass the whole environment through to the subprocesses.
+    # from the environment. Pass the whole environment through to subprocesses.
     env = dict(os.environ)
+    env["MD_DATABASE"] = cfg["MD_DATABASE"]  # consumed by the project's profiles.yml env_var()
     env["DBT_TARGET"] = "motherduck"  # the `mf` CLI selects its target from this
 
     con = duckdb.connect("md:")
-    con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['TARGET_DATABASE'])}")
+    con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['MD_DATABASE'])}")
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        write_project(root, cfg["TARGET_DATABASE"])
-        env["DBT_PROFILES_DIR"] = str(root)
+        fetch_project(cfg, root)
+        project_dir, profiles_dir = discover(root)
+        log.info("project=%s profiles=%s", project_dir, profiles_dir)
+        env["DBT_PROFILES_DIR"] = str(profiles_dir)
         # dbt/MetricFlow write working files under HOME; a Flight's HOME may be
         # read-only, so point it at the writable temp dir.
         env["HOME"] = str(root)
-        build_models(root, env)
-        csv_path = query_metrics(root, cfg, env)
+
+        dbt = _tool("dbt")
+        run_cmd([dbt, "seed", "--target", "motherduck"], project_dir, env)
+        run_cmd([dbt, "run", "--target", "motherduck"], project_dir, env)
+
+        csv_path = root / "mf_result.csv"
+        run_cmd(
+            [_tool("mf"), "query",
+             "--metrics", cfg["METRICS"],
+             "--group-by", cfg["GROUP_BY"],
+             "--start-time", cfg["START_DATE"],
+             "--end-time", cfg["END_DATE"],
+             "--csv", str(csv_path)],
+            project_dir, env,
+        )
+        if not csv_path.exists():
+            raise SystemExit("mf query produced no CSV — check the metric/group-by names")
         rows = append_snapshot(con, cfg, csv_path)
 
-    log.info(
-        "appended %d row(s) to %s.%s",
-        rows, cfg["TARGET_DATABASE"], cfg["SNAPSHOT_TABLE"],
-    )
+    log.info("appended %d row(s) to %s.%s", rows, cfg["MD_DATABASE"], cfg["SNAPSHOT_TABLE"])
 
 
 if __name__ == "__main__":
