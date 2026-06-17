@@ -84,7 +84,7 @@ injects it as `MOTHERDUCK_TOKEN`.
 
 ## Anatomy of an example
 
-Every example README starts with YAML front matter holding exactly seven keys:
+Every example README starts with YAML front matter holding exactly nine keys:
 
 ```yaml
 ---
@@ -97,6 +97,13 @@ type: example                   # example | template
 category: ingestion             # one primary navigation category (see list below)
 features: []                    # MotherDuck capabilities used; [] if none (see list below)
 tags: [dbt]                     # curated lowercase slugs: significant third-party tools
+prompt: >-                      # first-person, copy-paste prompt to adapt the recipe
+  I want to build dbt models directly on Parquet/CSV in S3 without copying the
+  data first, running locally against DuckDB or in the cloud against MotherDuck.
+  Help me adapt the "Build Hacker News Models From S3 With dbt" recipe to my own
+  data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-ingestion-s3
+published_date: 2024-12-11      # publish date (YYYY-MM-DD); downstream orders by it
 ---
 ```
 
@@ -115,6 +122,12 @@ tags: [dbt]                     # curated lowercase slugs: significant third-par
   `node-postgres`). They are not for datasets, generic concepts (`sql`, `etl`),
   the DuckDB engine, redundant variants, or things already covered by `features`.
   Tags may be empty. Add a new tag only for a significant new tool.
+- `prompt` is a first-person, copy-paste prompt that points an agent at the
+  recipe. Lead with the user's goal, name the recipe by title, keep the "use it
+  as a guide / adapt it to my own data and use case" message, and end with the
+  recipe's docs URL (`https://motherduck.com/docs/cookbook/<id>`).
+- `published_date` is the publish date as `YYYY-MM-DD`, so downstream surfaces
+  can order recipes by recency.
 
 The body follows a consistent, skimmable structure:
 

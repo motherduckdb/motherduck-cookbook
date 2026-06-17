@@ -10,6 +10,13 @@ type: example
 category: ingestion
 features: []
 tags: [dbt]
+prompt: >-
+  I want to build dbt models directly on Parquet/CSV in S3 without copying the data
+  first, running locally against DuckDB or in the cloud against MotherDuck. Help me
+  adapt the "Build Hacker News Models From S3 With dbt" recipe to my own data and use
+  case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-ingestion-s3
+published_date: 2024-12-11
 ---
 
 # Build Hacker News Models From S3 With dbt

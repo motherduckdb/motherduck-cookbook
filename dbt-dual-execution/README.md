@@ -11,6 +11,13 @@ type: example
 category: analytics
 features: []
 tags: [dbt]
+prompt: >-
+  I want to develop dbt models locally against a DuckDB file while still reading from
+  and writing to MotherDuck in the same project, choosing per model whether it lands in
+  the cloud or on disk. Help me adapt the "dbt Dual Execution Across Local DuckDB and
+  MotherDuck" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-dual-execution
+published_date: 2024-12-20
 ---
 
 # dbt Dual Execution Across Local DuckDB and MotherDuck

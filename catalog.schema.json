@@ -64,9 +64,11 @@
         "type",
         "title",
         "description",
+        "prompt",
         "category",
         "features",
         "tags",
+        "published_date",
         "path",
         "urls"
       ],
@@ -85,6 +87,10 @@
           "minLength": 1
         },
         "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt": {
           "type": "string",
           "minLength": 1
         },
@@ -121,6 +127,10 @@
             "$ref": "#/$defs/slug"
           },
           "uniqueItems": true
+        },
+        "published_date": {
+          "type": "string",
+          "format": "date"
         },
         "path": {
           "$ref": "#/$defs/path"

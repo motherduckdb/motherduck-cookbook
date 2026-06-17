@@ -11,6 +11,13 @@ type: template
 category: analytics
 features: [flights]
 tags: []
+prompt: >-
+  I have a set of CREATE TABLE AS / VIEW / MACRO statements I want to run in dependency
+  order as a DAG inside one Flight, with independent statements running concurrently and
+  automatic retries. Help me adapt the "Run SQL Transformations in Order" recipe to my
+  own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-sql-transformation
+published_date: 2026-06-15
 ---
 
 # Run SQL Transformations in Order and in Parallel

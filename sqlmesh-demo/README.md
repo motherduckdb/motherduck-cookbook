@@ -10,6 +10,13 @@ type: example
 category: analytics
 features: []
 tags: [sqlmesh, dlt]
+prompt: >-
+  I want a SQLMesh project on MotherDuck that transforms data through interim,
+  conformed, and mart layers (incremental models, SCD type 2, audits, virtual
+  environments), fed by a dlt ingest. Help me adapt the "Transform Stock Data with
+  SQLMesh on MotherDuck" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/sqlmesh-demo
+published_date: 2025-01-14
 ---
 
 # Transform Stock Data with SQLMesh on MotherDuck

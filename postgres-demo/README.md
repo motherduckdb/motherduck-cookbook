@@ -10,6 +10,13 @@ type: example
 category: integrations
 features: [pg_duckdb]
 tags: [postgres, docker]
+prompt: >-
+  I want a hybrid setup where local Postgres and MotherDuck can read each other through
+  pg_duckdb, scanning Postgres from DuckDB and querying MotherDuck from psql. Help me
+  adapt the "Bridge Local Postgres and MotherDuck with pg_duckdb" recipe to my own data
+  and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/postgres-demo
+published_date: 2025-01-30
 ---
 
 # Bridge Local Postgres and MotherDuck with pg_duckdb

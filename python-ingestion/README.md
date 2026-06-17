@@ -10,6 +10,13 @@ type: example
 category: ingestion
 features: []
 tags: [python, pyarrow, pandas]
+prompt: >-
+  I need a standalone Python script that pulls JSON from an HTTP API (or an in-memory
+  dataframe) and loads it into a MotherDuck table, with both a pandas path and a typed
+  PyArrow path. Help me adapt the "Ingest API Data into MotherDuck with Python" recipe
+  to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/python-ingestion
+published_date: 2025-01-30
 ---
 
 # Ingest API Data into MotherDuck with Python

@@ -11,6 +11,13 @@ type: template
 category: ingestion
 features: [flights]
 tags: [postgres, ingest, migrate]
+prompt: >-
+  I want a config-driven, re-runnable Flight that mirrors selected PostgreSQL tables
+  into MotherDuck with one streaming full-refresh per table, retries, and an audit log.
+  Help me adapt the "Mirror PostgreSQL Tables into MotherDuck With a Flight" recipe to
+  my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-postgres-ingest
+published_date: 2026-06-09
 ---
 
 # Mirror PostgreSQL Tables into MotherDuck With a Flight

@@ -11,6 +11,13 @@ type: example
 category: getting-started
 features: []
 tags: [nodejs, javascript, generic-pool]
+prompt: >-
+  I want to run DuckDB SQL against MotherDuck from a Node.js service using the native
+  DuckDB Neo driver, including a connection pool for concurrent workloads. Help me adapt
+  the "Connect to MotherDuck from Node.js with the DuckDB Neo Driver" recipe to my own
+  data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/nodejs-motherduck
+published_date: 2026-02-04
 ---
 
 # Connect to MotherDuck from Node.js with the DuckDB Neo Driver

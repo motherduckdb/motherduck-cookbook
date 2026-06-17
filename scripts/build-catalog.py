@@ -5,10 +5,11 @@
 
 """Validate README front matter and build the examples catalog.
 
-Every catalog entry is a README.md with YAML front matter holding exactly seven
-keys: title, id, description, type, category, features, tags. Running this script
-with no output path validates the front matter across the repo (non-zero exit on
-the first problem). Pass --output to also write catalog.json.
+Every catalog entry is a README.md with YAML front matter holding exactly nine
+keys: title, id, description, type, category, features, tags, prompt,
+published_date. Running this script with no output path validates the front
+matter across the repo (non-zero exit on the first problem). Pass --output to
+also write catalog.json.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -97,12 +98,22 @@ ALLOWED_KEYS = {
     "title",
     "id",
     "description",
+    "prompt",
     "type",
     "category",
     "features",
     "tags",
+    "published_date",
 }
-REQUIRED_KEYS = {"title", "id", "description", "type", "category"}
+REQUIRED_KEYS = {
+    "title",
+    "id",
+    "description",
+    "prompt",
+    "type",
+    "category",
+    "published_date",
+}
 FLIGHT_PLANS_DIR = "flight-plans"
 
 SKIPPED_DIR_NAMES = {
@@ -186,6 +197,28 @@ def assert_slug_list(data: dict[str, Any], readme_path: Path, key: str) -> list[
     return cleaned
 
 
+def assert_date(data: dict[str, Any], readme_path: Path, key: str) -> str:
+    """Return a YYYY-MM-DD string from a YAML date/datetime or ISO date string.
+
+    PyYAML parses an unquoted ISO date in front matter as a datetime.date, so
+    accept that as well as a quoted string and normalize both to a plain
+    YYYY-MM-DD string.
+    """
+    value = data.get(key)
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip()).isoformat()
+        except ValueError as error:
+            raise CatalogError(
+                f"{readme_path}: {key} must be a YYYY-MM-DD date, got {value.strip()!r}"
+            ) from error
+    raise CatalogError(f"{readme_path}: {key} must be a YYYY-MM-DD date string")
+
+
 def build_item(
     repo_root: Path, readme_path: Path, frontmatter: dict[str, Any], repo: str, ref: str
 ) -> dict[str, Any] | None:
@@ -239,6 +272,9 @@ def build_item(
             f"for a significant new tool. Allowed tags: {sorted(ALLOWED_TAGS)}"
         )
 
+    prompt = assert_string(frontmatter, readme_path, "prompt")
+    published_date = assert_date(frontmatter, readme_path, "published_date")
+
     relative_dir = readme_path.parent.relative_to(repo_root).as_posix()
     under_flight_plans = relative_dir == FLIGHT_PLANS_DIR or relative_dir.startswith(
         f"{FLIGHT_PLANS_DIR}/"
@@ -262,9 +298,11 @@ def build_item(
         "type": item_type,
         "title": assert_string(frontmatter, readme_path, "title"),
         "description": assert_string(frontmatter, readme_path, "description"),
+        "prompt": prompt,
         "category": category,
         "features": features,
         "tags": tags,
+        "published_date": published_date,
         "path": relative_dir,
         "urls": build_urls(repo=repo, ref=ref, path=relative_dir),
     }

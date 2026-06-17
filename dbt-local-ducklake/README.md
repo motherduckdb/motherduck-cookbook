@@ -11,6 +11,13 @@ type: example
 category: analytics
 features: [ducklake]
 tags: [dbt, postgres, sqlite]
+prompt: >-
+  I want a lakehouse-style DuckLake catalog (table versioning, snapshots, file
+  compaction) for local dbt development that mirrors a managed DuckLake on MotherDuck.
+  Help me adapt the "Run dbt on a Local DuckLake Catalog" recipe to my own data and use
+  case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-local-ducklake
+published_date: 2024-12-20
 ---
 
 # Run dbt on a Local DuckLake Catalog

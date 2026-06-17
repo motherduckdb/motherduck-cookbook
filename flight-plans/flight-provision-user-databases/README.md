@@ -10,6 +10,13 @@ type: template
 category: automation
 features: [flights, shares]
 tags: []
+prompt: >-
+  My application gives each user their own isolated MotherDuck database and share, and I
+  want an admin Flight that provisions them from a control table and revokes access when
+  a user goes inactive. Help me adapt the "Provision User Databases and Shares" recipe
+  to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-provision-user-databases
+published_date: 2026-06-08
 ---
 
 # Provision User Databases and Shares

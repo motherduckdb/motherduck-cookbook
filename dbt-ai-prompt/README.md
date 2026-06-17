@@ -11,6 +11,13 @@ type: example
 category: analytics
 features: [shares]
 tags: [dbt]
+prompt: >-
+  I have unstructured text I want to turn into typed columns with an LLM, run entirely
+  as a SQL transformation in dbt with no external API code. Help me adapt the "Extract
+  Structured Data From Reviews With dbt And prompt()" MotherDuck recipe to my own data
+  and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-ai-prompt
+published_date: 2024-12-11
 ---
 
 # Extract Structured Data From Reviews With dbt And prompt()

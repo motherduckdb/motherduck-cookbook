@@ -10,6 +10,13 @@ type: template
 category: ingestion
 features: [flights]
 tags: [dlt, ingest]
+prompt: >-
+  I want Python ingestion that runs on a schedule as a Flight and handles API calls,
+  schema drift, state, and merge behavior with dlt instead of hand-writing every INSERT.
+  Help me adapt the "Run a dlt Ingest Pipeline as a Flight" recipe to my own data and
+  use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-dlt-ingest
+published_date: 2026-06-08
 ---
 
 # Run a dlt Ingest Pipeline as a Flight

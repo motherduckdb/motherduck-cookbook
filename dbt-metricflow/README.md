@@ -10,6 +10,13 @@ type: example
 category: analytics
 features: []
 tags: [dbt, metricflow]
+prompt: >-
+  I want to define metrics once with dbt MetricFlow over a fact table and query them
+  identically on a local DuckDB file and on MotherDuck. Help me adapt the "Define and
+  Query Metrics with dbt MetricFlow on MotherDuck" recipe to my own data and use case,
+  using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-metricflow
+published_date: 2025-10-20
 ---
 
 # Define and Query Metrics with dbt MetricFlow on MotherDuck

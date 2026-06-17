@@ -10,6 +10,12 @@ type: example
 category: analytics
 features: [ducklake]
 tags: [dbt]
+prompt: >-
+  I want a dbt project that lands raw tables in DuckLake storage and writes analytics
+  models to native MotherDuck. Help me adapt the "Run TPC-DS Models on DuckLake with
+  dbt" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-ducklake
+published_date: 2024-12-20
 ---
 
 # Run TPC-DS Models on DuckLake with dbt

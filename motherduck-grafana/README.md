@@ -10,6 +10,12 @@ type: example
 category: integrations
 features: []
 tags: [grafana, docker]
+prompt: >-
+  I want to build Grafana dashboards and time-series panels on top of MotherDuck data,
+  with the DuckDB datasource plugin wired up. Help me adapt the "Visualize MotherDuck
+  Data in Grafana" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/motherduck-grafana
+published_date: 2025-09-08
 ---
 
 # Visualize MotherDuck Data in Grafana

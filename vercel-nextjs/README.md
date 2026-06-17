@@ -10,6 +10,13 @@ type: example
 category: integrations
 features: [pg_endpoint]
 tags: [vercel, nextjs, node-postgres]
+prompt: >-
+  I'm building a Vercel/Next.js backend that reads MotherDuck data through Next.js API
+  routes over the Postgres wire protocol with pooled, parameterized SQL and no DuckDB
+  binary. Help me adapt the "Query MotherDuck from Vercel and Next.js" recipe to my own
+  data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/vercel-nextjs
+published_date: 2026-03-31
 ---
 
 # Query MotherDuck from Vercel and Next.js

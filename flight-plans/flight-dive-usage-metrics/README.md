@@ -12,6 +12,13 @@ type: template
 category: analytics
 features: [flights, dives]
 tags: []
+prompt: >-
+  I want a scheduled, trend-aware map of which data objects my organization's Dives
+  reference and how they connect, mined from the SQL embedded in each Dive. Help me
+  adapt the "Map Data Usage and Relationships Across Dives" Flight recipe to my own data
+  and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-dive-usage-metrics
+published_date: 2026-06-09
 ---
 
 # Map Data Usage and Relationships Across Dives

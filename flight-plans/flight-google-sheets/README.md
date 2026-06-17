@@ -12,6 +12,13 @@ type: template
 category: ingestion
 features: [flights]
 tags: [google-sheets, ingest, export]
+prompt: >-
+  I want to sync data both ways between Google Sheets and MotherDuck on a schedule,
+  importing sheets into tables and exporting query results back to sheet tabs as reverse
+  ETL. Help me adapt the "Sync Google Sheets and MotherDuck With a Flight" recipe to my
+  own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-google-sheets
+published_date: 2026-06-15
 ---
 
 # Sync Google Sheets and MotherDuck With a Flight
