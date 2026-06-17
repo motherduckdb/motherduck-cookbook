@@ -10,6 +10,13 @@ type: example
 category: getting-started
 features: []
 tags: []
+prompt: >-
+  I want a hands-on, query-by-query walkthrough for loading a CSV, profiling it with
+  SUMMARIZE, cleaning messy columns, and answering an analysis question in the
+  MotherDuck web UI. Help me adapt the "Clean and Analyze a CSV in the MotherDuck UI"
+  recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/motherduck-ui
+published_date: 2025-01-29
 ---
 
 # Clean and Analyze a CSV in the MotherDuck UI

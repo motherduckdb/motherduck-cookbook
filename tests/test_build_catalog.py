@@ -36,6 +36,8 @@ features: []
 tags:
   - python
   - pyarrow
+prompt: Adapt this Python API ingestion recipe to my own data and use case.
+published_date: 2025-03-14
 """,
     )
     write_readme(
@@ -70,9 +72,11 @@ type: example
             "type": "example",
             "title": "Ingest API data into MotherDuck with Python",
             "description": "Load API data into MotherDuck from Python.",
+            "prompt": "Adapt this Python API ingestion recipe to my own data and use case.",
             "category": "ingestion",
             "features": [],
             "tags": ["python", "pyarrow"],
+            "published_date": "2025-03-14",
             "path": "python-ingestion",
             "urls": {
                 "github": "https://github.com/motherduckdb/motherduck-cookbook/tree/main/python-ingestion",
@@ -111,6 +115,8 @@ id: duplicate
 description: Duplicate IDs should not be allowed.
 type: example
 category: integrations
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-01-01
 """,
         )
 
@@ -157,6 +163,8 @@ features:
   - flights
 tags:
   - dbt
+prompt: Adapt this dbt-on-S3 recipe to my own data and use case.
+published_date: 2025-02-02
 """,
     )
 
@@ -179,6 +187,8 @@ features:
   - flights
 tags:
   - dbt
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-02-02
 """,
     )
 
@@ -203,6 +213,8 @@ features:
   - flights
 tags:
   - dbt
+prompt: Adapt this dbt Flight recipe to my own data and use case.
+published_date: 2025-02-02
 """,
     )
 
@@ -226,6 +238,8 @@ description: Load API data into MotherDuck from Python.
 type: example
 features: []
 tags: [python]
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-01-01
 """,
     )
 
@@ -247,10 +261,89 @@ type: example
 category: etl
 features: []
 tags: [python]
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-01-01
 """,
     )
 
     with pytest.raises(
         build_catalog_module.CatalogError, match="category must be one of"
+    ):
+        build_catalog_module.build_catalog(repo_root)
+
+
+def test_missing_prompt_fails(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "a-recipe" / "README.md",
+        """
+title: A recipe
+id: a-recipe
+description: A recipe without a prompt.
+type: example
+category: ingestion
+published_date: 2025-07-09
+""",
+    )
+
+    with pytest.raises(
+        build_catalog_module.CatalogError, match="missing required keys .*prompt"
+    ):
+        build_catalog_module.build_catalog(repo_root)
+
+
+def test_published_date_normalizes_yaml_date_and_string(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    # An unquoted ISO date is parsed by PyYAML as a datetime.date.
+    write_readme(
+        repo_root / "a-recipe" / "README.md",
+        """
+title: A recipe
+id: a-recipe
+description: Publish date written as an unquoted YAML date.
+type: example
+category: ingestion
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-07-09
+""",
+    )
+    # A quoted date is parsed as a string.
+    write_readme(
+        repo_root / "b-recipe" / "README.md",
+        '''
+title: B recipe
+id: b-recipe
+description: Publish date written as a quoted string.
+type: example
+category: ingestion
+prompt: Adapt this recipe to my own data and use case.
+published_date: "2025-07-10"
+''',
+    )
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+    dates = {item["id"]: item["published_date"] for item in catalog["items"]}
+
+    assert dates == {"a-recipe": "2025-07-09", "b-recipe": "2025-07-10"}
+    assert all(isinstance(item["published_date"], str) for item in catalog["items"])
+
+
+def test_invalid_published_date_fails(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "a-recipe" / "README.md",
+        """
+title: A recipe
+id: a-recipe
+description: Publish date that is not a valid ISO date.
+type: example
+category: ingestion
+prompt: Adapt this recipe to my own data and use case.
+published_date: not-a-date
+""",
+    )
+
+    with pytest.raises(
+        build_catalog_module.CatalogError, match="must be a YYYY-MM-DD date"
     ):
         build_catalog_module.build_catalog(repo_root)

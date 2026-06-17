@@ -10,6 +10,13 @@ type: template
 category: ingestion
 features: [flights]
 tags: [ingest, s3]
+prompt: >-
+  My data already lands as Hive-partitioned Parquet in S3, and I want a scheduled Flight
+  that incrementally refreshes a MotherDuck table by reading only the partition that
+  changes. Help me adapt the "Ingest Partitioned S3 Parquet on a Schedule" recipe to my
+  own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-scheduled-s3-ingest
+published_date: 2026-06-08
 ---
 
 # Ingest Partitioned S3 Parquet on a Schedule

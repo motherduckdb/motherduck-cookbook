@@ -10,6 +10,13 @@ type: example
 category: integrations
 features: [pg_endpoint]
 tags: [cloudflare, typescript, node-postgres]
+prompt: >-
+  I want a serverless HTTP API on Cloudflare Workers that queries MotherDuck over the
+  Postgres wire protocol with node-postgres, no DuckDB binary required, and returns
+  JSON. Help me adapt the "Query MotherDuck from Cloudflare Workers" recipe to my own
+  data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/cloudflare-workers
+published_date: 2026-02-18
 ---
 
 # Query MotherDuck from Cloudflare Workers

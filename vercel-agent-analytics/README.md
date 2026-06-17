@@ -11,6 +11,13 @@ type: example
 category: end-to-end
 features: []
 tags: [vercel, nodejs, typescript]
+prompt: >-
+  I want to capture my Vercel log drain, classify AI bot, agent, and AI-referred human
+  traffic from the user agent and referer, and write it into MotherDuck to query live,
+  with no AWS or S3. Help me adapt the "Capture Vercel Log Drain Traffic and Classify AI
+  Agents in MotherDuck" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/vercel-agent-analytics
+published_date: 2026-04-24
 ---
 
 # Capture Vercel Log Drain Traffic and Classify AI Agents in MotherDuck

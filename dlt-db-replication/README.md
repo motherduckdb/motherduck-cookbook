@@ -10,6 +10,13 @@ type: example
 category: ingestion
 features: []
 tags: [dlt, postgres, connectorx]
+prompt: >-
+  I need to copy and refresh tables from a PostgreSQL database into MotherDuck with a
+  dlt pipeline, with tunable extract, normalize, and load parallelism. Help me adapt the
+  "Replicate PostgreSQL Tables to MotherDuck with dlt" recipe to my own data and use
+  case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dlt-db-replication
+published_date: 2024-12-11
 ---
 
 # Replicate PostgreSQL Tables to MotherDuck with dlt

@@ -10,6 +10,13 @@ type: example
 category: analytics
 features: []
 tags: [dbt, python, scikit-learn]
+prompt: >-
+  I want a SQL-first churn feature pipeline on MotherDuck, building feature and label
+  tables with dbt and keeping model training as a separate Python step. Help me adapt
+  the "Build Churn Prediction Features with dbt" recipe to my own data and use case,
+  using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-churn-prediction
+published_date: 2026-04-16
 ---
 
 # Build Churn Prediction Features with dbt

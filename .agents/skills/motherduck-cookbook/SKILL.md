@@ -59,7 +59,7 @@ sync, GitHub Pages, or committed generated JSON.
 ## README Metadata
 
 Catalog READMEs start with YAML front matter. For catalog entries, keep exactly
-these seven keys:
+these nine keys:
 
 ```yaml
 ---
@@ -72,6 +72,13 @@ type: example
 category: ingestion
 features: []
 tags: [dbt]
+prompt: >-
+  I want to build dbt models directly on Parquet/CSV in S3 without copying the
+  data first, running locally against DuckDB or in the cloud against MotherDuck.
+  Help me adapt the "Build Hacker News Models From S3 With dbt" recipe to my own
+  data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-ingestion-s3
+published_date: 2024-12-11
 ---
 ```
 
@@ -98,6 +105,14 @@ Rules:
   (`cloudflare-workers` when `cloudflare` exists), or anything already expressed
   as a feature (`pg_duckdb`, `ducklake`). Tags may be empty. Add a new tag to the
   list only for a significant new third-party thing.
+- `prompt` is a first-person, copy-paste prompt that tells an agent to use the
+  recipe as a guide and adapt it to the user's own data and use case. Lead with
+  the user's goal (drawn from the description), name the recipe by its exact
+  title, keep the "use it as a guide / adapt it to my own data and use case"
+  message, and end with its docs URL `https://motherduck.com/docs/cookbook/<id>`.
+- `published_date` is the recipe's publish date as `YYYY-MM-DD`; downstream
+  surfaces order by it. Use the date the recipe first landed in the repo. The
+  builder also accepts an unquoted YAML date and normalizes it.
 - `flight-plans/` is only for reusable Flight templates: items there must be
   `type: template` and include `flights`. Concrete examples never live there.
 - Examples at the repo root may include `flights` when they can deploy as a

@@ -10,6 +10,12 @@ type: example
 category: analytics
 features: [dives, shares]
 tags: [dbt]
+prompt: >-
+  I want to build a MotherDuck warehouse from scratch with dbt-duckdb and then ship a
+  Dive on top of the mart tables. Help me adapt the "Build a MotherDuck Warehouse with
+  dbt and Deploy a Dive" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/dbt-duckdb-dwh-starter
+published_date: 2026-06-01
 ---
 
 # Build a MotherDuck Warehouse with dbt and Deploy a Dive

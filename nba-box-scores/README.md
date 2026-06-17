@@ -11,6 +11,13 @@ type: example
 category: end-to-end
 features: [flights, dives]
 tags: [python, typescript]
+prompt: >-
+  I want to pair a scheduled Python Flight ingest with a Dive frontend that reads the
+  data live, all deployed as code on MotherDuck. Help me adapt the "NBA Box Scores on
+  MotherDuck Flights and a Dive" recipe to my own data and use case, using it as a
+  guide:
+  https://motherduck.com/docs/cookbook/nba-box-scores
+published_date: 2026-06-09
 ---
 
 # NBA Box Scores on MotherDuck Flights and a Dive

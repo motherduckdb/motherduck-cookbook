@@ -11,6 +11,14 @@ type: template
 category: ingestion
 features: [flights]
 tags: [snowflake, ingest, migrate]
+prompt: >-
+  I want a code-driven, re-runnable Flight that ingests Snowflake tables into MotherDuck
+  in two phases (discover an editable inventory, then move the selected tables via
+  Arrow), as part of migrating off Snowflake. Help me adapt the "Ingest Snowflake Tables
+  into MotherDuck From a Flight" recipe to my own data and use case, using it as a
+  guide:
+  https://motherduck.com/docs/cookbook/flight-snowflake-ingest
+published_date: 2026-06-09
 ---
 
 # Ingest Snowflake Tables into MotherDuck From a Flight

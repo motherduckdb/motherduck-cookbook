@@ -12,6 +12,14 @@ type: example
 category: end-to-end
 features: [flights, dives]
 tags: [python, typescript, d3]
+prompt: >-
+  I want a multi-stage Flight pipeline (raw to core to marts, transformed with
+  in-warehouse SQL) paired with a bespoke D3 Dive that renders the data live, all
+  deployed as code on MotherDuck. Help me adapt the "StatsBomb 360 Football Matches —
+  Flights pipeline + animated Dive" recipe to my own data and use case, using it as a
+  guide:
+  https://motherduck.com/docs/cookbook/statsbomb-360-football-matches
+published_date: 2026-06-15
 ---
 
 # StatsBomb 360 Football Matches — Flights pipeline + animated Dive

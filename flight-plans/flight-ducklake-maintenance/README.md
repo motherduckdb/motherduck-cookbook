@@ -11,6 +11,13 @@ type: template
 category: automation
 features: [flights, ducklake]
 tags: []
+prompt: >-
+  My DuckLake is accumulating small files, deleted rows, and stale snapshots, and I want
+  scheduled compaction and cleanup tuned to my ingest pattern. Help me adapt the "Keep
+  DuckLake Reads Fast With Scheduled Maintenance" Flight recipe to my own data and use
+  case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-ducklake-maintenance
+published_date: 2026-06-15
 ---
 
 # Keep DuckLake Reads Fast With Scheduled Maintenance

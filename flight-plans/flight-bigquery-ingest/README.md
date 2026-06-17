@@ -13,6 +13,13 @@ type: template
 category: ingestion
 features: [flights]
 tags: [bigquery, ingest, migrate]
+prompt: >-
+  I want scheduled, incremental ingestion from BigQuery into MotherDuck using a
+  date-partition watermark with idempotent per-partition DELETE plus INSERT, as part of
+  moving off BigQuery. Help me adapt the "Incrementally Ingest BigQuery into MotherDuck"
+  Flight recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-bigquery-ingest
+published_date: 2026-06-09
 ---
 
 # Incrementally Ingest BigQuery into MotherDuck

@@ -10,6 +10,13 @@ type: template
 category: automation
 features: [flights]
 tags: [slack]
+prompt: >-
+  I want scheduled freshness monitoring on my MotherDuck tables with dbt-style
+  warn/error age thresholds and a Slack alert when data goes stale. Help me adapt the
+  "Alert on Stale Tables From a Flight" recipe to my own data and use case, using it as
+  a guide:
+  https://motherduck.com/docs/cookbook/flight-freshness-alert
+published_date: 2026-06-08
 ---
 
 # Alert on Stale Tables From a Flight
