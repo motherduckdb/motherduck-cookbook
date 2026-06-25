@@ -82,6 +82,8 @@ ALLOWED_TAGS = {
     "s3",
     # messaging and alerting
     "slack",
+    # crm and marketing
+    "hubspot",
     # external databases
     "postgres",
     "sqlite",
