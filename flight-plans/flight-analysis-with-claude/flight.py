@@ -138,3 +138,57 @@ async def explore_warehouse(sql: str) -> str:
     table sample_data.nyc.service_requests.
     """
     return await asyncio.to_thread(run_select, sql)
+
+
+# ---- Tool 2: an external-API tool you build yourself -------------------------
+# A thin wrapper over the Open-Meteo historical archive. It turns a location and
+# date range into daily weather, so the agent can explain 311 activity (a rain
+# day driving flooding complaints, a heat spike driving others). The archive API
+# needs no key. Borough coordinates live in the SKILL, so this stays a thin,
+# honest wrapper.
+def fetch_weather(latitude: float, longitude: float, start_date: str, end_date: str) -> dict:
+    params = urllib.parse.urlencode({
+        "latitude": latitude,
+        "longitude": longitude,
+        "start_date": start_date,
+        "end_date": end_date,
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum",
+        "timezone": "America/New_York",
+    })
+    with urllib.request.urlopen(f"{WEATHER_URL}?{params}", timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def summarize_weather(payload: dict) -> str:
+    daily = payload.get("daily", {})
+    days = daily.get("time", [])
+    if not days:
+        return "No weather data for that range."
+    lines = []
+    for i, day in enumerate(days):
+        tmax = daily["temperature_2m_max"][i]
+        tmin = daily["temperature_2m_min"][i]
+        precip = daily["precipitation_sum"][i] or 0.0
+        snow = daily["snowfall_sum"][i] or 0.0
+        if snow > 0:
+            cond = "snow"
+        elif precip >= 1.0:
+            cond = "rain"
+        else:
+            cond = "dry"
+        lines.append(
+            f"{day}: {tmin:.0f} to {tmax:.0f} C, precip {precip:.1f}mm, "
+            f"snow {snow:.1f}cm ({cond})"
+        )
+    return "\n".join(lines)
+
+
+async def get_weather(latitude: float, longitude: float,
+                      start_date: str, end_date: str) -> str:
+    """Daily historical weather for a location and date range (dates as YYYY-MM-DD).
+
+    Returns one line per day: min/max temperature, precipitation, snowfall, and a
+    rain/dry/snow label. Use the borough coordinates listed in your instructions.
+    """
+    payload = await asyncio.to_thread(fetch_weather, latitude, longitude, start_date, end_date)
+    return summarize_weather(payload)
