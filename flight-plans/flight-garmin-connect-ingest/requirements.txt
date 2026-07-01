@@ -1,0 +1,5 @@
+duckdb==1.5.4
+garminconnect==0.3.6
+# Load-bearing, not optional: garminconnect routes its login through curl_cffi for
+# TLS-fingerprint rotation, which is what gets past Garmin's WAF on cloud IPs.
+curl_cffi==0.15.0
