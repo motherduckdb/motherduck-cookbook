@@ -266,3 +266,128 @@ def build_agent() -> Agent:
         MODEL, provider=OpenRouterProvider(api_key=resolve_openrouter_key())
     )
     return Agent(model, instructions=SKILL, tools=[explore_warehouse, get_weather])
+
+
+# ---- Deterministic infra: discovery and persistence -------------------------
+# These are not the agent. They use md: (they also write to flights_demo) and run
+# plain SQL. Only the agent's explore_warehouse tool is scoped to md:sample_data.
+def get_anchor(con: duckdb.DuckDBPyConnection) -> datetime:
+    return con.execute(f"SELECT max(created_date) FROM {SOURCE_TABLE}").fetchone()[0]
+
+
+def discover_boroughs(con: duckdb.DuckDBPyConnection, window_start: datetime,
+                      anchor: datetime) -> list:
+    if BOROUGHS_OVERRIDE:
+        boroughs = [b.strip().upper() for b in BOROUGHS_OVERRIDE.split(",") if b.strip()]
+        log(f"Using BOROUGHS override: {boroughs}")
+    else:
+        rows = con.execute(
+            f"""
+            SELECT borough, count(*) AS requests
+            FROM {SOURCE_TABLE}
+            WHERE created_date BETWEEN ? AND ?
+              AND borough IS NOT NULL
+              AND borough <> 'Unspecified'
+            GROUP BY borough
+            ORDER BY requests DESC
+            """,
+            [window_start, anchor],
+        ).fetchall()
+        boroughs = [r[0] for r in rows]
+        log(f"Discovered {len(boroughs)} boroughs from {SOURCE_TABLE}")
+    if MAX_BOROUGHS > 0:
+        boroughs = boroughs[:MAX_BOROUGHS]
+        log(f"MAX_BOROUGHS={MAX_BOROUGHS}; limiting to {len(boroughs)} boroughs")
+    return boroughs
+
+
+def persist(borough: str, anchor: datetime, brief_md: str) -> None:
+    con = duckdb.connect("md:")
+    con.execute("CREATE DATABASE IF NOT EXISTS flights_demo")
+    con.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {RESULTS_TABLE} (
+            run_ts      TIMESTAMPTZ,
+            borough     VARCHAR,
+            window_days INTEGER,
+            window_end  TIMESTAMP,
+            brief_md    VARCHAR
+        )
+        """
+    )
+    con.execute(
+        f"INSERT INTO {RESULTS_TABLE} VALUES (now(), ?, ?, ?, ?)",
+        [borough, WINDOW_DAYS, anchor, brief_md],
+    )
+    con.close()
+
+
+# ---- The agentic run and bounded fan-out ------------------------------------
+async def generate_brief(agent: Agent, borough: str, window_start: datetime,
+                         anchor: datetime) -> str:
+    result = await agent.run(build_prompt(borough, window_start, anchor))
+    return result.output or ""
+
+
+async def run_one(agent: Agent, borough: str, window_start: datetime,
+                  anchor: datetime, sem: asyncio.Semaphore) -> tuple:
+    async with sem:
+        t = time.time()
+        try:
+            brief = await generate_brief(agent, borough, window_start, anchor)
+            if not brief.strip():
+                log(f"[{borough}] EMPTY brief")
+                return (borough, "empty", time.time() - t)
+            persist(borough, anchor, brief)
+            dt = time.time() - t
+            log(f"[{borough}] ok ({len(brief)} chars, {dt:.0f}s)")
+            return (borough, "ok", dt)
+        except Exception as e:  # one borough's failure must not abort the batch
+            log(f"[{borough}] ERROR: {e!r}")
+            return (borough, "error", time.time() - t)
+
+
+async def run_batch(agent: Agent, boroughs: list, window_start: datetime,
+                    anchor: datetime) -> list:
+    # One agent shared across runs (Pydantic AI agents are safe to reuse; each
+    # run is independent). The semaphore bounds concurrency to the Flight runtime
+    # and OpenRouter rate limits.
+    sem = asyncio.Semaphore(CONCURRENCY)
+    return await asyncio.gather(
+        *[run_one(agent, b, window_start, anchor, sem) for b in boroughs]
+    )
+
+
+def main() -> None:
+    if not os.environ.get("MOTHERDUCK_TOKEN", "").strip():
+        raise SystemExit("MOTHERDUCK_TOKEN is required (the Flights runtime injects it).")
+    agent = build_agent()  # fails fast if the OpenRouter key is missing
+
+    t0 = time.time()
+    con = duckdb.connect("md:")
+    anchor = get_anchor(con)
+    window_start = anchor - timedelta(days=WINDOW_DAYS)
+    boroughs = discover_boroughs(con, window_start, anchor)
+    con.close()
+
+    if not boroughs:
+        log("No boroughs to brief; exiting.")
+        return
+    log(
+        f"Briefing {len(boroughs)} boroughs at concurrency {CONCURRENCY}, "
+        f"model {MODEL}, window {window_start:%Y-%m-%d}..{anchor:%Y-%m-%d} ..."
+    )
+    results = asyncio.run(run_batch(agent, boroughs, window_start, anchor))
+
+    ok = [r for r in results if r[1] == "ok"]
+    bad = [r for r in results if r[1] != "ok"]
+    log("---- BATCH SUMMARY ----")
+    log(f"ok={len(ok)} failed/empty={len(bad)} total={len(results)} wall={time.time() - t0:.0f}s")
+    for borough, status, dt in sorted(results, key=lambda r: (r[1] != "ok", r[0])):
+        log(f"  {status:6} {borough} ({dt:.0f}s)")
+    if bad:
+        log(f"WARNING: {len(bad)} borough(s) did not produce a brief: {[r[0] for r in bad]}")
+
+
+if __name__ == "__main__":
+    main()
