@@ -85,3 +85,56 @@ def resolve_openrouter_key() -> str:
     raise SystemExit(
         "OPENROUTER_API_KEY is required (set it locally or add a Flights secret)."
     )
+
+
+# ---- Tool 1: a read-only warehouse tool you build yourself -------------------
+# json_serialize_sql() is a DuckDB scalar that parses a SQL string to its AST as
+# JSON, but ONLY for SELECT statements. Anything that mutates state
+# (INSERT/UPDATE/DELETE/CREATE/ATTACH/...) comes back with error=true instead of
+# an AST. So the read-only check is: serialize the query, and only run it if
+# error is false. This is the same primitive motherduck-wasm and Dive use.
+MAX_ROWS = 200
+
+
+def is_read_only(con: duckdb.DuckDBPyConnection, sql: str) -> bool:
+    row = con.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()
+    payload = json.loads(row[0])
+    return payload.get("error") is False
+
+
+def run_select(sql: str) -> str:
+    # A fresh connection per call keeps concurrent tool calls independent. It is
+    # scoped to a single database (md:sample_data), one layer of least privilege.
+    con = duckdb.connect("md:sample_data")
+    try:
+        if not is_read_only(con, sql):
+            return (
+                "ERROR: only SELECT statements are allowed. For schema, query "
+                "information_schema (e.g. SELECT column_name, data_type FROM "
+                "information_schema.columns WHERE table_name = 'service_requests') "
+                "or SELECT * FROM <table> LIMIT 0."
+            )
+        cur = con.execute(sql)
+        columns = [d[0] for d in cur.description]
+        rows = cur.fetchmany(MAX_ROWS)
+        header = " | ".join(columns)
+        body = "\n".join(
+            " | ".join("" if v is None else str(v) for v in r) for r in rows
+        )
+        note = f"\n... (truncated to {MAX_ROWS} rows)" if len(rows) == MAX_ROWS else ""
+        return f"{header}\n{body}{note}" if rows else f"{header}\n(no rows)"
+    except Exception as e:
+        return f"ERROR: {e!r}"
+    finally:
+        con.close()
+
+
+async def explore_warehouse(sql: str) -> str:
+    """Run a read-only DuckDB SELECT against the sample_data database and return rows.
+
+    Only SELECT is supported: statements that write or change state are refused.
+    To explore the schema, use SELECT against information_schema (columns,
+    tables) or SELECT * FROM <table> LIMIT 0, not PRAGMA. The 311 data is in the
+    table sample_data.nyc.service_requests.
+    """
+    return await asyncio.to_thread(run_select, sql)
