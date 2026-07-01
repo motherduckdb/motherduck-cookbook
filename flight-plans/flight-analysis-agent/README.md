@@ -1,6 +1,6 @@
 ---
-title: Build Your Own Analysis Agent in a Flight
-id: flight-analysis-with-claude
+title: Build an automated AI data analysis agent with Flights
+id: flight-analysis-agent
 description: >-
   Build a data-analysis agent from scratch and run it on a schedule in
   MotherDuck. A Pydantic AI agent, with its model served through OpenRouter so it
@@ -12,9 +12,17 @@ type: template
 category: automation
 features: [flights]
 tags: [pydantic-ai, openrouter, python]
+prompt: >-
+  I want to build my own data-analysis agent and run it on a schedule in
+  MotherDuck: it discovers the entities to cover, fans out one agent each,
+  explores my warehouse with read-only SQL, and writes a ranked "notable things"
+  brief. Help me adapt the "Build an automated AI data analysis agent with
+  Flights" recipe to my own data and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-analysis-agent
+published_date: 2026-07-01
 ---
 
-# Build Your Own Analysis Agent in a Flight
+# Build an automated AI data analysis agent with Flights
 
 This Flight shows how to build your own data-analysis agent and run it on a
 schedule in MotherDuck. Instead of reaching for a finished framework and hoping
