@@ -1,0 +1,5 @@
+segment_id,segment_name,segment_label,segment_description,recommended_action,recommended_offer
+1,promotion_maximizers,Promotion maximizers,Households that buy campaign-targeted items and respond to retailer coupons or broad store discounts.,Prioritize targeted coupon bundles and measure lift against a holdout group.,Personalized campaign coupon bundle
+2,private_label_loyalists,Private label loyalists,Households with strong private label affinity and owned-brand basket share.,Grow owned-brand baskets with replenishment reminders and category extensions.,Private label cross-sell
+3,brand_deal_seekers,Brand deal seekers,Households that respond to manufacturer coupons and discounts on national brands.,Coordinate brand-funded offers and stock-up messaging around national brand promotions.,Manufacturer-funded deal
+4,steady_full_price,Steady full-price shoppers,High-engagement households with limited discount dependence.,Protect margin with service-oriented messages and selective loyalty recognition.,Loyalty recognition

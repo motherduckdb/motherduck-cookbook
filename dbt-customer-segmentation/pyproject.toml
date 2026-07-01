@@ -1,0 +1,13 @@
+[project]
+name = "dbt-customer-segmentation"
+version = "0.1.0"
+description = "Customer segmentation with dbt, DuckDB, Python models, and MotherDuck native storage"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dbt-core==1.9.9",
+    "dbt-duckdb==1.9.6",
+    "duckdb==1.5.1",
+    "pandas==2.3.3",
+    "scikit-learn==1.8.0",
+]
