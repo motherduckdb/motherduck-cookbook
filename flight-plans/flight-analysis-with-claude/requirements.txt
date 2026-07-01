@@ -1,8 +1,7 @@
 duckdb==1.5.3
-# The Claude Agent SDK bundles the Claude Code CLI and drives it as a
-# subprocess; each query() opens its own MCP connection. Pinned so a Flight
-# build is reproducible.
-claude-agent-sdk==0.2.101
-# Tiny JSON-RPC client for the hosted MotherDuck MCP server (the agent's tools
-# forward to it). Plain HTTP POSTs — no async/session machinery needed.
-requests==2.32.3
+# Pydantic AI runs the agent loop and speaks OpenRouter's OpenAI-compatible API,
+# so the agent is model-agnostic: swap the MODEL slug for any tool-capable model.
+# Pinned for reproducible Flight builds. The [openrouter] extra provides
+# OpenRouterModel and OpenRouterProvider. The weather tool uses stdlib urllib,
+# so no HTTP client dependency is needed.
+pydantic-ai-slim[openrouter]==2.2.0
