@@ -1,0 +1,7 @@
+# dbt + MetricFlow, plus a DuckDB client for creating the database and writing
+# the snapshot table. dbt-duckdb and dbt-metricflow pull in `duckdb` and
+# `metricflow` transitively; the `mf` and `dbt` console scripts come from these.
+dbt-core>=1.8.0,<2.0.0
+dbt-duckdb>=1.8.0,<2.0.0
+dbt-metricflow>=0.10.0,<1.0.0
+duckdb>=1.0.0  # used directly for `md:` connect + the JSON snapshot INSERT
