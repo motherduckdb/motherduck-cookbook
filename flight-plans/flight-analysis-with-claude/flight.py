@@ -192,3 +192,77 @@ async def get_weather(latitude: float, longitude: float,
     """
     payload = await asyncio.to_thread(fetch_weather, latitude, longitude, start_date, end_date)
     return summarize_weather(payload)
+
+
+# ---- The skill: your company/domain context (layer 2) ------------------------
+# In a Flight there is no filesystem to load a SKILL.md from at runtime, so the
+# skill lives here as a constant and is passed to the agent as instructions.
+# Swap this block to point the agent at your own domain: what is notable, what to
+# exclude, how to ground claims, and any reference data it needs (here, borough
+# coordinates for the weather tool).
+SKILL = """\
+You are a data analyst for a NYC 311 service-request operations team. You write
+short, decision-useful briefs of NOTABLE activity for a single borough.
+
+Data:
+- The 311 requests are in the table sample_data.nyc.service_requests, one row per
+  request. Confirm real column names before querying (query information_schema,
+  not DESCRIBE). Useful columns: created_date, closed_date, agency, agency_name,
+  complaint_type, descriptor, status, incident_zip, community_board,
+  open_data_channel_type, borough.
+- Borough values are uppercase. Exclude the 'Unspecified' borough: it is a
+  catch-all with no geography, the analog of internal or test accounts.
+
+What counts as NOTABLE:
+- Complaint-type or descriptor spikes vs the rest of the window.
+- Agencies with unusually slow or aging open requests (compare created_date to
+  closed_date and current status).
+- Zip-code or community-board hotspots.
+- Shifts in how requests arrive (open_data_channel_type).
+- Weather that plausibly explains activity: a heavy-rain day preceding a flooding
+  or sewer spike, a heat spell preceding heat or cooling complaints. Use the
+  get_weather tool for this; do not force a weather angle if the data does not
+  support one.
+
+Borough coordinates for get_weather (latitude, longitude):
+- MANHATTAN: 40.7831, -73.9712
+- BROOKLYN: 40.6782, -73.9442
+- QUEENS: 40.7282, -73.7949
+- BRONX: 40.8448, -73.8648
+- STATEN ISLAND: 40.5795, -74.1502
+
+Guardrails:
+- Ground every claim in a query you ran. Never invent numbers.
+- If a query returns nothing, say so rather than guessing.
+- Only SELECT is allowed. Use information_schema or SELECT ... LIMIT 0 to explore.
+"""
+
+
+def build_prompt(borough: str, window_start: datetime, anchor: datetime) -> str:
+    start_str = window_start.strftime("%Y-%m-%d")
+    end_str = anchor.strftime("%Y-%m-%d")
+    return f"""\
+Write a brief of notable 311 activity for the borough: {borough}.
+
+The data is a frozen snapshot, so your window is fixed to the most recent
+{WINDOW_DAYS} days present: created_date from {start_str} to {end_str} inclusive.
+Filter every query on borough = '{borough}' and created_date between
+'{start_str}' and '{end_str}'.
+
+Steps:
+1. Profile the window: total requests, busiest complaint types and agencies, the
+   open/closed status mix, and how volume moved day over day.
+2. Decide what is notable (see your instructions). Where a spike lines up with
+   weather, check get_weather for {borough} over the window and say so.
+3. Output ONLY a concise markdown brief, ranked by importance, one short section
+   per finding, led by a 2 to 3 sentence "Top of mind" summary. It is stored
+   verbatim. If nothing is notable, say so plainly.
+"""
+
+
+def build_agent() -> Agent:
+    """Compose the agent: model (OpenRouter) + skill (instructions) + tools."""
+    model = OpenRouterModel(
+        MODEL, provider=OpenRouterProvider(api_key=resolve_openrouter_key())
+    )
+    return Agent(model, instructions=SKILL, tools=[explore_warehouse, get_weather])
