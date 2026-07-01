@@ -72,7 +72,9 @@ ALLOWED_TAGS = {
     "node-postgres",
     "generic-pool",
     "d3",
-    "claude-agent-sdk",
+    # agent frameworks and gateways
+    "pydantic-ai",
+    "openrouter",
     # platforms and infrastructure
     "cloudflare",
     "vercel",
