@@ -101,6 +101,54 @@ Discovery and persistence use a direct `duckdb.connect("md:")` (deterministic
 infra); only the agent's exploration goes through the `explore_warehouse` tool,
 which connects to the single `md:sample_data` database.
 
+## Questions to answer
+
+Before pointing this at your own data, decide:
+
+- **What entity do you fan out on?** Here it is NYC boroughs; for you it might be
+  customers, regions, products, or teams. This is the discovery query in
+  `discover_boroughs()` and the entity filter in `build_prompt()`.
+- **What is the source table, and which column marks "recent"?** Set `SOURCE_TABLE`
+  and the date column the window filters on (`created_date` here).
+- **Live data or a frozen snapshot?** The shipped example anchors the window to
+  `MAX(created_date)` because `sample_data` is frozen. Against a live table, anchor
+  to `now()` instead (see Caveats).
+- **What is *notable* in your domain, and what must be excluded?** This is the
+  `SKILL` constant: the definitions, exclusions (the `Unspecified` borough is the
+  analog of internal or test accounts), and any reference data your tools need
+  (here, borough coordinates for the weather tool).
+- **Which tools does the agent need?** A read-only SQL tool over your warehouse is
+  almost always one. The weather tool is domain-specific: keep it only if an
+  external signal actually explains your data, otherwise replace it.
+- **Which model, and does it support tool calling?** Set `MODEL` to a tool-capable
+  OpenRouter slug (see Caveats).
+- **Where do briefs land, and who may read them?** Set `RESULTS_TABLE` to a
+  database the Flight can write, and apply the source data's access controls to it.
+- **How often, and how many entities per run?** Choose a schedule and use
+  `MAX_BOROUGHS` and `CONCURRENCY` to bound cost while you iterate.
+- **Where does the OpenRouter key come from?** A local env var for local runs, or a
+  MotherDuck Flights secret when deployed (see "Deploy as a Flight").
+
+## Caveats
+
+- **Fan-out multiplies cost and time.** One agent per entity is N independent model
+  runs, each making several tool calls. Keep `MAX_BOROUGHS` small on the first run
+  and while iterating, and only lift the cap once a run looks right. `CONCURRENCY`
+  bounds parallelism to the Flight runtime and OpenRouter rate limits; it does not
+  bound spend.
+- **Output is non-deterministic.** Two runs over the same window can rank or word
+  findings differently. The guardrails constrain *what* the agent may claim (every
+  number grounded in a query it ran), not the exact prose. This is the wrong tool
+  when you need one stable, exact figure: compute that with plain SQL and reserve
+  the agent for the judgment layer on top.
+- **The window is anchored to the data, not the clock.** Because `sample_data` ends
+  in 2023, the run measures "recent" from `MAX(created_date)`. Point it at a live
+  table without switching the anchor to `now()` and it will keep briefing the same
+  stale window.
+- **The model must support tool calling.** A non-tool model set as `MODEL` cannot
+  call `explore_warehouse` or `get_weather`; pick a tool-capable slug from
+  OpenRouter.
+
 ## What you'll adjust
 
 | Knob | Where | Default | Purpose |
@@ -229,4 +277,5 @@ agent per entity, or you point a single agent at more tools.
   `get_flight_guide` tool. Deeper MotherDuck or DuckDB questions: use the
   `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight source)
-  and [`requirements.txt`](requirements.txt) (`duckdb`, `pydantic-ai-slim`).
+  and [`requirements.txt`](requirements.txt) (`duckdb` and
+  `pydantic-ai-slim[openrouter]`, pinned for reproducible Flight builds).
