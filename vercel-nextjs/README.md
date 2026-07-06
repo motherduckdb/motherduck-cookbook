@@ -105,7 +105,7 @@ to man-in-the-middle attacks.
 ## Questions to answer
 
 - Which MotherDuck database and schema should the routes read from (default is `sample_data.nyc.taxi`)?
-- Which region is the account in, so the right `MOTHERDUCK_HOST` is set (US vs EU)?
+- Which region is the account in, so the right `MOTHERDUCK_HOST` is set (US vs EU)? Determine it with `SELECT region FROM md_user_info();`.
 - What tables and columns do the API routes need to expose, and what query parameters drive them?
 - How will the token be provisioned in production: manual `vercel env add` or the MotherDuck Native Integration on Vercel?
 - What concurrency is expected, so the pool `max` and idle timeout can be tuned?
