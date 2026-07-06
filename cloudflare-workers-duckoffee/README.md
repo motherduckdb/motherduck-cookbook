@@ -107,7 +107,7 @@ ORDER BY 1
 
 - Which MotherDuck share or database holds the analytics, and what is its share URI?
 - What is the schema: a locations table, a per-day fact table, and a top-N dimension, plus the column names to use in the three queries?
-- What region is the account in, so you set the right `MOTHERDUCK_HOST`?
+- What region is the account in, so you set the right `MOTHERDUCK_HOST`? Determine it with `SELECT region FROM md_user_info();`.
 - What is the voting question and the candidate list (8 to 12 items, kebab-case `id` values)?
 - What lat/lon coordinates back each location and candidate city?
 - What brand palette, copy, and assets should the frontend use?
