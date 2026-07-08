@@ -1,0 +1,12 @@
+{
+  "DB_ENV_VAR": "MOTHERDUCK_DATABASE",
+  "DBT_TARGET": "prod",
+  "GIT_REF": "main",
+  "GIT_REPO": "https://github.com/motherduckdb/motherduck-cookbook.git",
+  "MODELS_DATABASE": "dbt_build_flight_test",
+  "REPO_SUBDIR": "dbt-churn-prediction",
+  "RUN_MODE": "build",
+  "SELECT": "",
+  "SNAPSHOT_DATABASE": "dbt_build_flight_test",
+  "SNAPSHOT_TABLE": "dbt_run_results"
+}
