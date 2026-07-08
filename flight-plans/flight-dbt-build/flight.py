@@ -20,6 +20,7 @@ without redeploying. ``RUN_MODE=build`` runs ``dbt build`` (seed+run+test);
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import shutil
@@ -31,7 +32,7 @@ from pathlib import Path
 
 import duckdb
 
-log = logging.getLogger("dbt_metricflow")
+log = logging.getLogger("dbt_build")
 
 
 # ===========================================================================
@@ -123,8 +124,7 @@ def resolve_secret(param: str) -> str:
     run sets the bare env var (e.g. ``GIT_TOKEN``); deployed as a Flight, the
     secret injects each param as ``<secret_name>_<PARAM>`` (the lowercased secret
     name becomes a prefix), so accept the exact name first, then any var ending in
-    ``_<PARAM>``. Returns ``""`` when neither is set — i.e. a public repo. Mirrors
-    resolve_secret_param() in flight-snowflake-ingest."""
+    ``_<PARAM>``. Returns ``""`` when neither is set — i.e. a public repo."""
     direct = os.environ.get(param, "").strip()
     if direct:
         return direct
@@ -168,7 +168,7 @@ def discover(subdir: Path) -> tuple[Path, Path]:
 
 
 # ---------------------------------------------------------------------------
-# Running the dbt / MetricFlow CLIs
+# Running the dbt CLI
 # ---------------------------------------------------------------------------
 def _tool(name: str) -> str:
     """Locate a console script installed by requirements, with a clear error."""
@@ -192,11 +192,6 @@ def run_cmd(cmd: list[str], cwd: Path | str, env: dict[str, str], check: bool = 
     if check and proc.returncode != 0:
         raise SystemExit(f"command failed ({proc.returncode}): {' '.join(cmd)}")
     return proc.returncode
-
-
-def _truthy(value: str) -> bool:
-    """Parse a config string as a boolean (Flight config values are always strings)."""
-    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +261,7 @@ def append_run_results(con: "duckdb.DuckDBPyConnection", cfg: dict[str, str], ru
         INSERT INTO {db}.{table}
         WITH doc AS (SELECT CAST(content AS JSON) AS j FROM read_text(?))
         SELECT
-            now(),
+            now()::TIMESTAMP,
             doc.j->>'$.metadata.invocation_id',
             ?, ?,
             doc.j->>'$.metadata.dbt_version',
@@ -283,11 +278,7 @@ def append_run_results(con: "duckdb.DuckDBPyConnection", cfg: dict[str, str], ru
         """,
         [str(run_results_path), cfg["GIT_REPO"], cfg["GIT_REF"], cfg["RUN_MODE"]],
     )
-    (payload,) = con.execute(
-        "SELECT CAST(content AS JSON)->'$.results' FROM read_text(?)", [str(run_results_path)]
-    ).fetchone()
-    import json
-    return json.loads(payload) if payload else []
+    return json.loads(run_results_path.read_text())["results"]
 
 
 def main() -> None:
@@ -303,6 +294,7 @@ def main() -> None:
 
     con = duckdb.connect("md:")
     con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['SNAPSHOT_DATABASE'])}")
+    con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['MODELS_DATABASE'])}")
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
