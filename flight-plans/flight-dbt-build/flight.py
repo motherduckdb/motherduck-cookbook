@@ -309,6 +309,17 @@ def main() -> None:
         dbt = _tool("dbt")
         maybe_deps(dbt, project_dir, env)
 
+        # In build mode, seed first so the seed tables exist before the models run.
+        # dbt only orders seeds ahead of models that `ref()` them; a project whose
+        # models read the seeds as `source()`s (like the default
+        # dbt-churn-prediction) has no such edge, so a cold `dbt build` can run
+        # models before seeds and error on the first run against a new database.
+        # Priming the seeds makes the first build deterministic. Tolerant on
+        # purpose: the build below re-runs seeds and its run_results is the record,
+        # so a genuine seed error is still captured and enforced there.
+        if cfg["RUN_MODE"].strip().lower() != "test":
+            run_cmd([dbt, "seed", "--target", cfg["DBT_TARGET"]], project_dir, env, check=False)
+
         # Run dbt tolerating a non-zero exit — a test failure must not stop us from
         # recording results. Capture the code, then decide after snapshotting.
         rc = run_cmd(dbt_command(cfg, dbt), project_dir, env, check=False)

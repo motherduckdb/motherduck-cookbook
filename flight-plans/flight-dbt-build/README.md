@@ -52,8 +52,8 @@ only — no clone) and shells out to the `dbt` CLI against it:
    (`api.github.com/repos/<owner>/<repo>/tarball/<ref>`).
 4. Discover the dbt project (`dbt_project.yml`) and its profile (`profiles.yml`)
    inside `REPO_SUBDIR` of the checkout, so any layout works.
-5. Run dbt with `--target DBT_TARGET`. `RUN_MODE=build` runs `dbt build`
-   (seed + run + test); `RUN_MODE=test` runs `dbt test` only. The project's own
+5. Run dbt with `--target DBT_TARGET`. `RUN_MODE=build` runs `dbt seed` then
+   `dbt build` (run + test); `RUN_MODE=test` runs `dbt test` only. The project's own
    `profiles.yml` is used as-is; its MotherDuck target reads the database name
    from an `env_var()`, which the Flight feeds via `DB_ENV_VAR`, so models land
    in `MODELS_DATABASE`.
@@ -71,9 +71,10 @@ config (env) ── download archive ── dbt build/test ── run_results.js
 
 `RUN_MODE` picks what the Flight does with the fetched project:
 
-- `RUN_MODE=build` (default) runs `dbt build` — seed, run, and test in one pass.
-  This is the Flight that owns the build: it materializes the tables and records
-  every node's result.
+- `RUN_MODE=build` (default) runs `dbt seed` then `dbt build` — priming the seed
+  tables, then materializing and testing every model. This is the Flight that owns
+  the build: it materializes the tables and records every node's result. (Seeding
+  first is deliberate; see the cold-start caveat below.)
 - `RUN_MODE=test` runs `dbt test` only, for when a **separate job already built
   the tables** (a dbt Cloud job, Airflow, another Flight). It touches no models,
   so it is read-only and any number of `test` runs can run concurrently without
@@ -185,6 +186,12 @@ getting slower?" and "what did last night's build touch?".
   tables (MotherDuck rejects the losers with a write-write conflict). For fan-out
   or read-only runs, use `RUN_MODE=test` — it touches no models and is
   parallel-safe.
+- **Build mode seeds before it builds.** The default project's staging models
+  read the seed tables as dbt `source()`s, and dbt does not sequence a model
+  after a seed it only reads as a source. So `RUN_MODE=build` runs `dbt seed`
+  first and then `dbt build`, which is what makes a cold first run on a brand-new
+  `MODELS_DATABASE` succeed rather than error on models that ran before the seeds.
+  `RUN_MODE=test` assumes the tables already exist and does no seeding.
 - **Test failures are recorded but do not fail the Flight — model errors do.** A
   failing test assertion (status `fail`) lands in the snapshot table and the run
   stays green; a model, seed, or snapshot that errors (status `error`) fails the
