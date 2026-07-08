@@ -295,14 +295,14 @@ def main() -> None:
     cfg = read_config()
     log.info("config: %s", cfg)
 
-    # The Flight runtime injects MOTHERDUCK_TOKEN; dbt-duckdb and the CLIs read it
+    # The Flight runtime injects MOTHERDUCK_TOKEN; dbt-duckdb and duckdb read it
     # from the environment. Pass the whole environment through to subprocesses.
     env = dict(os.environ)
-    env["MD_DATABASE"] = cfg["MD_DATABASE"]  # consumed by the project's profiles.yml env_var()
-    env["DBT_TARGET"] = "motherduck"  # the `mf` CLI selects its target from this
+    # Feed the project's profiles.yml env_var() so models land in our chosen db.
+    env[cfg["DB_ENV_VAR"]] = cfg["MODELS_DATABASE"]
 
     con = duckdb.connect("md:")
-    con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['MD_DATABASE'])}")
+    con.execute(f"CREATE DATABASE IF NOT EXISTS {_ident(cfg['SNAPSHOT_DATABASE'])}")
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -310,28 +310,33 @@ def main() -> None:
         project_dir, profiles_dir = discover(subdir)
         log.info("project=%s profiles=%s", project_dir, profiles_dir)
         env["DBT_PROFILES_DIR"] = str(profiles_dir)
-        # dbt/MetricFlow write working files under HOME; a Flight's HOME may be
-        # read-only, so point it at the writable temp dir.
+        # dbt writes working files under HOME; a Flight's HOME may be read-only,
+        # so point it at the writable temp dir.
         env["HOME"] = str(root)
 
         dbt = _tool("dbt")
-        prepare_project(cfg, dbt, project_dir, env)
+        maybe_deps(dbt, project_dir, env)
 
-        csv_path = root / "mf_result.csv"
-        run_cmd(
-            [_tool("mf"), "query",
-             "--metrics", cfg["METRICS"],
-             "--group-by", cfg["GROUP_BY"],
-             "--start-time", cfg["START_DATE"],
-             "--end-time", cfg["END_DATE"],
-             "--csv", str(csv_path)],
-            project_dir, env,
+        # Run dbt tolerating a non-zero exit — a test failure must not stop us from
+        # recording results. Capture the code, then decide after snapshotting.
+        rc = run_cmd(dbt_command(cfg, dbt), project_dir, env, check=False)
+
+        run_results = project_dir / "target" / "run_results.json"
+        if not run_results.exists():
+            # No results written => dbt failed before executing any node (e.g. a
+            # parse/compile error). That is a hard failure with nothing to record.
+            raise SystemExit(f"dbt produced no run_results.json (exit {rc}) — check the logs")
+
+        results = append_run_results(con, cfg, run_results)
+        log.info(
+            "snapshotted %d node result(s) to %s.%s",
+            len(results), cfg["SNAPSHOT_DATABASE"], cfg["SNAPSHOT_TABLE"],
         )
-        if not csv_path.exists():
-            raise SystemExit("mf query produced no CSV — check the metric/group-by names")
-        rows = append_snapshot(con, cfg, csv_path)
 
-    log.info("appended %d row(s) to %s.%s", rows, cfg["MD_DATABASE"], cfg["SNAPSHOT_TABLE"])
+        # Policy: model/seed/snapshot errors fail the Flight; test failures are
+        # recorded but do not (quality drift is a trend, not a page).
+        if has_build_error(results):
+            raise SystemExit("dbt reported node errors — see the snapshot table and logs")
 
 
 if __name__ == "__main__":
