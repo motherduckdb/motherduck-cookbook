@@ -264,25 +264,37 @@ arguments), passing:
 - `config`: a `MAP` of the knobs above — `GIT_REPO`/`GIT_REF`/`REPO_SUBDIR` for
   your project, `RUN_MODE`, `DBT_TARGET`/`DB_ENV_VAR`, `MODELS_DATABASE`, and
   `SNAPSHOT_DATABASE`/`SNAPSHOT_TABLE`
+- `flight_secret_names` (private repos only): the `TYPE flights` secrets to inject,
+  e.g. `['git_auth']`. **Required for a private repo** — see below.
 
 A MotherDuck token is attached automatically and injected at run time as
-`MOTHERDUCK_TOKEN`; no token argument is needed. For a **private** dbt repo, also
-create a Flights secret first — a fine-grained personal access token with
-**Contents: Read-only** on that repo:
+`MOTHERDUCK_TOKEN`; no token argument is needed. For a **private** dbt repo, two
+steps are both required — create the secret **and** attach it to the Flight.
+
+First create a `TYPE flights` secret holding a GitHub token with **Contents:
+Read-only** on that repo. Flights-secret params go inside a `PARAMS MAP` (a bare
+`GIT_TOKEN '…'` property is rejected with `Unknown parameter 'git_token'`):
 
 ```sql
 CREATE SECRET git_auth IN motherduck (
   TYPE flights,
-  GIT_TOKEN 'github_pat_...'
+  PARAMS MAP {'GIT_TOKEN': 'github_pat_...'}
 );
 ```
 
-The Flight reads it at run time and switches to the authenticated GitHub API
-archive endpoint.
+Then **attach it** by passing `flight_secret_names := ['git_auth']` to
+`MD_CREATE_FLIGHT`. At run time the runtime injects each param as
+`<secret_name>_<PARAM>` (here `git_auth_GIT_TOKEN`); `resolve_secret` in
+`flight.py` matches any env var ending in `_GIT_TOKEN`, so the secret name is yours
+to choose. Only when the secret is **both created and attached** does the Flight
+take the authenticated GitHub API archive endpoint — miss either step and it falls
+back to the public endpoint, which 404s on a private repo. If the repo lives in a
+SAML-protected org, the token must also be **SSO-authorized** for that org (an
+unauthorized token 403s).
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := …)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm the snapshot database and a batch of
+listed by `MD_LIST_FLIGHTS()`), and confirm the snapshot database and a batch of
 `dbt_run_results` rows appear. Once green, add a schedule by updating
 `schedule_cron` with `MD_UPDATE_FLIGHT` (`0 6 * * *`, 06:00 UTC daily, is a
 reasonable default); schedule updates are metadata-only and do not create a new
