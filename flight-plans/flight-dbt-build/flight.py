@@ -1,8 +1,8 @@
 """MotherDuck Flight: run a dbt project on a schedule, snapshotting run results.
 
 A Flight runs as a single ``flight.py`` in a fresh, torn-down container with no
-git binary. This Flight **downloads a dbt project as a GitHub archive at run
-time** (stdlib only — no clone), runs ``dbt build`` against it on MotherDuck, and
+git binary. This Flight downloads a dbt project as a GitHub archive at run
+time (stdlib only — no clone), runs ``dbt build`` against it on MotherDuck, and
 appends dbt's own ``run_results.json`` to a snapshot table — one row per node per
 run. A scheduled Flight thus builds a queryable history of build and test health
 (per-model status, timing, test pass/fail) over time.
@@ -48,25 +48,34 @@ def read_config() -> dict[str, str]:
         "GIT_REPO": os.environ.get(
             "GIT_REPO", "https://github.com/motherduckdb/motherduck-cookbook.git"
         ),
+
         "GIT_REF": os.environ.get("GIT_REF", "main"),  # branch, tag, or commit SHA
+
         # Path within the repo to the dbt project. Leave empty (or ".") when the
-        # repo *is* the dbt project — i.e. dbt_project.yml sits at the repo root.
+        # repo is the dbt project — i.e. dbt_project.yml sits at the repo root.
         "REPO_SUBDIR": os.environ.get("REPO_SUBDIR", "dbt-churn-prediction"),
+
         # How to run. "build" = dbt build (seed+run+test). "test" = dbt test only,
         # for when a separate job already built the tables.
         "RUN_MODE": os.environ.get("RUN_MODE", "build"),
+
         # dbt target in the project's profiles.yml (root cookbook dbt projects
         # name their MotherDuck target "prod").
         "DBT_TARGET": os.environ.get("DBT_TARGET", "prod"),
+
         # The project's profile reads its target database from an env var; name it
         # and give it a value. dbt-churn-prediction reads MOTHERDUCK_DATABASE.
         "DB_ENV_VAR": os.environ.get("DB_ENV_VAR", "MOTHERDUCK_DATABASE"),
+
         "MODELS_DATABASE": os.environ.get("MODELS_DATABASE", "dbt_churn_flight"),
+
         # Optional dbt node selection (e.g. "tag:nightly"). Leave empty to run the
         # whole project (no --select is passed).
         "SELECT": os.environ.get("SELECT", ""),
+
         # Where the run_results history lands.
         "SNAPSHOT_DATABASE": os.environ.get("SNAPSHOT_DATABASE", "dbt_churn_flight"),
+
         "SNAPSHOT_TABLE": os.environ.get("SNAPSHOT_TABLE", "dbt_run_results"),
     }
 
