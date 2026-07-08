@@ -207,6 +207,24 @@ def _ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def dbt_command(cfg: dict[str, str], dbt: str) -> list[str]:
+    """Build the dbt argv from config. RUN_MODE 'test' runs `dbt test` (models
+    built elsewhere); anything else runs the full `dbt build`. SELECT scopes the
+    nodes when set."""
+    verb = "test" if cfg["RUN_MODE"].strip().lower() == "test" else "build"
+    cmd = [dbt, verb, "--target", cfg["DBT_TARGET"]]
+    if cfg["SELECT"].strip():
+        cmd += ["--select", cfg["SELECT"].strip()]
+    return cmd
+
+
+def maybe_deps(dbt: str, project_dir: Path, env: dict[str, str]) -> None:
+    """Install dbt packages if the project declares any. The default project has
+    none, so this is a no-op there; it generalizes the Flight to projects that do."""
+    if (project_dir / "packages.yml").exists() or (project_dir / "dependencies.yml").exists():
+        run_cmd([dbt, "deps"], project_dir, env)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = read_config()
