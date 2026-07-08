@@ -233,6 +233,63 @@ def has_build_error(results: list[dict]) -> bool:
     return any(r.get("status") == "error" for r in results)
 
 
+def append_run_results(con: "duckdb.DuckDBPyConnection", cfg: dict[str, str], run_results_path: Path) -> list[dict]:
+    """Append one row per dbt node to the snapshot table, tagged with the run, and
+    return the parsed `results` list. Each row keeps the full node as JSON, so the
+    schema survives any project/selection; typed columns are pulled out for easy
+    querying. Reading via read_text->JSON->json_each tolerates nodes that omit
+    fields (rows_affected, failures) without failing the insert."""
+    db = _ident(cfg["SNAPSHOT_DATABASE"])
+    table = _ident(cfg["SNAPSHOT_TABLE"])
+    con.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {db}.{table} (
+            run_at         TIMESTAMP,
+            invocation_id  VARCHAR,
+            git_repo       VARCHAR,
+            git_ref        VARCHAR,
+            dbt_version    VARCHAR,
+            run_mode       VARCHAR,
+            resource_type  VARCHAR,
+            unique_id      VARCHAR,
+            status         VARCHAR,
+            execution_time DOUBLE,
+            rows_affected  BIGINT,
+            failures       BIGINT,
+            message        VARCHAR,
+            node           JSON
+        )
+        """
+    )
+    con.execute(
+        f"""
+        INSERT INTO {db}.{table}
+        WITH doc AS (SELECT CAST(content AS JSON) AS j FROM read_text(?))
+        SELECT
+            now(),
+            doc.j->>'$.metadata.invocation_id',
+            ?, ?,
+            doc.j->>'$.metadata.dbt_version',
+            ?,
+            split_part(r.value->>'unique_id', '.', 1),
+            r.value->>'unique_id',
+            r.value->>'status',
+            TRY_CAST(r.value->>'execution_time' AS DOUBLE),
+            TRY_CAST(r.value->'adapter_response'->>'rows_affected' AS BIGINT),
+            TRY_CAST(r.value->>'failures' AS BIGINT),
+            r.value->>'message',
+            r.value
+        FROM doc, json_each(doc.j, '$.results') AS r
+        """,
+        [str(run_results_path), cfg["GIT_REPO"], cfg["GIT_REF"], cfg["RUN_MODE"]],
+    )
+    (payload,) = con.execute(
+        "SELECT CAST(content AS JSON)->'$.results' FROM read_text(?)", [str(run_results_path)]
+    ).fetchone()
+    import json
+    return json.loads(payload) if payload else []
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = read_config()
