@@ -225,6 +225,14 @@ def maybe_deps(dbt: str, project_dir: Path, env: dict[str, str]) -> None:
         run_cmd([dbt, "deps"], project_dir, env)
 
 
+def has_build_error(results: list[dict]) -> bool:
+    """True if any node errored (a model/seed/snapshot that failed to build, or a
+    test that errored). dbt reports a *test* that fails its assertion as status
+    'fail' — that is recorded but does NOT count as a build error, so scheduled
+    quality drift does not turn the Flight run red. Only 'error' does."""
+    return any(r.get("status") == "error" for r in results)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = read_config()
