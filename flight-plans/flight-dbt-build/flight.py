@@ -49,6 +49,8 @@ def read_config() -> dict[str, str]:
             "GIT_REPO", "https://github.com/motherduckdb/motherduck-cookbook.git"
         ),
         "GIT_REF": os.environ.get("GIT_REF", "main"),  # branch, tag, or commit SHA
+        # Path within the repo to the dbt project. Leave empty (or ".") when the
+        # repo *is* the dbt project — i.e. dbt_project.yml sits at the repo root.
         "REPO_SUBDIR": os.environ.get("REPO_SUBDIR", "dbt-churn-prediction"),
         # How to run. "build" = dbt build (seed+run+test). "test" = dbt test only,
         # for when a separate job already built the tables.
@@ -60,7 +62,8 @@ def read_config() -> dict[str, str]:
         # and give it a value. dbt-churn-prediction reads MOTHERDUCK_DATABASE.
         "DB_ENV_VAR": os.environ.get("DB_ENV_VAR", "MOTHERDUCK_DATABASE"),
         "MODELS_DATABASE": os.environ.get("MODELS_DATABASE", "dbt_churn_flight"),
-        # Optional dbt node selection (e.g. "tag:nightly"). Empty = whole project.
+        # Optional dbt node selection (e.g. "tag:nightly"). Leave empty to run the
+        # whole project (no --select is passed).
         "SELECT": os.environ.get("SELECT", ""),
         # Where the run_results history lands.
         "SNAPSHOT_DATABASE": os.environ.get("SNAPSHOT_DATABASE", "dbt_churn_flight"),
