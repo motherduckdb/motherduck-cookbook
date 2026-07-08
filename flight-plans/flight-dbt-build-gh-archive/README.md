@@ -1,6 +1,6 @@
 ---
-title: Run a dbt Project as a Flight and Snapshot Run Results
-id: flight-dbt-build
+title: Run a dbt Project as a Flight via GitHub Archive
+id: flight-dbt-build-gh-archive
 description: >-
   A reusable Flight that downloads a dbt project from a GitHub repo over HTTPS,
   runs dbt build on MotherDuck, and appends dbt's run_results.json to a snapshot
@@ -15,13 +15,13 @@ prompt: >-
   I want one deployed Flight that builds my dbt project on MotherDuck on a schedule
   and keeps a queryable history of build and test health — per-model status, timing,
   and test pass/fail over time — instead of just running dbt and losing the results.
-  Help me adapt the "Run a dbt Project as a Flight and Snapshot Run Results" recipe to
+  Help me adapt the "Run a dbt Project as a Flight via GitHub Archive" recipe to
   my own dbt repo and use case, using it as a guide:
-  https://motherduck.com/docs/cookbook/flight-dbt-build
+  https://motherduck.com/docs/cookbook/flight-dbt-build-gh-archive
 published_date: 2026-07-09
 ---
 
-# Run a dbt Project as a Flight and Snapshot Run Results
+# Run a dbt Project as a Flight via GitHub Archive
 
 A single-file Flight that runs a dbt project on MotherDuck and records what
 happened — downloading the dbt project as a GitHub archive **over HTTPS at run
@@ -37,10 +37,12 @@ results.
 
 ## How it works
 
-A Flight runs as a single `flight.py` in a fresh container that ships **no git
-binary**. Embedding a copy of the dbt project would drift from the canonical
-example, so `flight.py` **downloads the project over HTTPS at run time** (stdlib
-only — no clone) and shells out to the `dbt` CLI against it:
+A Flight runs as a single `flight.py` in a fresh, torn-down container.
+Embedding a copy of the dbt project would drift from the canonical example, so
+`flight.py` **downloads the project over HTTPS at run time** (stdlib only — no
+clone, no repo history) and shells out to the `dbt` CLI against it. (The
+runtime does preinstall `git`; [flight-dbt-build-git](../flight-dbt-build-git)
+is the sibling that clones instead.)
 
 1. Read config from the environment (Flight `config` keys arrive as env vars).
 2. Connect to MotherDuck (`md:`) and `CREATE DATABASE IF NOT EXISTS` the
@@ -169,10 +171,11 @@ getting slower?" and "what did last night's build touch?".
 
 ## Caveats
 
-- **Run-time network, no git.** The Flight downloads the project archive over
-  HTTPS at run time (stdlib only — the container has no `git`), so it needs
-  egress to GitHub. The archive endpoints are **GitHub-specific**; a non-GitHub
-  host (GitLab, Bitbucket, self-hosted) would need a different fetch.
+- **Run-time network to GitHub only.** The Flight downloads the project archive
+  over HTTPS at run time, so it needs egress to GitHub — and the archive
+  endpoints are **GitHub-specific**. For a non-GitHub host (GitLab, Bitbucket,
+  self-hosted) use the git-clone sibling
+  [flight-dbt-build-git](../flight-dbt-build-git) instead.
 - **A private repo needs a `GIT_TOKEN` secret.** Without one, the public
   `…/archive/<ref>.tar.gz` URL 404s on a private repo. Store a token in a `TYPE
   flights` secret (see [Deploy as a Flight](#deploy-as-a-flight)); the Flight
@@ -324,6 +327,9 @@ version.
   [dbt-churn-prediction](../../dbt-churn-prediction).
 - The MetricFlow sibling of this template, which builds the same fetch engine
   around `mf query`: [flight-dbt-metricflow](../flight-dbt-metricflow).
+- The git-clone sibling of this template, which fetches with `git` instead of
+  the GitHub archive endpoint (any git host, per-commit `git_sha` provenance):
+  [flight-dbt-build-git](../flight-dbt-build-git).
 - Deeper MotherDuck or DuckDB questions: the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight that
   downloads the project over HTTPS, runs dbt, and snapshots `run_results.json`)

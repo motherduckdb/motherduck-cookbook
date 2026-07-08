@@ -1,11 +1,13 @@
 """MotherDuck Flight: run a dbt project on a schedule, snapshotting run results.
 
-A Flight runs as a single ``flight.py`` in a fresh, torn-down container with no
-git binary. This Flight downloads a dbt project as a GitHub archive at run
-time (stdlib only — no clone), runs ``dbt build`` against it on MotherDuck, and
+A Flight runs as a single ``flight.py`` in a fresh, torn-down container. This
+Flight downloads a dbt project as a GitHub archive at run time (stdlib only —
+no clone, no repo history), runs ``dbt build`` against it on MotherDuck, and
 appends dbt's own ``run_results.json`` to a snapshot table — one row per node per
 run. A scheduled Flight thus builds a queryable history of build and test health
-(per-model status, timing, test pass/fail) over time.
+(per-model status, timing, test pass/fail) over time. The runtime also
+preinstalls ``git``; flight-dbt-build-git is the sibling template that clones
+instead — reach for it for non-GitHub hosts or per-commit provenance.
 
 Point ``GIT_REPO``/``GIT_REF``/``REPO_SUBDIR`` at your own dbt repo to run your own
 project; for a private repo, store a token in a MotherDuck ``TYPE flights`` secret
@@ -85,9 +87,11 @@ def read_config() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 def fetch_project(cfg: dict[str, str], dest: Path) -> Path:
     """Materialize ``REPO_SUBDIR`` of the repo under ``dest`` and return the path
-    to that subdirectory. The Flight container ships no git, so we never clone —
-    we download the repo as a gzip archive with the stdlib and extract it. Public
-    vs private is chosen at run time by whether a ``GIT_TOKEN`` secret resolves."""
+    to that subdirectory. Downloads the repo as a gzip archive with the stdlib
+    and extracts it — one HTTPS GET of exactly one tree, no history transfer (the
+    runtime does ship git; the flight-dbt-build-git sibling clones instead).
+    Public vs private is chosen at run time by whether a ``GIT_TOKEN`` secret
+    resolves."""
     token = resolve_secret("GIT_TOKEN")
     url, headers = _archive_request(cfg, token)
     checkout = _download_and_extract(url, headers, dest)
