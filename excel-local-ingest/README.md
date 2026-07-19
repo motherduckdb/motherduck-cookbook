@@ -63,9 +63,13 @@ The default load is a `SELECT *` pass-through; to shape the data, replace the
   load another sheet.
 - **Full refresh.** Each run replaces the whole table, which suits a workbook you
   re-export in full.
-- **Type inference.** `read_xlsx` infers column types from the cells. If a column
-  comes in as the wrong type, set `ALL_VARCHAR` to `true` and cast downstream, or
-  clean the sheet.
+- **Numbers come in as `DOUBLE`.** `read_xlsx` infers types from the cells and
+  reads every numeric cell as a double, so an integer-looking column like
+  `order_id` loads as `1001.0`, not `1001`. Cast it downstream (for example
+  `CAST(order_id AS BIGINT)`) if you need integers.
+- **Type inference for messy columns.** For a column with mixed text and numbers,
+  set `ALL_VARCHAR` to `true` to read everything as text, then cast the columns
+  you need, or clean the sheet.
 
 ## What you'll adjust
 

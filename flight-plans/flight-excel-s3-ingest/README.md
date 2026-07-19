@@ -69,9 +69,13 @@ the `SELECT *` with your own projection or aggregation.
 - **Full refresh, not incremental.** Each run replaces the whole table. That is
   the right model for a workbook that is republished in full, but it re-reads the
   entire file every run, so it is not suited to very large or append-only sources.
-- **Type inference.** `read_xlsx` infers column types from the cells. If a column
-  is read as the wrong type (for example mixed text and numbers), set `ALL_VARCHAR`
-  to `true` and cast downstream, or clean the sheet.
+- **Numbers come in as `DOUBLE`.** `read_xlsx` infers types from the cells and
+  reads every numeric cell as a double, so an integer-looking column like
+  `order_id` loads as `1001.0`, not `1001`. Cast it downstream (for example
+  `CAST(order_id AS BIGINT)`) if you need integers.
+- **Type inference for messy columns.** For a column with mixed text and numbers,
+  set `ALL_VARCHAR` to `true` to read everything as text, then cast the columns
+  you need, or clean the sheet.
 - **Private buckets need a secret.** The default source is public. Point
   `SOURCE_XLSX` at a private `s3://` bucket only after adding a MotherDuck **S3 secret**
   for it: the simplest way is the MotherDuck UI at
