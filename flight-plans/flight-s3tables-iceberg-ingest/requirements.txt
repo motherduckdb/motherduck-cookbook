@@ -1,0 +1,6 @@
+# 1.5.4 ships the MotherDuck client that can project columns from a server-side Iceberg
+# (S3 Tables) attach. `tenacity` provides the jittered exponential-backoff retry around each
+# per-table load. The `iceberg` extension is a DuckDB core extension loaded server-side, not a
+# pip package, so it is not listed here.
+duckdb==1.5.4
+tenacity==9.0.0
