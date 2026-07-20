@@ -1,0 +1,6 @@
+# dbt + a DuckDB client for `md:` connect and the run_results snapshot INSERT.
+# dbt-duckdb pulls in `duckdb` transitively; the `dbt` console script comes from
+# dbt-core. No MetricFlow — this Flight runs dbt only.
+dbt-core>=1.8.0,<2.0.0
+dbt-duckdb>=1.8.0,<2.0.0
+duckdb>=1.0.0
