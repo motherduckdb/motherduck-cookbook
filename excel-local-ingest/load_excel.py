@@ -12,7 +12,7 @@ def main() -> None:
     # by editing code. The default reads the sample_orders.xlsx workbook next to
     # this script and builds excel_demo.main.excel_orders in your account.
     source_xlsx = env("SOURCE_XLSX", os.path.join(os.path.dirname(__file__), "sample_orders.xlsx"))
-    sheet = env("SHEET", "orders")
+    sheet = env("SHEET", "orders", allow_empty=True)
     all_varchar = "true" if env_bool("ALL_VARCHAR", False) else "false"
     database = validate_identifier("DESTINATION_DATABASE", env("DESTINATION_DATABASE", "excel_demo"))
     schema = validate_identifier("DESTINATION_SCHEMA", env("DESTINATION_SCHEMA", "main"))
@@ -53,9 +53,12 @@ def main() -> None:
         print(" | ".join("" if v is None else str(v) for v in row))
 
 
-def env(name: str, default: str) -> str:
-    value = os.environ.get(name, default).strip()
-    return value or default
+def env(name: str, default: str, *, allow_empty: bool = False) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value if value or allow_empty else default
 
 
 def env_bool(name: str, default: bool) -> bool:

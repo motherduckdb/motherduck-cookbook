@@ -18,7 +18,7 @@ def main() -> None:
         "SOURCE_XLSX",
         "https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/main/flight-plans/flight-excel-s3-ingest/sample_orders.xlsx",
     )
-    sheet = env("SHEET", "orders")
+    sheet = env("SHEET", "orders", allow_empty=True)
     all_varchar = "true" if env_bool("ALL_VARCHAR", False) else "false"
     database = validate_identifier("DESTINATION_DATABASE", env("DESTINATION_DATABASE", "flights_demo"))
     schema = validate_identifier("DESTINATION_SCHEMA", env("DESTINATION_SCHEMA", "main"))
@@ -71,9 +71,12 @@ def main() -> None:
     print(f"loaded {destination} from {source_xlsx} sheet={sheet or '(first)'}: {row_count} rows")
 
 
-def env(name: str, default: str) -> str:
-    value = os.environ.get(name, default).strip()
-    return value or default
+def env(name: str, default: str, *, allow_empty: bool = False) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value if value or allow_empty else default
 
 
 def env_bool(name: str, default: bool) -> bool:
