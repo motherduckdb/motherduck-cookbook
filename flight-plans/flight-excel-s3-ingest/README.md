@@ -113,12 +113,12 @@ against your account:
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
-uv run --with duckdb==1.5.2 flight.py
+uv run --with duckdb==1.5.4 flight.py
 ```
 
 That single run creates `flights_demo.main.excel_orders`, loads the `orders`
 sheet, and writes one ledger row. Override any default inline, for example
-`SHEET=regions DESTINATION_TABLE=excel_regions uv run --with duckdb==1.5.2 flight.py`
+`SHEET=regions DESTINATION_TABLE=excel_regions uv run --with duckdb==1.5.4 flight.py`
 to load the other sheet.
 
 ### Deploy as a Flight

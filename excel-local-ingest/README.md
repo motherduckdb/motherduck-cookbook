@@ -91,7 +91,7 @@ You need a MotherDuck account and an access token. From this directory:
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
-uv run --with duckdb==1.5.2 load_excel.py
+uv run --with duckdb==1.5.4 load_excel.py
 ```
 
 That creates `excel_demo.main.excel_orders` from the `orders` sheet and prints a
@@ -99,7 +99,7 @@ preview. Override any default inline, for example to load your own file and shee
 
 ```bash
 SOURCE_XLSX=~/data/q3_report.xlsx SHEET=Summary DESTINATION_TABLE=q3_summary \
-  uv run --with duckdb==1.5.2 load_excel.py
+  uv run --with duckdb==1.5.4 load_excel.py
 ```
 
 ## Security
