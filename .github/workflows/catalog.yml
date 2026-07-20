@@ -6,16 +6,22 @@ on:
       - "**/README.md"
       - "catalog.schema.json"
       - "scripts/build-catalog.py"
+      - "excel-local-ingest/load_excel.py"
+      - "flight-plans/flight-excel-s3-ingest/flight.py"
       - "tests/test_build_catalog.py"
       - "tests/test_catalog_workflow.py"
+      - "tests/test_excel_ingest_env.py"
       - ".github/workflows/catalog.yml"
   push:
     paths:
       - "**/README.md"
       - "catalog.schema.json"
       - "scripts/build-catalog.py"
+      - "excel-local-ingest/load_excel.py"
+      - "flight-plans/flight-excel-s3-ingest/flight.py"
       - "tests/test_build_catalog.py"
       - "tests/test_catalog_workflow.py"
+      - "tests/test_excel_ingest_env.py"
       - ".github/workflows/catalog.yml"
   workflow_dispatch:
 
@@ -43,7 +49,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Run catalog tests
-        run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py -q
+        run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py tests/test_excel_ingest_env.py -q
 
       - name: Build catalog preview
         run: |
