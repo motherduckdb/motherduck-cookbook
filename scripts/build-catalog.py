@@ -92,6 +92,7 @@ ALLOWED_TAGS = {
     "sqlite",
     "snowflake",
     "bigquery",
+    "databricks",
     # SaaS / external data sources
     "google-sheets",
     # data movement patterns
