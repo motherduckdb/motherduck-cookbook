@@ -128,7 +128,7 @@ plain config.
 |---|---|---|---|
 | `MODE` | config / env | `all` | Which phase to run: `discover`, `move`, or `all`. |
 | `SNOWFLAKE_ACCOUNT` | config / env | (required) | Snowflake account identifier, for example `ab12345.eu-west-1`. |
-| `SNOWFLAKE_USER` | config / env or Flight secret | (required) | Snowflake login user. Can sit in plain config, or alongside the password in a Flights secret (arrives as `<secret_name>_SNOWFLAKE_USER`); `flight.py` resolves either. |
+| `SNOWFLAKE_USER` | config / env or Flight secret | (required) | Snowflake login user. Can sit in plain config, or alongside the password in a Flights secret; either way it arrives as `SNOWFLAKE_USER`. |
 | `SNOWFLAKE_WAREHOUSE` | config / env | (unset) | Warehouse for the discovery and move queries. Effectively required: querying `INFORMATION_SCHEMA.TABLES` needs an active warehouse, so without one discovery finds 0 tables. (`SHOW DATABASES` itself does not need a warehouse.) |
 | `SNOWFLAKE_ROLE` | config / env | (unset) | Role to assume. Optional. |
 | `SNOWFLAKE_DATABASE` | config / env | (unset) | Source database to scan. Leave it unset to scan every database the connection can see (enumerated with `SHOW TERSE DATABASES`), or set it to scope to one database. Validated as a SQL identifier when set. |
@@ -140,7 +140,7 @@ plain config.
 | `LEDGER_TABLE` | config / env | `snowflake_move_runs` | Per-table move ledger name. |
 | `MAX_ROWS_PER_TABLE` | config / env | `0` | Optional `LIMIT` per table during move (`0` means no cap). Useful for a sampled first pass. |
 | `DRY_RUN` | config / env | `true` | When true, MOVE logs the plan and writes ledger rows without copying data. Set `false` to copy for real. |
-| `SNOWFLAKE_PASSWORD` | Flight secret / env var | (required) | The Snowflake credential. Add it through a MotherDuck Flights secret (in the UI, see below), never in code or config. As a Flight the secret arrives as `<secret_name>_SNOWFLAKE_PASSWORD`; `flight.py` resolves either name. |
+| `SNOWFLAKE_PASSWORD` | Flight secret / env var | (required) | The Snowflake credential. Add it through a MotherDuck Flights secret (in the UI, see below), never in code or config. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for MotherDuck. Select a token on the Flight; never hard-code it. |
 
 ## Run it
@@ -201,13 +201,10 @@ CREATE SECRET snowflake_creds IN motherduck (
 );
 ```
 
-A `TYPE flights` secret injects each param under the env var
-`<secret_name>_<PARAM>`, not the bare param name: the params above arrive as
-`snowflake_creds_SNOWFLAKE_USER` and `snowflake_creds_SNOWFLAKE_PASSWORD`. (DuckDB
-lowercases the unquoted secret name into the prefix.) `flight.py` handles this: it
-reads the bare `SNOWFLAKE_USER` / `SNOWFLAKE_PASSWORD` for local runs and otherwise
-picks up any env var ending in `_SNOWFLAKE_USER` / `_SNOWFLAKE_PASSWORD`, so the
-secret name you choose does not matter.
+A `TYPE flights` secret injects each param under its bare name, so the params
+above arrive as `SNOWFLAKE_USER` and `SNOWFLAKE_PASSWORD` whatever you name the
+secret. (Each param is also injected namespaced as `<secret_name>_<PARAM>`,
+which disambiguates when several secrets define the same param name.)
 
 Then create the Flight with the `MD_CREATE_FLIGHT` SQL function (no deploy SQL
 is checked in; adapt the arguments to your situation), passing:

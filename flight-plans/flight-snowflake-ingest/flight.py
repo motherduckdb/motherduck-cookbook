@@ -15,8 +15,8 @@ DEFAULT_TARGET_DB = "flights_demo"
 def main() -> None:
     # Every knob is read from Flight config/env, so you adapt this template by
     # setting config values rather than editing code. The Snowflake user and
-    # password are the exception: they come from a MotherDuck secret (see
-    # resolve_secret_param).
+    # password are the exception: they come from a MotherDuck secret, whose
+    # params arrive under their bare names.
     mode = env("MODE", "all").strip().lower()
     if mode not in {"discover", "move", "all"}:
         raise ValueError(f"MODE must be 'discover', 'move', or 'all', got {mode!r}")
@@ -241,23 +241,24 @@ def record_move(
 
 def snowflake_connect_kwargs(source_database: str, source_schema: str) -> dict:
     # Non-secret connection params come from config/env; the user and password come
-    # from a MotherDuck secret (see resolve_secret_param). account and user are required.
+    # from a MotherDuck secret. account and user are required.
     account = env("SNOWFLAKE_ACCOUNT", "")
-    # user and password can both live in one TYPE flights secret, so resolve each
-    # from the bare env var (local) or the secret-injected `<secret_name>_<PARAM>`
-    # form (deployed). account is not a credential, so it stays in plain config.
-    user = resolve_secret_param("SNOWFLAKE_USER")
+    # user and password can both live in one TYPE flights secret; its params are
+    # injected under their bare names, so config, a local env var, and a deployed
+    # secret all arrive the same way. account is not a credential, so it stays in
+    # plain config.
+    user = env("SNOWFLAKE_USER", "")
     if not account or not user:
         raise ValueError(
             "SNOWFLAKE_ACCOUNT (config) and SNOWFLAKE_USER (config or a TYPE flights "
             "secret param) are both required"
         )
 
-    password = resolve_secret_param("SNOWFLAKE_PASSWORD")
+    password = env("SNOWFLAKE_PASSWORD", "")
     if not password:
         raise ValueError(
             "No Snowflake password found. Set SNOWFLAKE_PASSWORD locally, or deploy "
-            "a TYPE flights secret whose param arrives as <secret_name>_SNOWFLAKE_PASSWORD."
+            "a TYPE flights secret with a SNOWFLAKE_PASSWORD param."
         )
 
     kwargs: dict = {
@@ -278,27 +279,6 @@ def snowflake_connect_kwargs(source_database: str, source_schema: str) -> dict:
     if source_schema:
         kwargs["schema"] = source_schema
     return kwargs
-
-
-def resolve_secret_param(param: str) -> str:
-    # Resolve a connection param that may come from a MotherDuck `TYPE flights`
-    # secret. A local run can set the bare env var (e.g. SNOWFLAKE_PASSWORD).
-    # Deployed as a Flight, the secret injects each param under the env var
-    # `<secret_name>_<PARAM>`, NOT the bare name: the (lowercased) secret name
-    # becomes a prefix, so a secret `snowflake_migration_test` with a
-    # SNOWFLAKE_PASSWORD param arrives as
-    # `snowflake_migration_test_SNOWFLAKE_PASSWORD`. Accept both: the exact name
-    # first (local), then any var ending in `_<PARAM>` (the secret, whatever you
-    # named it). Both SNOWFLAKE_USER and SNOWFLAKE_PASSWORD can be stored this way.
-    # Mirrors resolve_webhook() in flight-freshness-alert.
-    direct = os.environ.get(param, "").strip()
-    if direct:
-        return direct
-    suffix = f"_{param}"
-    for key, value in os.environ.items():
-        if key.endswith(suffix) and value.strip():
-            return value.strip()
-    return ""
 
 
 def fetch_inventory_rows(sf_conn_kwargs: dict, source_database: str, source_schema: str) -> list:

@@ -15,8 +15,8 @@ Each import and export is retried on errors.
 Success or failure is logged in an audit log in <target>.main.gsheets_sync_log.
 
 Config (env vars):
-    Secret `GSHEETS_SECRET_NAME` (default gsheets) injects
-    `<name>_SERVICE_ACCOUNT_JSON`: a Google service-account key (never expires;
+    A flights secret (any name) with a SERVICE_ACCOUNT_JSON param injects
+    `SERVICE_ACCOUNT_JSON`: a Google service-account key (never expires;
     the extension mints short-lived OAuth tokens from it). Share each sheet with
     its client_email (Viewer for sources, Editor for destinations).
     TARGET_DATABASE - import destination database (default google_sheets)
@@ -304,15 +304,15 @@ def build_copy_sql(spec: SheetExport, source_sql: str) -> str:
 
 
 # ---- Connections + auth ----
-def validate_service_account_json(secret_name: str) -> tuple[str, str]:
+def validate_service_account_json() -> tuple[str, str]:
     """Pre-flight credential check, run BEFORE any connection so a missing/garbled
     secret exits 2 with a clean error. Returns (client_email, private_key)."""
-    env_var = f"{secret_name}_SERVICE_ACCOUNT_JSON"
+    env_var = "SERVICE_ACCOUNT_JSON"
     sa_json = os.environ.get(env_var)
     if not sa_json:
         raise RuntimeError(
-            f"Env var {env_var} is not set. Provide a `{secret_name}` flights secret "
-            "with a SERVICE_ACCOUNT_JSON param holding a Google service-account key."
+            f"Env var {env_var} is not set. Provide a flights secret with a "
+            "SERVICE_ACCOUNT_JSON param holding a Google service-account key."
         )
     try:
         parsed = json.loads(sa_json)
@@ -405,11 +405,11 @@ def run_export(
     return f"{spec.url} (sheet={spec.sheet or '<first>'})", arrow_tbl.num_rows
 
 
-def setup_connections(secret_name: str, target_db: str) -> tuple:
+def setup_connections(target_db: str) -> tuple:
     """Validate credentials, open both connections, register gsheet auth, and ensure
     the audit table. Raises on any failure so main() can exit 2 (nothing attempted).
     Returns (md, local, client_email)."""
-    client_email, private_key = validate_service_account_json(secret_name)
+    client_email, private_key = validate_service_account_json()
     md = duckdb.connect("md:")
     local = duckdb.connect()  # sheet writes only: COPY (FORMAT gsheet) is
     # unresolvable on any connection with the motherduck extension loaded.
@@ -430,7 +430,6 @@ def main() -> None:
     # `or default` so a blank env var falls back to the default, not an empty string.
     TARGET_DB = os.environ.get("TARGET_DATABASE") or "google_sheets"
     TARGET_SCHEMA = os.environ.get("TARGET_SCHEMA") or "main"
-    SECRET_NAME = os.environ.get("GSHEETS_SECRET_NAME") or "gsheets"
 
     # ValueError (bad MAX_RETRIES/RETRY_BASE_SECONDS) is config-class -> exit 2, not a
     # runtime traceback; ConfigError subclasses ValueError, so one except covers both.
@@ -451,7 +450,7 @@ def main() -> None:
         return
 
     try:
-        md, local, client_email = setup_connections(SECRET_NAME, TARGET_DB)
+        md, local, client_email = setup_connections(TARGET_DB)
     except Exception as exc:  # noqa: BLE001 - setup failure = nothing attempted = exit 2
         log.error("Setup failed before any item was attempted: %s", exc)
         sys.exit(2)

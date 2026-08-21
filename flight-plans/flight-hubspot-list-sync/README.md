@@ -103,10 +103,11 @@ credential, so it must be a secret, never config).
 | `RETRY_BASE_SECONDS` | `2` | Exponential-backoff multiplier (seconds). |
 | `DRY_RUN` | `false` | `true` computes and logs the diff without changing the list. |
 | `AUDIT_TABLE` | `hubspot_list_sync.main.flight_tracker` | Ledger table (created if absent); `""` to skip. |
-| `hubspot` **secret** | (required) | `TYPE flights` secret with param `ACCESS_TOKEN` (Service Key or private app token). |
+| `hubspot` **secret** | (required) | `TYPE flights` secret with param `HUBSPOT_ACCESS_TOKEN` (Service Key or private app token). |
 
-The secret injects its param as `HUBSPOT_ACCESS_TOKEN`. The Flight reads that at
-runtime; for a local run you can instead export `HUBSPOT_PRIVATE_APP_TOKEN`.
+Flight secret params are injected under their bare names, so the param arrives
+as `HUBSPOT_ACCESS_TOKEN` whatever the secret is called. The Flight reads that
+at runtime; for a local run you can instead export `HUBSPOT_PRIVATE_APP_TOKEN`.
 
 ## Run it
 
@@ -131,13 +132,13 @@ it to `false`) to apply the diff and write an audit row.
 
 First store the HubSpot token as a **Flights secret** named `hubspot` (UI:
 [Settings > Secrets](https://app.motherduck.com/settings/secrets), type
-**Flights**, param `ACCESS_TOKEN`). Or via SQL from a write-enabled connection
-(read-only connections reject `CREATE SECRET`):
+**Flights**, param `HUBSPOT_ACCESS_TOKEN`). Or via SQL from a write-enabled
+connection (read-only connections reject `CREATE SECRET`):
 
 ```sql
 CREATE SECRET hubspot IN motherduck (
   TYPE flights,
-  PARAMS MAP { 'ACCESS_TOKEN': 'your_service_key_or_pat' }
+  PARAMS MAP { 'HUBSPOT_ACCESS_TOKEN': 'your_service_key_or_pat' }
 );
 ```
 
@@ -148,7 +149,7 @@ client-side there:
 ```sql
 CREATE SECRET hubspot IN motherduck (
   TYPE flights,
-  PARAMS MAP { 'ACCESS_TOKEN': getenv('HUBSPOT_PRIVATE_APP_TOKEN') }
+  PARAMS MAP { 'HUBSPOT_ACCESS_TOKEN': getenv('HUBSPOT_PRIVATE_APP_TOKEN') }
 );
 ```
 
