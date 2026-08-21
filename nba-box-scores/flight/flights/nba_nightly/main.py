@@ -50,18 +50,10 @@ def sh(args, cwd=None, env=None, check=True):
     return r
 
 
-def ensure_git():
-    if shutil.which("git"):
-        return
-    sh(["apt-get", "update", "-y"], check=False)
-    sh(["apt-get", "install", "-y", "--no-install-recommends", "git", "ca-certificates"])
-
-
 def main():
     print("python:", sys.version, flush=True)
     branch = os.environ.get("NBA_FLIGHT_REPO_BRANCH", DEFAULT_BRANCH)
 
-    ensure_git()
     if REPO_DIR.exists():
         shutil.rmtree(REPO_DIR)
     sh(["git", "clone", "--depth", "1", "--branch", branch, REPO_URL, str(REPO_DIR)])
