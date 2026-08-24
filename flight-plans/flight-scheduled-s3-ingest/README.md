@@ -126,6 +126,7 @@ checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `scheduled_s3_ingest`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `config`: the keys from [What you'll adjust](#what-youll-adjust) you want to
   override (omit any you are keeping at default)
 
@@ -134,7 +135,7 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm it succeeds. Each run reads only
+listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it succeeds. Each run reads only
 `LOAD_PARTITION`, so the live partition stays fresh without touching the
 historical files. Once the manual run is green, add a daily schedule (the source
 updates daily; `30 6 * * *`, 06:30 UTC, is a reasonable default) by updating the

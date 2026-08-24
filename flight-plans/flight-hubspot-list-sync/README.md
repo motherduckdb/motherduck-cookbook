@@ -158,6 +158,7 @@ checked in; adapt the arguments), passing:
 - `name`: a Flight name, for example `hubspot-list-sync`
 - `source_code`: [`flight.py`](flight.py)
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["hubspot"]` so `HUBSPOT_ACCESS_TOKEN` is injected
 - `config`: at least `QUERY` and `HUBSPOT_LIST_ID`, plus any other knobs above.
   The token stays in the `hubspot` secret, never in config.
@@ -166,7 +167,7 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and confirm
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm
 the list membership matches the query and `AUDIT_TABLE` has a new row. Decide a
 schedule with the user before adding one.
 

@@ -215,6 +215,7 @@ is checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `snowflake_ingest`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `config`: the non-secret knobs, for example
   `{"MODE": "discover", "SNOWFLAKE_ACCOUNT": "ab12345.eu-west-1", "SNOWFLAKE_WAREHOUSE": "your_wh", "SNOWFLAKE_DATABASE": "SOURCE_DB", "TARGET_DB": "flights_demo", "DRY_RUN": "true"}`
 - `flight_secret_names`: `["snowflake_creds"]` so the user and password are
@@ -226,7 +227,7 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight with `MODE=discover`, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm the inventory lands in MotherDuck. Curate `selected`, then run
+listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm the inventory lands in MotherDuck. Curate `selected`, then run
 `MODE=move` with `DRY_RUN=false` (a config change, not a new Flight version) to
 copy. Schedule it only if you want a recurring refresh.
 

@@ -199,6 +199,7 @@ is checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `freshness_alert`
 - `source_code`: the contents of [`flight.py`](flight.py), with `CHECKS` edited to your tables
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["freshness_slack"]` so the webhook is injected (as
   `freshness_slack_SLACK_WEBHOOK_URL`; `flight.py` resolves it)
 
@@ -208,7 +209,7 @@ attached to the Flight automatically and injected at run time as
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm it succeeds and a Slack alert arrives.
+listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it succeeds and a Slack alert arrives.
 Then edit `CHECKS` to your real tables and add a schedule (for example
 `0 * * * *`, hourly) by updating the Flight's `schedule_cron` with
 `MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and do not create a new

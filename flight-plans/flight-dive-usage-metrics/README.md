@@ -209,6 +209,7 @@ checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `dive_usage_metrics`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `config`: the keys from [What you'll adjust](#what-youll-adjust) you want to
   override (omit any you are keeping at default)
 
@@ -218,7 +219,7 @@ Dives that token can read, so deploy from an account that sees them.
 
 Create the Flight without a schedule, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and read the run logs and the `_latest` view to
+listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and read the run logs and the `_latest` view to
 confirm the metrics look right. Then add a schedule by updating the Flight's
 `schedule_cron` with `MD_UPDATE_FLIGHT`. A daily run
 (`0 6 * * *`) or weekly run (`0 6 * * 1`) is a reasonable cadence, since Dive

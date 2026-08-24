@@ -249,6 +249,7 @@ is checked in; adapt the arguments to your situation), passing:
 - `source_code`: the contents of [`flight.py`](flight.py), with the USER-EDIT
   BLOCKS edited to your read mode, source, and destination
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["gcp_creds"]` so the SA JSON is injected (as
   `gcp_creds_GOOGLE_APPLICATION_CREDENTIALS_JSON`; `flight.py` resolves it)
 - `config`: `GCP_PROJECT_ID` (and optionally `BIGQUERY_DEST_DB`, `EVENT_SOURCE`).
@@ -260,7 +261,7 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm it loads the cold-start partition. Then
+listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it loads the cold-start partition. Then
 add a schedule (for example `0 6 * * *`, daily at 06:00 UTC) by updating the
 Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates are
 metadata-only and do not create a new Flight version. For a one-off backfill, set `start_dt`/`end_dt` (or `target_dt`)
