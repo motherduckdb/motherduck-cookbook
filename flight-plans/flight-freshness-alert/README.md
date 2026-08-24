@@ -209,11 +209,12 @@ attached to the Flight automatically and injected at run time as
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it succeeds and a Slack alert arrives.
-Then edit `CHECKS` to your real tables and add a schedule (for example
-`0 * * * *`, hourly) by updating the Flight's `schedule_cron` with
-`MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and do not create a new
-Flight version.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it
+succeeds and a Slack alert arrives. Then edit `CHECKS` to your real tables and
+add a schedule (for example `0 * * * *`, hourly) by updating the Flight's
+`schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and
+do not create a new Flight version.
 
 ## Security
 

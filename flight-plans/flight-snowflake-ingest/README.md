@@ -227,9 +227,11 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight with `MODE=discover`, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm the inventory lands in MotherDuck. Curate `selected`, then run
-`MODE=move` with `DRY_RUN=false` (a config change, not a new Flight version) to
-copy. Schedule it only if you want a recurring refresh.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm the
+inventory lands in MotherDuck. Curate `selected`, then run `MODE=move` with
+`DRY_RUN=false` (a config change, not a new Flight version) to copy. Schedule it
+only if you want a recurring refresh.
 
 ## Security
 

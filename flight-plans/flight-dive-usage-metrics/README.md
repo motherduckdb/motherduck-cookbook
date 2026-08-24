@@ -219,12 +219,13 @@ Dives that token can read, so deploy from an account that sees them.
 
 Create the Flight without a schedule, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and read the run logs and the `_latest` view to
-confirm the metrics look right. Then add a schedule by updating the Flight's
-`schedule_cron` with `MD_UPDATE_FLIGHT`. A daily run
-(`0 6 * * *`) or weekly run (`0 6 * * 1`) is a reasonable cadence, since Dive
-source SQL changes slowly. Schedule updates are metadata-only and do not create a
-new Flight version.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and read the run logs
+and the `_latest` view to confirm the metrics look right. Then add a schedule by
+updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. A daily run (`0 6
+* * *`) or weekly run (`0 6 * * 1`) is a reasonable cadence, since Dive source
+SQL changes slowly. Schedule updates are metadata-only and do not create a new
+Flight version.
 
 ## Security
 

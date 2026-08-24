@@ -152,12 +152,14 @@ as `MOTHERDUCK_TOKEN`; no token argument is needed. Give that token write access
 the target lake.
 
 Create the Flight without a schedule first, trigger one manual run with
-`MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and listed
-by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`) — using a `config` override of `DRY_RUN := 'true'` for the first
-run is a safe way to see what it will touch — and confirm the log looks right. Once a
-real run is green, add a schedule that matches your ingest cadence (a lake written all
-day might run `0 * * * *` hourly; a nightly batch might run `0 7 * * *`) by updating
-the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. 
+`MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`) — using a `config`
+override of `DRY_RUN := 'true'` for the first run is a safe way to see what it
+will touch — and confirm the log looks right. Once a real run is green, add a
+schedule that matches your ingest cadence (a lake written all day might run `0 *
+* * *` hourly; a nightly batch might run `0 7 * * *`) by updating the Flight's
+`schedule_cron` with `MD_UPDATE_FLIGHT`.
 
 ## Security
 

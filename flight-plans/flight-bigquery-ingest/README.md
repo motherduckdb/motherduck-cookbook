@@ -261,11 +261,12 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it loads the cold-start partition. Then
-add a schedule (for example `0 6 * * *`, daily at 06:00 UTC) by updating the
-Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates are
-metadata-only and do not create a new Flight version. For a one-off backfill, set `start_dt`/`end_dt` (or `target_dt`)
-in the run config.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it loads
+the cold-start partition. Then add a schedule (for example `0 6 * * *`, daily at
+06:00 UTC) by updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`.
+Schedule updates are metadata-only and do not create a new Flight version. For a
+one-off backfill, set `start_dt`/`end_dt` (or `target_dt`) in the run config.
 
 ## Security
 

@@ -181,9 +181,10 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm
-`<TARGET_DATABASE>.main.gsheets_sync_log` has one row per item. Decide with the
-user whether a schedule is desired and what cadence fits the data.
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a
+specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and
+confirm `<TARGET_DATABASE>.main.gsheets_sync_log` has one row per item. Decide
+with the user whether a schedule is desired and what cadence fits the data.
 
 ## Security
 

@@ -177,9 +177,11 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm
-`<TARGET_DATABASE>.main.flight_tracker` has one row per table. 
-Get feedback from the user about whether or not a schedule is desired and what it should be.
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a
+specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and
+confirm `<TARGET_DATABASE>.main.flight_tracker` has one row per table. Get
+feedback from the user about whether or not a schedule is desired and what it
+should be.
 
 ## Security
 
