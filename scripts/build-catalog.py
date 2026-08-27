@@ -87,6 +87,8 @@ ALLOWED_TAGS = {
     "slack",
     # crm and marketing
     "hubspot",
+    # ecommerce
+    "shopify",
     # external databases
     "postgres",
     "sqlite",
