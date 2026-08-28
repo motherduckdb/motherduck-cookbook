@@ -215,12 +215,10 @@ CREATE SECRET openrouter IN motherduck (
 );
 ```
 
-A `TYPE flights` secret injects each param under the env var
-`<secret_name>_<PARAM>`, not the bare param name: the param above arrives as
-`openrouter_OPENROUTER_API_KEY`, not `OPENROUTER_API_KEY`. (DuckDB lowercases the
-unquoted secret name into the prefix.) `flight.py` handles this: it reads
-`OPENROUTER_API_KEY` for local runs and otherwise picks up any env var ending in
-`_OPENROUTER_API_KEY`, so the secret name you choose does not matter.
+A `TYPE flights` secret injects each param under its bare name, so the param
+above arrives as `OPENROUTER_API_KEY` whatever you name the secret. (Each param
+is also injected namespaced as `<secret_name>_<PARAM>`, which disambiguates
+when several secrets define the same param name.)
 
 Then create the Flight with the `MD_CREATE_FLIGHT` SQL function (adapt the
 arguments to your situation), passing:

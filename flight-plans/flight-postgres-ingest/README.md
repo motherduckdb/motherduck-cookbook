@@ -86,9 +86,8 @@ and use a different Flight template or modify this one heavily.
 
 No code edits are required (code edits are optional). 
 Everything is read from Flight config/env and a MotherDuck flights secret. 
-The MotherDuck **Flights secret** named `pg` contains the Postgres connection information
-which includes a password, so it must be in a secret. If a different secret name is desired, 
-update the SECRET_NAME variable in the code.
+The MotherDuck **Flights secret** (any name) contains the Postgres connection
+information, which includes a password, so it must be in a secret.
 
 | Knob | Default | Purpose |
 |---|---|---|
@@ -100,7 +99,7 @@ update the SECRET_NAME variable in the code.
 | `MAX_RETRIES` | `5` | Per-table retry attempts on transient errors. |
 | `RETRY_BASE_SECONDS` | `2` | Exponential-backoff multiplier (seconds). |
 | `MOTHERDUCK_HOST` | (unset) | Override MotherDuck host (e.g. non-prod). Leave unset for default. |
-| `pg` **secret** | (required) | Postgres connection. `TYPE flights` secret named `pg` with params `HOST`, `PORT`, `DATABASE`, `USER`, `PASSWORD`, `SSLMODE`. |
+| `pg` **secret** | (required) | Postgres connection. `TYPE flights` secret (any name) with params `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`. |
 
 Selection precedence: a table is mirrored only if its schema passes the schema
 gate **and** its `schema.table` passes the table gate; excludes are `AND NOT` at
@@ -108,27 +107,29 @@ every level, so exclude always wins (including a table whose schema is excluded)
 System schemas (`information_schema`, `pg_catalog`, `pg_toast`, `pg_temp*`) are
 always excluded.
 
-Two gotchas with the `pg` secret:
-- **KEYS must be UPPERCASE.** The secret injects each param as `pg_<KEY>` (e.g.
-  `pg_HOST`), which `flight.py` reads via `PG_PARAMS`.
-- **Code edits are required to use a name other than `pg`.** DuckDB lowercases the secret name into the prefix.
-  Rename the secret only if you also change `SECRET_NAME` in `flight.py`.
+The secret's params are the libpq env vars themselves (`PGHOST`, `PGPASSWORD`,
+...): a flights secret injects each param under its bare name, so libpq picks
+them up with no mapping and the secret name is yours to choose. A legacy secret
+named `pg` with `HOST`/`PORT`/... params (injected namespaced as `pg_HOST`,
+`pg_PORT`, ...) keeps working. Existing `flight_tracker` ledgers: the
+`flight_secret_name` column is now `source_host` — rename it with
+`ALTER TABLE ... RENAME COLUMN`, or drop the ledger to recreate it.
 
 ## Run it
 
 You need a MotherDuck account and token, plus a reachable Postgres source. For a
-local run, set the same `pg_*` names the secret would inject (no credential-free
+local run, set the same libpq names the secret would inject (no credential-free
 smoke test — a reachable Postgres is required).
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
-# Postgres connection (same names the `pg` Flights secret injects):
-export pg_HOST=your-postgres-host
-export pg_PORT=5432
-export pg_DATABASE=your_database
-export pg_USER=readonly_user
-export pg_PASSWORD=your_password
-export pg_SSLMODE=require
+# Postgres connection (same names the Flights secret injects):
+export PGHOST=your-postgres-host
+export PGPORT=5432
+export PGDATABASE=your_database
+export PGUSER=readonly_user
+export PGPASSWORD=your_password
+export PGSSLMODE=require
 # optional: narrow scope / pick a destination
 # export TARGET_DATABASE=postgres_ingest
 # export INCLUDED_SCHEMAS=public
@@ -153,12 +154,12 @@ reject `CREATE SECRET`):
 CREATE SECRET pg IN motherduck (
   TYPE flights,
   PARAMS MAP {
-    'HOST': 'your-postgres-host',
-    'PORT': '5432',
-    'DATABASE': 'your_database',
-    'USER': 'readonly_user',
-    'PASSWORD': 'your_password',
-    'SSLMODE': 'require'
+    'PGHOST': 'your-postgres-host',
+    'PGPORT': '5432',
+    'PGDATABASE': 'your_database',
+    'PGUSER': 'readonly_user',
+    'PGPASSWORD': 'your_password',
+    'PGSSLMODE': 'require'
   }
 );
 ```

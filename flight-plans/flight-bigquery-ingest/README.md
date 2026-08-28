@@ -183,7 +183,7 @@ GCP billing project, and the service-account credentials.
 | `build_filters()` | top of `flight.py` | `start_dt`, `end_dt`, `event_source` | Returns the `{placeholder}` values for `SCAN_FILTER`/`QUERY` and `MD_DELETE_PREDICATE`. Reads per-run overrides (e.g. `EVENT_SOURCE`) from the environment. |
 | `GCP_PROJECT_ID` | Flight config / env var | (required) | The GCP billing project charged for the read. In scan mode it is interpolated into `bigquery_scan` (named args can't be bound); in query mode it is bound as a parameter. Validated as a project id. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | env var (local) | (unset) | Path to a service-account JSON file on disk. Used for a local run. |
-| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Flight secret | (unset) | The service-account JSON itself, provided through a `TYPE flights` secret. Deployed, it arrives as `<secret_name>_GOOGLE_APPLICATION_CREDENTIALS_JSON`; `flight.py` resolves either name. |
+| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Flight secret | (unset) | The service-account JSON itself, provided through a `TYPE flights` secret. |
 | `start_dt` / `end_dt` / `target_dt` | env var (optional) | (unset) | Override the window: explicit inclusive backfill range, or a single day. Unset = watermark mode. |
 | `BIGQUERY_DEST_DB` | Flight config / env var (optional) | `DEFAULT_DB` | Override the destination database without editing code. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth. Select a token on the Flight; never hard-code it. |
@@ -232,15 +232,12 @@ CREATE SECRET gcp_creds IN motherduck (
 );
 ```
 
-A `TYPE flights` secret injects each param under the env var
-`<secret_name>_<PARAM>`, not the bare param name: the param above arrives as
-`gcp_creds_GOOGLE_APPLICATION_CREDENTIALS_JSON`, not
-`GOOGLE_APPLICATION_CREDENTIALS_JSON`. (DuckDB lowercases the unquoted secret name
-into the prefix.) `flight.py` handles this: it reads the bare
-`GOOGLE_APPLICATION_CREDENTIALS_JSON` for local runs and otherwise picks up any
-env var ending in `_GOOGLE_APPLICATION_CREDENTIALS_JSON`, then writes the JSON to
-a temp file and points `GOOGLE_APPLICATION_CREDENTIALS` at it. The secret name you
-choose does not matter.
+A `TYPE flights` secret injects each param under its bare name, so the param
+above arrives as `GOOGLE_APPLICATION_CREDENTIALS_JSON` whatever you name the
+secret. (Each param is also injected namespaced as `<secret_name>_<PARAM>`,
+which disambiguates when several secrets define the same param name.)
+`flight.py` writes the JSON to a temp file and points
+`GOOGLE_APPLICATION_CREDENTIALS` at it.
 
 Then create the Flight with the `MD_CREATE_FLIGHT` SQL function (no deploy SQL
 is checked in; adapt the arguments to your situation), passing:

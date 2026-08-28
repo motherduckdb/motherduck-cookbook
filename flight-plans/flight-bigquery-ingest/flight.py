@@ -310,7 +310,7 @@ def _materialize_gcp_creds() -> None:
       - Deployed Flight: the SA JSON is a secret, so it must NOT travel in
         plaintext Flight config. It is stored as a MotherDuck `TYPE flights`
         secret with a GOOGLE_APPLICATION_CREDENTIALS_JSON param, which the
-        runtime injects as the env var `<secret_name>_GOOGLE_APPLICATION_CREDENTIALS_JSON`.
+        runtime injects under that bare name whatever the secret is called.
         We read that JSON blob, validate it parses, write it to a private temp
         file, and set GOOGLE_APPLICATION_CREDENTIALS to that path.
     """
@@ -345,21 +345,12 @@ def _materialize_gcp_creds() -> None:
 def resolve_creds_json() -> str:
     """Find the SA JSON blob in the environment.
 
-    Mirrors flight-freshness-alert's resolve_webhook(): a local run sets the
-    bare GOOGLE_APPLICATION_CREDENTIALS_JSON; deployed, a TYPE flights secret
-    injects it under `<secret_name>_GOOGLE_APPLICATION_CREDENTIALS_JSON`, where
-    the secret name (whatever you call it) becomes a lowercased prefix. Accept
-    the exact name first, then any env var ending in the suffix, so the secret
-    name does not matter.
+    A local run sets GOOGLE_APPLICATION_CREDENTIALS_JSON directly; deployed, a
+    TYPE flights secret injects its params under their bare names (plus a
+    namespaced `<secret_name>_<PARAM>` variant to disambiguate same-named
+    params across secrets), so one lookup covers both.
     """
-    direct = os.environ.get(CREDS_JSON_ENV, "").strip()
-    if direct:
-        return direct
-    suffix = f"_{CREDS_JSON_ENV}"
-    for key, value in os.environ.items():
-        if key.endswith(suffix) and value.strip():
-            return value.strip()
-    return ""
+    return os.environ.get(CREDS_JSON_ENV, "").strip()
 
 
 def _connect_duckdb() -> duckdb.DuckDBPyConnection:
