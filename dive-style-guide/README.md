@@ -2,28 +2,28 @@
 title: Give Every Dive Your Brand Style With a Guide
 id: dive-style-guide
 description: >-
-  A ready-to-edit Guide filed under the reserved `dives` topic, so agents apply
-  your palette, number formatting, and layout rules to every Dive they build
-  instead of falling back to the MotherDuck defaults. Use when Dives across your
-  team look inconsistent, or when you find yourself restating the same styling
-  instructions in every session.
+  A ready-to-edit Guide filed under the reserved `dives` topic and published
+  org-wide, so every Dive your team builds carries your brand palette, number
+  formatting, and layout rules instead of the MotherDuck defaults. Use when
+  Dives across a team look inconsistent, or when staying on brand depends on
+  someone remembering to ask.
 type: example
 category: analytics
 features: [dives, mcp]
 prompt: >-
-  I want every Dive my agents build to follow our brand palette, number formatting,
-  and layout rules without me restating them each session. Help me adapt the "Give
-  Every Dive Your Brand Style With a Guide" MotherDuck recipe to my own conventions,
-  using it as a guide:
+  I want every Dive my team builds to follow our brand palette, number formatting,
+  and layout rules, published once org-wide rather than restated each session. Help
+  me adapt the "Give Every Dive Your Brand Style With a Guide" MotherDuck recipe to
+  our conventions, using it as a guide:
   https://motherduck.com/docs/cookbook/dive-style-guide
 published_date: 2026-08-27
 ---
 
 # Give Every Dive Your Brand Style With a Guide
 
-An agent building a Dive reads MotherDuck's built-in design conventions first: a default palette, KPI and chart layout rules, and a visual checklist. Those defaults are good, and they are not yours. This recipe stores your overrides as a Guide so they travel into every session automatically.
+An agent building a Dive reads MotherDuck's built-in design conventions first: a default palette, KPI and chart layout rules, and a visual checklist. Those defaults are good, and they are not yours. Define your brand rules once as a Guide, publish it to your organization, and every Dive anyone builds carries them — nobody has to remember to ask.
 
-`dive-style-guide.sql` creates that Guide. Edit the palette, formatting, and layout rules, run it, and the next Dive an agent builds follows them.
+`dive-style-guide.sql` creates that Guide. Edit the palette, formatting, and layout rules, run it to create it privately, confirm a Dive comes back on brand, then publish it org-wide.
 
 ## How it works
 
