@@ -170,6 +170,7 @@ is checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `postgres_ingest`
 - `source_code`: [`flight.py`](flight.py) (no edits for the default "mirror everything non-system")
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["pg"]` so the Postgres connection is injected
 - `config`: at least `TARGET_DATABASE`, plus any `INCLUDED_*`/`EXCLUDED_*` scoping and `MOTHERDUCK_HOST` if non-default. The connection stays in the `pg` secret, never config.
 
@@ -177,9 +178,11 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and confirm
-`<TARGET_DATABASE>.main.flight_tracker` has one row per table. 
-Get feedback from the user about whether or not a schedule is desired and what it should be.
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a
+specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and
+confirm `<TARGET_DATABASE>.main.flight_tracker` has one row per table. Get
+feedback from the user about whether or not a schedule is desired and what it
+should be.
 
 ## Security
 
