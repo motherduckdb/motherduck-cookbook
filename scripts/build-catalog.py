@@ -65,6 +65,7 @@ ALLOWED_TAGS = {
     "sqlmesh",
     "metricflow",
     "connectorx",
+    "adbc",
     # libraries
     "pandas",
     "pyarrow",
@@ -91,6 +92,7 @@ ALLOWED_TAGS = {
     "shopify",
     # external databases
     "postgres",
+    "planetscale",
     "sqlite",
     "snowflake",
     "bigquery",
