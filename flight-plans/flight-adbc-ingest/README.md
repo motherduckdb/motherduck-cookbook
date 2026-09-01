@@ -9,7 +9,7 @@ description: >-
 type: template
 category: ingestion
 features: [flights]
-tags: [adbc, planetscale, postgres, ingest]
+tags: [adbc, postgres, ingest]
 prompt: >-
   I want a simple Flight that copies a table from a Postgres database into
   MotherDuck through the DuckDB ADBC extension and an ADBC driver installed
@@ -26,8 +26,7 @@ interesting part is the transport: instead of the DuckDB `postgres` extension,
 it uses the [`adbc` community extension](https://duckdb.org/community_extensions/extensions/adbc.html)
 with the standard PostgreSQL ADBC driver. Swap the driver name and connection
 URI and the same pattern reads Snowflake, MySQL, SQLite, or anything else with
-an [ADBC](https://arrow.apache.org/adbc/) driver. The tested source is a
-PlanetScale Postgres database.
+an [ADBC](https://arrow.apache.org/adbc/) driver.
 
 ## How it works
 
@@ -42,7 +41,7 @@ PlanetScale Postgres database.
    percent-encoded into the URI.
 3. Connect to MotherDuck, load the `adbc` extension, and copy the table with
    one statement:
-   `CREATE OR REPLACE TABLE <target> AS SELECT * FROM read_adbc('profile://planetscale', 'SELECT * FROM <schema>.<table>')`.
+   `CREATE OR REPLACE TABLE <target> AS SELECT * FROM read_adbc('profile://postgres_source', 'SELECT * FROM <schema>.<table>')`.
    With no `SOURCE_TABLE` configured, it first asks the source's
    `information_schema` for the first user table.
 
@@ -51,8 +50,8 @@ result as Arrow data. The copy is one statement with no intermediate files.
 
 ## Questions to answer
 
-- Source connection: host, port, database, user, and which password? The
-  password goes in a MotherDuck Flights secret; the rest is plain config.
+- Source connection: host, port, database, user, and which password? Enter the
+  connection as a MotherDuck Flights secret.
 - Which `schema.table` to copy, or rely on discovery of the first user table?
 - Which `TARGET_DATABASE` should receive the copy?
 - Is a full refresh of one table enough? This is a demo. For a config-driven,
@@ -75,13 +74,12 @@ result as Arrow data. The copy is one statement with no intermediate files.
 
 | Knob | Default | Purpose |
 |---|---|---|
-| `PGHOST` | (required) | Source Postgres host. |
-| `PGUSER` | (required) | Source Postgres user. |
-| `PGPORT` | `5432` | Source Postgres port. |
-| `PGDATABASE` | `postgres` | Source Postgres database. |
 | `SOURCE_TABLE` | (first user table) | `schema.table` to copy; a bare table name means `public.<table>`. |
 | `TARGET_DATABASE` | `adbc_demo` | MotherDuck database for the copy (created if absent). The table lands in its `main` schema. |
-| `planetscale` **secret** | (required) | Flights secret with one param, `cdc_password`, injected as env var `planetscale_cdc_password`. Using a different secret or param name means updating that env var name in `flight.py`. |
+| **secret** | (required) | Postgres connection. `TYPE flights` secret (any name) with params `PGHOST`, `PGUSER`, `PGPASSWORD`, and optionally `PGPORT` (default `5432`) and `PGDATABASE` (default `postgres`). A legacy secret named `pg` with `HOST`/`USER`/`PASSWORD`/... params (injected as `pg_HOST`, ...) works too. |
+
+The secret's params are the libpq env vars themselves: a flights secret injects
+each param under its bare name, so the secret name is yours to choose.
 
 ## Run it
 
@@ -89,30 +87,32 @@ You need a MotherDuck account and token plus a reachable Postgres source.
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
+# Postgres connection (same names the Flights secret injects):
 export PGHOST=your-postgres-host
 export PGUSER=your_user
+export PGPASSWORD=your_password
 export PGDATABASE=your_database
-export planetscale_cdc_password=your_password
 # optional: export SOURCE_TABLE=public.orders TARGET_DATABASE=adbc_demo
 uv run --with-requirements requirements.txt flight.py
 ```
 
 The run prints one line, for example
-`Copied bench.events -> "adbc_demo".main."events" (51001 rows)`.
+`Copied public.orders -> "adbc_demo".main."orders" (51001 rows)`.
 
 ### Deploy as a Flight
 
-First store the password as a Flights secret named `planetscale` (UI:
+First store the connection as a Flights secret named `pg` (UI:
 [Settings > Secrets](https://app.motherduck.com/settings/secrets), type
-**Flights**, one param named `cdc_password`). Then create the Flight with the
-`MD_CREATE_FLIGHT` SQL function, passing:
+**Flights**, params `PGHOST`, `PGUSER`, `PGPASSWORD`, and optionally `PGPORT`
+and `PGDATABASE`). Then create the Flight with the `MD_CREATE_FLIGHT` SQL
+function, passing:
 
 - `name`: a Flight name, for example `adbc_ingest`
 - `source_code`: `flight.py`
 - `requirements_txt`: `requirements.txt`
-- `flight_secret_names`: `['planetscale']`
-- `config`: at least `PGHOST`, `PGUSER`, and `PGDATABASE`, plus `SOURCE_TABLE`
-  and `TARGET_DATABASE` if the defaults don't fit
+- `flight_secret_names`: `['pg']` (or whatever the secret is named)
+- `config`: `SOURCE_TABLE` and `TARGET_DATABASE` if the defaults don't fit; the
+  connection stays in the secret, never config
 
 Create it without a schedule, run it once with `MD_RUN_FLIGHT(flight_id := ...)`
 (the id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and
@@ -120,9 +120,9 @@ check the target table. Add a cron schedule later if the copy should repeat.
 
 ## Security
 
-- **Password in a secret, never in config or SQL.** It reaches the driver
-  percent-encoded inside the profile URI. The profile file is written with
-  owner-only permissions (0600) in the run's container.
+- **Connection in a secret, never in config or SQL.** The password reaches the
+  driver percent-encoded inside the profile URI. The profile file is written
+  with owner-only permissions (0600) in the run's container.
 - **Quoted identifiers.** Schema, table, and database names are quoted before
   they land in SQL, and query text sent through `read_adbc()` is
   single-quote-escaped.

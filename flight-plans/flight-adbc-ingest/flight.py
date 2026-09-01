@@ -1,8 +1,8 @@
 """Copy a Postgres table into MotherDuck with the DuckDB ADBC extension.
 
 A demo Flight showing DuckDB's `adbc` community extension as a generic bridge
-to any database with an ADBC driver — here, a PlanetScale Postgres database
-through the standard PostgreSQL ADBC driver. Each run:
+to any database with an ADBC driver — here, a Postgres database through the
+standard PostgreSQL ADBC driver. Each run:
 
 1. Installs the PostgreSQL ADBC driver with `dbc` (Columnar's ADBC driver
    manager, installed from requirements.txt).
@@ -11,16 +11,14 @@ through the standard PostgreSQL ADBC driver. Each run:
    `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_adbc(...)`.
 
 Config:
-  PGHOST           Source Postgres host (required)
-  PGUSER           Source Postgres user (required)
-  PGPORT           Source Postgres port (default: 5432)
-  PGDATABASE       Source Postgres database (default: postgres)
   SOURCE_TABLE     schema.table to copy (default: first user table found)
   TARGET_DATABASE  MotherDuck database to write to (default: adbc_demo)
 
 Secrets:
-  The `planetscale` flights secret provides the source password as
-  `planetscale_cdc_password`.
+  A flights secret provides the source connection as the libpq env vars
+  themselves: PGHOST, PGUSER, PGPASSWORD, and optionally PGPORT and
+  PGDATABASE. A legacy secret named `pg` with HOST/USER/PASSWORD/... params
+  (injected as pg_HOST, pg_USER, ...) works too.
 """
 
 import os
@@ -30,11 +28,12 @@ from urllib.parse import quote
 
 import duckdb
 
-PROFILE = "planetscale"
+PROFILE = "postgres_source"
 
 
 def env(name: str, default: str | None = None) -> str:
-    value = os.environ.get(name) or default
+    # PGUSER etc., falling back to the pg_USER style a legacy `pg` secret injects.
+    value = os.environ.get(name) or os.environ.get(f"pg_{name.removeprefix('PG')}") or default
     if value is None:
         raise RuntimeError(f"Required env var {name} is not set")
     return value
@@ -44,7 +43,7 @@ def write_adbc_profile() -> None:
     """Write an ADBC connection profile for the source Postgres database."""
     uri = (
         f"postgresql://{quote(env('PGUSER'), safe='')}:"
-        f"{quote(env('planetscale_cdc_password'), safe='')}"
+        f"{quote(env('PGPASSWORD'), safe='')}"
         f"@{quote(env('PGHOST'), safe='')}:{int(env('PGPORT', '5432'))}"
         f"/{quote(env('PGDATABASE', 'postgres'), safe='')}?sslmode=require"
     )

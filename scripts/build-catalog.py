@@ -92,7 +92,6 @@ ALLOWED_TAGS = {
     "shopify",
     # external databases
     "postgres",
-    "planetscale",
     "sqlite",
     "snowflake",
     "bigquery",
