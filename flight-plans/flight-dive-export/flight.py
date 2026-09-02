@@ -1,8 +1,9 @@
-"""Render a MotherDuck Dive in headless Chromium and keep the PNG + PDF.
+"""Render a MotherDuck Dive in headless Chromium and deliver the PNG + PDF.
 
 Dives have no native PDF export yet, so this Flight mints a Dive embed session,
 opens it in headless Chromium on MotherDuck compute, and captures a PNG and a
-single-page PDF. The renditions are stored in MotherDuck as BLOBs.
+single-page PDF. The renditions are stored in MotherDuck as BLOBs and handed to
+whichever delivery targets `DELIVERY` names.
 
 Every knob is a config value or an env var; see the README "What you'll adjust"
 table. Credentials arrive as Flight secret params under their bare names.
@@ -25,6 +26,8 @@ SANDBOX_BASE = "https://embed-motherduck.com/sandbox/#session="
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MIME_TYPES = {"png": "image/png", "pdf": "application/pdf"}
+
+SLACK_API = "https://slack.com/api"
 
 
 @dataclass
@@ -63,6 +66,8 @@ def main() -> None:
     report_name = env("REPORT_NAME", "Dive export")
     store_table = env("STORE_TABLE", "flights_demo.main.dive_exports")
     kinds = env_list("ATTACH", "pdf,png")
+    targets = env_list("DELIVERY", "")
+    dry_run = env("DRY_RUN", "false").lower() == "true"
     wait_ms = env_int("WAIT_MS", 15000)
     scale = float(env("SCALE", "2"))
     width, height = parse_viewport(env("VIEWPORT", "1440x2600"))
@@ -70,6 +75,8 @@ def main() -> None:
     unknown = [kind for kind in kinds if kind not in MIME_TYPES]
     if unknown or not kinds:
         raise ValueError(f"ATTACH must be a subset of png,pdf; got {kinds or ['']}")
+    # Fail on a typo or a missing credential now, not after a 90-second render.
+    check_delivery_config(targets)
 
     if shot_url:
         # Debugging path: shoot any URL, no Dive and no service account needed.
@@ -104,6 +111,13 @@ def main() -> None:
         store(store_table, export)
     else:
         log("STORE_TABLE is empty; skipping the MotherDuck copy.")
+
+    # Deliver after the store, so a broken delivery target still leaves the
+    # rendered file somewhere you can get at it.
+    if not targets:
+        log("DELIVERY is empty; nothing to send.")
+    for target in targets:
+        DELIVERY_TARGETS[target]["deliver"](export, dry_run)
 
 
 def mint_embed_session(dive_id: str, username: str, token: str) -> str:
@@ -253,6 +267,92 @@ def store(store_table: str, export: Export) -> None:
     log(f"stored {len(export.renditions)} row(s) in {store_table}")
 
 
+def check_delivery_config(targets: list[str]) -> None:
+    """Reject unknown targets and missing credentials before anything renders."""
+    unknown = [target for target in targets if target not in DELIVERY_TARGETS]
+    if unknown:
+        raise ValueError(
+            f"DELIVERY names unknown target(s) {unknown}; "
+            f"choose from {sorted(DELIVERY_TARGETS)}"
+        )
+    missing = [
+        name
+        for target in targets
+        for name in DELIVERY_TARGETS[target]["requires"]
+        if not env(name)
+    ]
+    if missing:
+        raise RuntimeError(
+            f"DELIVERY={','.join(targets)} needs {missing} in the environment. "
+            "Attach them as Flight secret params, or export them for a local run."
+        )
+
+
+def deliver_slack(export: Export, dry_run: bool) -> None:
+    """Upload each rendition to a Slack channel as a real file.
+
+    `files.upload` is retired, so this is the three-step external upload flow:
+    reserve a URL, POST the bytes to it, then complete the upload and share the
+    files into the channel with one comment.
+    """
+    token = env("SLACK_BOT_TOKEN")
+    channel = env("SLACK_CHANNEL_ID")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    if dry_run:
+        log(f"[dry run] slack: would upload {filenames(export)} to {channel}")
+        return
+
+    uploaded = []
+    for rendition in export.renditions:
+        reserved = slack_api(
+            httpx.post(
+                f"{SLACK_API}/files.getUploadURLExternal",
+                headers=headers,
+                data={
+                    "filename": rendition.filename,
+                    "length": len(rendition.content),
+                },
+                timeout=30,
+            )
+        )
+        # The upload URL is pre-authorized: no bearer token on this request.
+        response = httpx.post(
+            reserved["upload_url"],
+            files={"file": (rendition.filename, rendition.content, rendition.mime)},
+            timeout=300,
+        )
+        response.raise_for_status()
+        uploaded.append({"id": reserved["file_id"], "title": rendition.filename})
+
+    slack_api(
+        httpx.post(
+            f"{SLACK_API}/files.completeUploadExternal",
+            headers=headers,
+            json={
+                "files": uploaded,
+                "channel_id": channel,
+                "initial_comment": f"*{export.title}*\n{export.message}",
+            },
+            timeout=30,
+        )
+    )
+    log(f"slack: uploaded {filenames(export)} to {channel}")
+
+
+def slack_api(response: httpx.Response) -> dict:
+    """Slack answers 200 OK with `ok: false` on failure, so check both."""
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack API error: {payload.get('error') or payload}")
+    return payload
+
+
+def filenames(export: Export) -> str:
+    return ", ".join(rendition.filename for rendition in export.renditions)
+
+
 def default_message(report_name: str, captured_at: datetime) -> str:
     return f"{report_name} captured {captured_at:%Y-%m-%d %H:%M} UTC."
 
@@ -296,6 +396,16 @@ def split_table(value: str) -> tuple[str, str, str]:
         if not IDENTIFIER_RE.fullmatch(part):
             raise ValueError(f"STORE_TABLE part must be an identifier, got {part!r}")
     return parts[0], parts[1], parts[2]
+
+
+# Delivery targets, keyed by the names DELIVERY accepts. `requires` is checked
+# before the render so a missing secret fails the run in seconds.
+DELIVERY_TARGETS = {
+    "slack": {
+        "deliver": deliver_slack,
+        "requires": ("SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID"),
+    },
+}
 
 
 if __name__ == "__main__":

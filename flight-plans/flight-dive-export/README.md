@@ -1,31 +1,34 @@
 ---
-title: Export a Dive to PDF or PNG From a Flight
+title: Export a Dive to PDF and Deliver It
 id: flight-dive-export
 description: >-
   A Flight that renders one of your Dives in headless Chromium on MotherDuck
-  compute and stores the PNG and the PDF as BLOBs in a MotherDuck table. Use
-  when you want a scheduled PDF or PNG snapshot of a Dive while Dives have no
-  native export.
+  compute, stores the PNG and the PDF as BLOBs in a MotherDuck table, and
+  uploads them to a Slack channel. Use when you want a scheduled PDF or PNG of a
+  Dive delivered to where people already work, while Dives have no native
+  export.
 type: template
 category: automation
 features: [flights, dives, admin_api]
-tags: []
+tags: [slack]
 prompt: >-
-  I want a scheduled PDF or PNG snapshot of one of my MotherDuck Dives, rendered
-  and stored without anyone clicking anything. Help me adapt the "Export a Dive
-  to PDF or PNG From a Flight" recipe to my own data and use case, using it as a
-  guide: https://motherduck.com/docs/cookbook/flight-dive-export
+  I want a scheduled PDF or PNG of one of my MotherDuck Dives rendered and
+  delivered to my team's Slack channel, without anyone clicking anything. Help me
+  adapt the "Export a Dive to PDF and Deliver It" recipe to my own data and use
+  case, using it as a guide:
+  https://motherduck.com/docs/cookbook/flight-dive-export
 published_date: 2026-09-02
 ---
 
-# Export a Dive to PDF or PNG From a Flight
+# Export a Dive to PDF and Deliver It
 
 Dives have no native PDF or PNG export yet. This single-file Flight builds one
 out of the pieces that already exist: a Dive embed session, headless Chromium
 running on MotherDuck compute, and a MotherDuck table to keep the results in.
 Each run renders the Dive as it looks to a service account, captures a
-full-height PNG and a single-page PDF, and appends both to
-`STORE_TABLE` as BLOBs. Put it on a cron and the snapshot shows up on its own.
+full-height PNG and a single-page PDF, appends both to `STORE_TABLE` as BLOBs,
+and hands them to whatever `DELIVERY` names. Put it on a cron and the report
+arrives on its own.
 
 A first run takes roughly 95 seconds, most of it the one-off Chromium download;
 later runs on a warm image are much quicker.
@@ -45,6 +48,12 @@ later runs on a warm image are much quicker.
 4. Each rendition named in `ATTACH` is appended to `STORE_TABLE`
    (`captured_at`, `label`, `source_url`, `kind`, `filename`, `mime`,
    `byte_count`, `content`). The database and schema are created on first run.
+5. Every target named in `DELIVERY` gets the same renditions. Delivery runs
+   after the store, so a broken webhook still leaves the file somewhere you can
+   reach it. `DELIVERY=""` stores and stops.
+
+Delivery credentials are validated before Chromium starts, so a missing secret
+fails the run in seconds instead of after a 90-second render.
 
 The Dive is rendered *as the service account*, so the export contains exactly
 what that account is allowed to read. Grant it read access on the databases the
@@ -59,6 +68,7 @@ Dive queries and nothing else.
 - How tall does the viewport have to be to fit the whole Dive (see
   [Sizing](#sizing))?
 - Which database holds the exports, and who is allowed to read that table?
+- Where should the report land: a Slack channel, the exports table, or both?
 - What schedule (cron, UTC) matches how often the underlying data changes?
 
 ## Caveats
@@ -81,6 +91,9 @@ Dive queries and nothing else.
   on every healthy render. So do Content Security Policy console errors from
   third-party scripts. None of them mean the capture failed; check the reported
   PNG and PDF byte counts instead.
+- **Slack needs a bot token, not a webhook.** Incoming webhooks cannot carry a
+  file. Delivery uses a bot token with `files:write`, and the bot has to be a
+  member of the target channel or the upload is rejected with `not_in_channel`.
 - **`WAIT_MS` is the whole correctness story for freshness.** The capture happens
   on a timer, not on a "queries finished" signal, so a Dive that is still loading
   at the deadline is captured half-rendered. Raise it if charts come out empty.
@@ -107,11 +120,21 @@ to be edited in the code.
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
 | `WAIT_MS` | `15000` | Settle time in ms after load, so the Dive's queries can finish. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
+| `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`. Empty stores the export and stops. |
+| `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. |
 | `MESSAGE` | (generated) | Message text stored with the export. Defaults to `<REPORT_NAME> captured <timestamp> UTC.` |
 | `API_BASE` | `https://api.motherduck.com` | REST API base. The API is region-scoped, so only a non-production environment needs this. |
 | `SHOT_URL` | (unset) | Debugging only: capture this URL instead of minting a Dive session. |
 | `LABEL` | `adhoc` | Label stored with a `SHOT_URL` capture. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth for the REST API and for the write. Select a token on the Flight; never hard-code it. |
+
+Slack delivery adds two credentials, which belong in a Flight secret rather than
+in config:
+
+| Knob | Purpose |
+|---|---|
+| `SLACK_BOT_TOKEN` | Bot User OAuth token (`xoxb-...`) with the `files:write` and `chat:write` scopes. |
+| `SLACK_CHANNEL_ID` | Destination channel id (`C...`), from the channel's details in Slack. |
 
 Config is per-run overridable, so one Flight can export several Dives.
 
@@ -146,6 +169,42 @@ SHOT_URL=https://motherduck.com STORE_TABLE="" \
   uv run --with-requirements requirements.txt flight.py
 ```
 
+### Set up Slack delivery
+
+Slack's incoming webhooks cannot attach a file, so delivery uses a bot token and
+the [external upload flow](https://docs.slack.dev/messaging/working-with-files/):
+
+1. Open [api.slack.com/apps?new_app=1](https://api.slack.com/apps?new_app=1),
+   choose **From a manifest**, select your workspace, and paste this manifest:
+   ```json
+   {
+       "display_information": { "name": "Dive Export" },
+       "features": { "bot_user": { "display_name": "Dive Export" } },
+       "oauth_config": { "scopes": { "bot": ["files:write", "chat:write"] } },
+       "settings": {
+           "org_deploy_enabled": false,
+           "socket_mode_enabled": false,
+           "token_rotation_enabled": false
+       }
+   }
+   ```
+2. Review, create the app, then **Install to Workspace** and copy the **Bot User
+   OAuth Token** (`xoxb-...`) from **OAuth & Permissions**.
+3. Invite the bot to the destination channel (`/invite @Dive Export`). Without
+   this the upload fails with `not_in_channel`.
+4. Copy the channel id (`C...`) from the channel's **About** details.
+
+Then send a real report to Slack:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_CHANNEL_ID=C0123456789
+DELIVERY=slack uv run --with-requirements requirements.txt flight.py
+```
+
+Use `DRY_RUN=true` first to confirm the render and the filenames without posting
+anything.
+
 ### Getting the files out
 
 The renditions are BLOBs, so pull the newest one through the client:
@@ -168,10 +227,33 @@ checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `dive_export`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
-- `config`: at least `DIVE_ID` and `SERVICE_ACCOUNT`, plus any knob from the
-  table above
+- `config`: at least `DIVE_ID`, `SERVICE_ACCOUNT`, and `DELIVERY`, plus any knob
+  from the table above
 - `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap).
   Leave room for the Chromium download on the first run.
+- `flight_secret_names`: the secret holding the delivery credentials
+
+Store the delivery credentials as a MotherDuck **Flights secret**, never in
+config. The simplest way is the MotherDuck UI: open
+[Settings > Secrets](https://app.motherduck.com/settings/secrets), add a secret
+of type **Flights**, and give it one param per credential. The same secret can be
+created from any write-enabled SQL connection (read-only connections reject
+`CREATE SECRET`):
+
+```sql
+CREATE SECRET dive_export_delivery IN motherduck (
+  TYPE flights,
+  PARAMS MAP {
+    'SLACK_BOT_TOKEN': 'xoxb-...',
+    'SLACK_CHANNEL_ID': 'C0123456789'
+  }
+);
+```
+
+A `TYPE flights` secret injects each param under its bare name, so the params
+above arrive as `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID` whatever you name the
+secret. (Each param is also injected namespaced as `<secret_name>_<PARAM>`,
+which disambiguates when several secrets define the same param name.)
 
 A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed. It must be a read/write
@@ -196,6 +278,12 @@ and do not create a new Flight version.
   against `^[A-Za-z_][A-Za-z0-9_]*$` before it is interpolated into the `CREATE`
   and `INSERT` statements, which cannot be parameterized. Row values are bound
   parameters.
+- **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN` is read from the
+  environment at run time and never logged; put it in a Flights secret, not in
+  Flight config, which is visible to anyone who can read the Flight.
+- **Delivery is a data egress path.** A Dive that renders sensitive numbers
+  sends them to whoever can read the destination channel. Pick the channel with
+  that in mind.
 - **Treat the exports table as sensitive.** It holds rendered business data; the
   same read grants you would put on the Dive's tables belong on it.
 
@@ -209,6 +297,10 @@ and do not create a new Flight version.
 - Capture options (viewport, `full_page`, PDF sizing): the
   [Playwright screenshots](https://playwright.dev/python/docs/screenshots) and
   [PDF](https://playwright.dev/python/docs/api/class-page#page-pdf) docs.
+- Slack file delivery:
+  [uploading files](https://docs.slack.dev/messaging/working-with-files/) and the
+  [`files.completeUploadExternal`](https://docs.slack.dev/reference/methods/files.completeuploadexternal)
+  reference.
 - Deeper MotherDuck or DuckDB questions: use the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight
   source) and [`requirements.txt`](requirements.txt) (`duckdb`, `playwright`,
