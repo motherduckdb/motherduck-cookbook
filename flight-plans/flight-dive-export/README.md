@@ -4,7 +4,7 @@ id: flight-dive-export
 description: >-
   A Flight that renders one of your Dives in headless Chromium on MotherDuck
   compute, stores the PNG and the PDF as BLOBs in a MotherDuck table, and
-  delivers them to a Slack or Microsoft Teams channel. Use when you want a
+  delivers them to Slack, Microsoft Teams, or email. Use when you want a
   scheduled PDF or PNG of a Dive delivered to where people already work, while
   Dives have no native export.
 type: template
@@ -13,7 +13,7 @@ features: [flights, dives, admin_api]
 tags: [slack, microsoft-teams]
 prompt: >-
   I want a scheduled PDF or PNG of one of my MotherDuck Dives rendered and
-  delivered to my team's Slack or Microsoft Teams channel, without anyone
+  delivered to my team over Slack, Microsoft Teams, or email, without anyone
   clicking anything. Help me
   adapt the "Export a Dive to PDF and Deliver It" recipe to my own data and use
   case, using it as a guide:
@@ -69,8 +69,8 @@ Dive queries and nothing else.
 - How tall does the viewport have to be to fit the whole Dive (see
   [Sizing](#sizing))?
 - Which database holds the exports, and who is allowed to read that table?
-- Where should the report land: a Slack channel, a Teams channel, the exports
-  table, or several of those?
+- Where should the report land: a Slack channel, a Teams channel, a mailbox, the
+  exports table, or several of those?
 - For Teams, is there an Entra app registration to use, and who can grant it
   admin consent?
 - What schedule (cron, UTC) matches how often the underlying data changes?
@@ -104,6 +104,9 @@ Dive queries and nothing else.
   through Microsoft Graph (it appears in the channel's **Files** tab) and the
   optional `TEAMS_WEBHOOK_URL` posts a card that links to it. Without the
   webhook the file still lands, it is just not announced.
+- **Mail servers cap attachment size.** Most sit around 25 MB, and a
+  `full_page` PNG at `SCALE=2` on a tall viewport can approach that. Send
+  `ATTACH=pdf` only, or drop `SCALE` to `1.5`, if mail bounces on size.
 - **`WAIT_MS` is the whole correctness story for freshness.** The capture happens
   on a timer, not on a "queries finished" signal, so a Dive that is still loading
   at the deadline is captured half-rendered. Raise it if charts come out empty.
@@ -130,7 +133,7 @@ to be edited in the code.
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
 | `WAIT_MS` | `15000` | Settle time in ms after load, so the Dive's queries can finish. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
-| `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`. Empty stores the export and stops. |
+| `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`, `email`. Empty stores the export and stops. |
 | `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. |
 | `MESSAGE` | (generated) | Message text stored with the export. Defaults to `<REPORT_NAME> captured <timestamp> UTC.` |
 | `API_BASE` | `https://api.motherduck.com` | REST API base. The API is region-scoped, so only a non-production environment needs this. |
@@ -157,6 +160,18 @@ optionally a webhook to announce the upload:
 | `TEAMS_TEAM_ID` | The team's group id (`groupId` in the channel link). |
 | `TEAMS_CHANNEL_ID` | The channel id (`19:...@thread.tacv2`). |
 | `TEAMS_WEBHOOK_URL` | Optional. Workflows webhook that posts the Adaptive Card linking to the uploaded files. |
+
+Email delivery is plain SMTP, so any provider works:
+
+| Knob | Default | Purpose |
+|---|---|---|
+| `SMTP_HOST` | (unset) | SMTP server hostname. |
+| `SMTP_PORT` | `587` | SMTP port. |
+| `SMTP_TLS` | `starttls` (`ssl` on port 465) | Transport security: `starttls`, `ssl` (implicit TLS), or `none` for a local relay. |
+| `SMTP_USER` / `SMTP_PASSWORD` | (unset) | Credentials. Leave unset for a relay that does not authenticate. |
+| `EMAIL_FROM` | (unset) | Envelope sender. |
+| `EMAIL_TO` | (unset) | Comma-separated recipients. |
+| `EMAIL_SUBJECT` | `REPORT_NAME` | Subject line. |
 
 Config is per-run overridable, so one Flight can export several Dives.
 
@@ -256,6 +271,23 @@ export TEAMS_WEBHOOK_URL=https://prod-00.westeurope.logic.azure.com/...
 DELIVERY=teams uv run --with-requirements requirements.txt flight.py
 ```
 
+### Set up email delivery
+
+There is no provider SDK here, just SMTP, so SES, Resend, Postmark, Google
+Workspace, or an internal relay all work the same way. Point it at the
+provider's submission host and attach the credentials as a secret:
+
+```bash
+export SMTP_HOST=email-smtp.eu-central-1.amazonaws.com SMTP_PORT=587
+export SMTP_USER=... SMTP_PASSWORD=...
+export EMAIL_FROM=reports@example.com
+export EMAIL_TO='team@example.com, exec@example.com'
+DELIVERY=email uv run --with-requirements requirements.txt flight.py
+```
+
+Set `SMTP_TLS=none` only for a relay on a trusted network (or a local SMTP sink
+while you are testing the render).
+
 ### Getting the files out
 
 The renditions are BLOBs, so pull the newest one through the client:
@@ -297,7 +329,8 @@ CREATE SECRET dive_export_delivery IN motherduck (
   PARAMS MAP {
     'SLACK_BOT_TOKEN': 'xoxb-...',
     'SLACK_CHANNEL_ID': 'C0123456789',
-    'TEAMS_CLIENT_SECRET': '...'
+    'TEAMS_CLIENT_SECRET': '...',
+    'SMTP_PASSWORD': '...'
   }
 );
 ```
@@ -330,16 +363,20 @@ and do not create a new Flight version.
   against `^[A-Za-z_][A-Za-z0-9_]*$` before it is interpolated into the `CREATE`
   and `INSERT` statements, which cannot be parameterized. Row values are bound
   parameters.
-- **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN` and
-  `TEAMS_CLIENT_SECRET` are read from the environment at run time and never
-  logged; put them in a Flights secret, not in Flight config, which is visible to
-  anyone who can read the Flight.
+- **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN`,
+  `TEAMS_CLIENT_SECRET`, and `SMTP_PASSWORD` are read from the environment at run
+  time and never logged; put them in a Flights secret, not in Flight config,
+  which is visible to anyone who can read the Flight.
 - **Scope the Entra app narrowly.** `Files.ReadWrite.All` is tenant-wide. If your
   tenant allows it, prefer `Sites.Selected` granted only on the site behind the
   destination team, so the app cannot write anywhere else.
 - **Delivery is a data egress path.** A Dive that renders sensitive numbers
-  sends them to whoever can read the destination channel. Pick the channel with
-  that in mind.
+  sends them to whoever can read the destination channel or mailbox, and an
+  emailed attachment leaves your control entirely. Pick the destination with that
+  in mind, and keep `EMAIL_TO` in config where it is reviewable rather than
+  buried in a secret.
+- **Keep mail on TLS.** `SMTP_TLS=none` sends the report, and any SMTP
+  credentials, in the clear. Use it only on a trusted network.
 - **Treat the exports table as sensitive.** It holds rendered business data; the
   same read grants you would put on the Dive's tables belong on it.
 
@@ -363,6 +400,10 @@ and do not create a new Flight version.
   in Microsoft Graph, plus
   [Adaptive Cards](https://learn.microsoft.com/en-us/power-automate/teams/send-a-message-in-teams)
   through a Workflows webhook.
+- Email delivery: whatever your provider documents for SMTP submission (for
+  example [Amazon SES](https://docs.aws.amazon.com/ses/latest/dg/send-email-smtp.html));
+  the code uses the standard library's
+  [`smtplib`](https://docs.python.org/3/library/smtplib.html).
 - Deeper MotherDuck or DuckDB questions: use the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight
   source) and [`requirements.txt`](requirements.txt) (`duckdb`, `playwright`,

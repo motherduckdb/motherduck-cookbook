@@ -11,10 +11,12 @@ table. Credentials arrive as Flight secret params under their bare names.
 
 import os
 import re
+import smtplib
 import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from urllib.parse import quote
 
 import duckdb
@@ -489,6 +491,58 @@ def post_teams_card(webhook: str, export: Export, links: list[tuple[str, str]]) 
     response.raise_for_status()
 
 
+def deliver_email(export: Export, dry_run: bool) -> None:
+    """Mail the renditions as attachments over SMTP.
+
+    Any provider that speaks SMTP works (SES, Resend, Postmark, Google
+    Workspace, a relay of your own), so there is no provider SDK here.
+    """
+    host = env("SMTP_HOST")
+    port = env_int("SMTP_PORT", 587)
+    user = env("SMTP_USER")
+    password = env("SMTP_PASSWORD")
+    sender = env("EMAIL_FROM")
+    recipients = [part.strip() for part in env("EMAIL_TO").split(",") if part.strip()]
+    # Implicit TLS on the submission-over-TLS port, STARTTLS everywhere else.
+    tls = env("SMTP_TLS", "ssl" if port == 465 else "starttls").lower()
+    if tls not in {"ssl", "starttls", "none"}:
+        raise ValueError(f"SMTP_TLS must be ssl, starttls, or none; got {tls!r}")
+
+    if dry_run:
+        log(
+            f"[dry run] email: would send {filenames(export)} "
+            f"to {', '.join(recipients)} via {host}:{port} ({tls})"
+        )
+        return
+
+    message = EmailMessage()
+    message["Subject"] = env("EMAIL_SUBJECT") or export.title
+    message["From"] = sender
+    message["To"] = ", ".join(recipients)
+    message.set_content(export.message)
+    for rendition in export.renditions:
+        maintype, subtype = rendition.mime.split("/", 1)
+        message.add_attachment(
+            rendition.content,
+            maintype=maintype,
+            subtype=subtype,
+            filename=rendition.filename,
+        )
+
+    if tls == "ssl":
+        smtp = smtplib.SMTP_SSL(host, port, timeout=60)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=60)
+    with smtp:
+        if tls == "starttls":
+            smtp.starttls()
+        # An unauthenticated relay is a valid setup, so only log in when asked.
+        if user:
+            smtp.login(user, password)
+        smtp.send_message(message)
+    log(f"email: sent {filenames(export)} to {', '.join(recipients)}")
+
+
 def graph_ok(response: httpx.Response, what: str) -> None:
     """Raise with the Graph error body, which says which permission is missing."""
     if response.status_code >= 400:
@@ -563,6 +617,12 @@ DELIVERY_TARGETS = {
     "slack": {
         "deliver": deliver_slack,
         "requires": ("SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID"),
+    },
+    "email": {
+        "deliver": deliver_email,
+        # SMTP_USER / SMTP_PASSWORD stay optional: an internal relay may not
+        # want them, and EMAIL_SUBJECT falls back to REPORT_NAME.
+        "requires": ("SMTP_HOST", "EMAIL_FROM", "EMAIL_TO"),
     },
     "teams": {
         "deliver": deliver_teams,
