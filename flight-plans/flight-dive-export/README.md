@@ -4,16 +4,17 @@ id: flight-dive-export
 description: >-
   A Flight that renders one of your Dives in headless Chromium on MotherDuck
   compute, stores the PNG and the PDF as BLOBs in a MotherDuck table, and
-  uploads them to a Slack channel. Use when you want a scheduled PDF or PNG of a
-  Dive delivered to where people already work, while Dives have no native
-  export.
+  delivers them to a Slack or Microsoft Teams channel. Use when you want a
+  scheduled PDF or PNG of a Dive delivered to where people already work, while
+  Dives have no native export.
 type: template
 category: automation
 features: [flights, dives, admin_api]
-tags: [slack]
+tags: [slack, microsoft-teams]
 prompt: >-
   I want a scheduled PDF or PNG of one of my MotherDuck Dives rendered and
-  delivered to my team's Slack channel, without anyone clicking anything. Help me
+  delivered to my team's Slack or Microsoft Teams channel, without anyone
+  clicking anything. Help me
   adapt the "Export a Dive to PDF and Deliver It" recipe to my own data and use
   case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-dive-export
@@ -68,7 +69,10 @@ Dive queries and nothing else.
 - How tall does the viewport have to be to fit the whole Dive (see
   [Sizing](#sizing))?
 - Which database holds the exports, and who is allowed to read that table?
-- Where should the report land: a Slack channel, the exports table, or both?
+- Where should the report land: a Slack channel, a Teams channel, the exports
+  table, or several of those?
+- For Teams, is there an Entra app registration to use, and who can grant it
+  admin consent?
 - What schedule (cron, UTC) matches how often the underlying data changes?
 
 ## Caveats
@@ -94,6 +98,12 @@ Dive queries and nothing else.
 - **Slack needs a bot token, not a webhook.** Incoming webhooks cannot carry a
   file. Delivery uses a bot token with `files:write`, and the bot has to be a
   member of the target channel or the upload is rejected with `not_in_channel`.
+- **Teams delivery takes two hops.** No Teams webhook can carry a file, and
+  posting a channel message with an app-only token is restricted to migration
+  scenarios. So the file goes into the SharePoint folder behind the channel
+  through Microsoft Graph (it appears in the channel's **Files** tab) and the
+  optional `TEAMS_WEBHOOK_URL` posts a card that links to it. Without the
+  webhook the file still lands, it is just not announced.
 - **`WAIT_MS` is the whole correctness story for freshness.** The capture happens
   on a timer, not on a "queries finished" signal, so a Dive that is still loading
   at the deadline is captured half-rendered. Raise it if charts come out empty.
@@ -120,7 +130,7 @@ to be edited in the code.
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
 | `WAIT_MS` | `15000` | Settle time in ms after load, so the Dive's queries can finish. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
-| `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`. Empty stores the export and stops. |
+| `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`. Empty stores the export and stops. |
 | `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. |
 | `MESSAGE` | (generated) | Message text stored with the export. Defaults to `<REPORT_NAME> captured <timestamp> UTC.` |
 | `API_BASE` | `https://api.motherduck.com` | REST API base. The API is region-scoped, so only a non-production environment needs this. |
@@ -135,6 +145,18 @@ in config:
 |---|---|
 | `SLACK_BOT_TOKEN` | Bot User OAuth token (`xoxb-...`) with the `files:write` and `chat:write` scopes. |
 | `SLACK_CHANNEL_ID` | Destination channel id (`C...`), from the channel's details in Slack. |
+
+Teams delivery needs an Entra app registration, the channel's ids, and
+optionally a webhook to announce the upload:
+
+| Knob | Purpose |
+|---|---|
+| `TEAMS_TENANT_ID` | Directory (tenant) id of the Entra app registration. |
+| `TEAMS_CLIENT_ID` | Application (client) id of that registration. |
+| `TEAMS_CLIENT_SECRET` | Client secret for it. |
+| `TEAMS_TEAM_ID` | The team's group id (`groupId` in the channel link). |
+| `TEAMS_CHANNEL_ID` | The channel id (`19:...@thread.tacv2`). |
+| `TEAMS_WEBHOOK_URL` | Optional. Workflows webhook that posts the Adaptive Card linking to the uploaded files. |
 
 Config is per-run overridable, so one Flight can export several Dives.
 
@@ -205,6 +227,35 @@ DELIVERY=slack uv run --with-requirements requirements.txt flight.py
 Use `DRY_RUN=true` first to confirm the render and the filenames without posting
 anything.
 
+### Set up Teams delivery
+
+Teams needs Microsoft Graph for the file and (optionally) a webhook for the
+announcement:
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com), register
+   an application (**App registrations > New registration**). Copy the
+   **Application (client) ID** and **Directory (tenant) ID**, then add a client
+   secret under **Certificates & secrets**.
+2. Under **API permissions**, add Microsoft Graph **application** permissions
+   `ChannelSettings.Read.All` (resolve the channel's Files folder) and
+   `Files.ReadWrite.All` (write into it), then grant admin consent. If a call is
+   refused, the Graph error body names the permission it wanted; this Flight
+   surfaces that body verbatim.
+3. Get the ids from Teams: on the channel, **Get link to channel** produces a URL
+   containing `groupId=<TEAMS_TEAM_ID>` and
+   `threadId=<TEAMS_CHANNEL_ID>` (the `19:...@thread.tacv2` value).
+4. Optional, for the card: in Teams open the channel's **Workflows** and create
+   one from the **Post to a channel when a webhook request is received**
+   template, then copy its URL as `TEAMS_WEBHOOK_URL`. (This replaces the retired
+   Office 365 connectors.)
+
+```bash
+export TEAMS_TENANT_ID=... TEAMS_CLIENT_ID=... TEAMS_CLIENT_SECRET=...
+export TEAMS_TEAM_ID=... TEAMS_CHANNEL_ID='19:...@thread.tacv2'
+export TEAMS_WEBHOOK_URL=https://prod-00.westeurope.logic.azure.com/...
+DELIVERY=teams uv run --with-requirements requirements.txt flight.py
+```
+
 ### Getting the files out
 
 The renditions are BLOBs, so pull the newest one through the client:
@@ -245,7 +296,8 @@ CREATE SECRET dive_export_delivery IN motherduck (
   TYPE flights,
   PARAMS MAP {
     'SLACK_BOT_TOKEN': 'xoxb-...',
-    'SLACK_CHANNEL_ID': 'C0123456789'
+    'SLACK_CHANNEL_ID': 'C0123456789',
+    'TEAMS_CLIENT_SECRET': '...'
   }
 );
 ```
@@ -278,9 +330,13 @@ and do not create a new Flight version.
   against `^[A-Za-z_][A-Za-z0-9_]*$` before it is interpolated into the `CREATE`
   and `INSERT` statements, which cannot be parameterized. Row values are bound
   parameters.
-- **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN` is read from the
-  environment at run time and never logged; put it in a Flights secret, not in
-  Flight config, which is visible to anyone who can read the Flight.
+- **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN` and
+  `TEAMS_CLIENT_SECRET` are read from the environment at run time and never
+  logged; put them in a Flights secret, not in Flight config, which is visible to
+  anyone who can read the Flight.
+- **Scope the Entra app narrowly.** `Files.ReadWrite.All` is tenant-wide. If your
+  tenant allows it, prefer `Sites.Selected` granted only on the site behind the
+  destination team, so the app cannot write anywhere else.
 - **Delivery is a data egress path.** A Dive that renders sensitive numbers
   sends them to whoever can read the destination channel. Pick the channel with
   that in mind.
@@ -301,6 +357,12 @@ and do not create a new Flight version.
   [uploading files](https://docs.slack.dev/messaging/working-with-files/) and the
   [`files.completeUploadExternal`](https://docs.slack.dev/reference/methods/files.completeuploadexternal)
   reference.
+- Teams file delivery:
+  [channel filesFolder](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder)
+  and [upload sessions](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession)
+  in Microsoft Graph, plus
+  [Adaptive Cards](https://learn.microsoft.com/en-us/power-automate/teams/send-a-message-in-teams)
+  through a Workflows webhook.
 - Deeper MotherDuck or DuckDB questions: use the `ask_docs_question` MCP tool.
 - Files in this template: [`flight.py`](flight.py) (the single-file Flight
   source) and [`requirements.txt`](requirements.txt) (`duckdb`, `playwright`,

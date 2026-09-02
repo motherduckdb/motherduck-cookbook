@@ -15,6 +15,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import duckdb
 import httpx
@@ -28,6 +29,11 @@ IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MIME_TYPES = {"png": "image/png", "pdf": "application/pdf"}
 
 SLACK_API = "https://slack.com/api"
+GRAPH_API = "https://graph.microsoft.com/v1.0"
+ENTRA_LOGIN = "https://login.microsoftonline.com"
+# A Graph upload session wants every chunk except the last to be a multiple of
+# 320 KiB. 5 MiB is 16 of those blocks.
+GRAPH_CHUNK_BYTES = 5 * 1024 * 1024
 
 
 @dataclass
@@ -340,6 +346,158 @@ def deliver_slack(export: Export, dry_run: bool) -> None:
     log(f"slack: uploaded {filenames(export)} to {channel}")
 
 
+def deliver_teams(export: Export, dry_run: bool) -> None:
+    """Put each rendition in the channel's Files tab, then announce it.
+
+    Teams has no file-carrying webhook either, and posting a channel message
+    with an app-only token is restricted to migration scenarios. So the file
+    goes to the SharePoint folder behind the channel through Microsoft Graph
+    (where it shows up in the channel's Files tab), and the optional
+    `TEAMS_WEBHOOK_URL` posts an Adaptive Card linking to it.
+    """
+    team_id = env("TEAMS_TEAM_ID")
+    channel_id = env("TEAMS_CHANNEL_ID")
+    webhook = env("TEAMS_WEBHOOK_URL")
+
+    if dry_run:
+        log(
+            f"[dry run] teams: would upload {filenames(export)} to the Files tab "
+            f"of channel {channel_id}"
+            + (" and post a card" if webhook else " (no webhook, no card)")
+        )
+        return
+
+    token = graph_token(
+        env("TEAMS_TENANT_ID"), env("TEAMS_CLIENT_ID"), env("TEAMS_CLIENT_SECRET")
+    )
+    drive_id, folder_id = teams_files_folder(token, team_id, channel_id)
+    links = [
+        (rendition.filename, graph_upload(token, drive_id, folder_id, rendition))
+        for rendition in export.renditions
+    ]
+    log(f"teams: uploaded {filenames(export)} to the Files tab of {channel_id}")
+
+    if not webhook:
+        log("teams: TEAMS_WEBHOOK_URL is unset; skipping the channel card.")
+        return
+    post_teams_card(webhook, export, links)
+    log("teams: posted the channel card")
+
+
+def graph_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    """Client-credentials token for Microsoft Graph (no user is signed in)."""
+    response = httpx.post(
+        f"{ENTRA_LOGIN}/{tenant_id}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": "https://graph.microsoft.com/.default",
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        # The body names the missing consent or the wrong tenant, and carries no
+        # secret of ours, so it is worth surfacing.
+        raise RuntimeError(f"Entra token request failed: {response.text[:500]}")
+    return response.json()["access_token"]
+
+
+def teams_files_folder(token: str, team_id: str, channel_id: str) -> tuple[str, str]:
+    """Resolve the drive and folder that back a channel's Files tab."""
+    response = httpx.get(
+        f"{GRAPH_API}/teams/{team_id}/channels/{channel_id}/filesFolder",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    graph_ok(response, "resolve the channel Files folder")
+    folder = response.json()
+    return folder["parentReference"]["driveId"], folder["id"]
+
+
+def graph_upload(
+    token: str, drive_id: str, folder_id: str, rendition: Rendition
+) -> str:
+    """Upload one rendition through an upload session; return its webUrl.
+
+    An upload session handles any size, so there is no 4 MB simple-upload cliff
+    to fall off when a PNG grows.
+    """
+    session = httpx.post(
+        f"{GRAPH_API}/drives/{drive_id}/items/{folder_id}:/{quote(rendition.filename)}:"
+        "/createUploadSession",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"item": {"@microsoft.graph.conflictBehavior": "replace"}},
+        timeout=60,
+    )
+    graph_ok(session, f"create an upload session for {rendition.filename}")
+    upload_url = session.json()["uploadUrl"]
+
+    total = len(rendition.content)
+    response = None
+    for start in range(0, total, GRAPH_CHUNK_BYTES):
+        chunk = rendition.content[start : start + GRAPH_CHUNK_BYTES]
+        end = start + len(chunk) - 1
+        # The upload URL carries its own authorization; adding ours breaks it.
+        response = httpx.put(
+            upload_url,
+            content=chunk,
+            headers={"Content-Range": f"bytes {start}-{end}/{total}"},
+            timeout=300,
+        )
+        graph_ok(response, f"upload bytes {start}-{end} of {rendition.filename}")
+    # The response to the final chunk is the created driveItem.
+    return (response.json() or {}).get("webUrl", "")
+
+
+def post_teams_card(webhook: str, export: Export, links: list[tuple[str, str]]) -> None:
+    """Announce the upload in the channel with an Adaptive Card."""
+    body = [
+        {
+            "type": "TextBlock",
+            "text": export.title,
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": True,
+        },
+        {"type": "TextBlock", "text": export.message, "wrap": True},
+    ]
+    actions = [
+        {"type": "Action.OpenUrl", "title": f"Open {name}", "url": url}
+        for name, url in links
+        if url
+    ]
+    response = httpx.post(
+        webhook,
+        json={
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "version": "1.4",
+                        "body": body,
+                        "actions": actions,
+                    },
+                }
+            ],
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+
+def graph_ok(response: httpx.Response, what: str) -> None:
+    """Raise with the Graph error body, which says which permission is missing."""
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Microsoft Graph could not {what}: "
+            f"HTTP {response.status_code} {response.text[:500]}"
+        )
+
+
 def slack_api(response: httpx.Response) -> dict:
     """Slack answers 200 OK with `ok: false` on failure, so check both."""
     response.raise_for_status()
@@ -380,7 +538,8 @@ def env_int(name: str, default: int) -> int:
 
 
 def env_list(name: str, default: str) -> list[str]:
-    return [part.strip().lower() for part in env(name, default).split(",") if part.strip()]
+    parts = env(name, default).split(",")
+    return [part.strip().lower() for part in parts if part.strip()]
 
 
 def split_table(value: str) -> tuple[str, str, str]:
@@ -404,6 +563,18 @@ DELIVERY_TARGETS = {
     "slack": {
         "deliver": deliver_slack,
         "requires": ("SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID"),
+    },
+    "teams": {
+        "deliver": deliver_teams,
+        # TEAMS_WEBHOOK_URL is optional: without it the file still lands in the
+        # channel's Files tab, it is just not announced.
+        "requires": (
+            "TEAMS_TENANT_ID",
+            "TEAMS_CLIENT_ID",
+            "TEAMS_CLIENT_SECRET",
+            "TEAMS_TEAM_ID",
+            "TEAMS_CHANNEL_ID",
+        ),
     },
 }
 
