@@ -85,6 +85,8 @@ def main() -> None:
         raise ValueError(f"ATTACH must be a subset of png,pdf; got {kinds or ['']}")
     # Fail on a typo or a missing credential now, not after a 90-second render.
     check_delivery_config(targets)
+    if store_table:
+        split_table(store_table)
 
     if shot_url:
         # Debugging path: shoot any URL, no Dive and no service account needed.
@@ -124,8 +126,17 @@ def main() -> None:
     # rendered file somewhere you can get at it.
     if not targets:
         log("DELIVERY is empty; nothing to send.")
+    failed = []
     for target in targets:
-        DELIVERY_TARGETS[target]["deliver"](export, dry_run)
+        try:
+            DELIVERY_TARGETS[target]["deliver"](export, dry_run)
+        except Exception as exc:
+            # One unreachable target should not stop the others, but the run
+            # still has to end FAILED so the failure is not silent.
+            log(f"{target}: delivery FAILED: {exc}")
+            failed.append(target)
+    if failed:
+        raise RuntimeError(f"delivery failed for {failed}; see the log above")
 
 
 def mint_embed_session(dive_id: str, username: str, token: str) -> str:

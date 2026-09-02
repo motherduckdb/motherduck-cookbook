@@ -53,8 +53,9 @@ later runs on a warm image are much quicker.
    after the store, so a broken webhook still leaves the file somewhere you can
    reach it. `DELIVERY=""` stores and stops.
 
-Delivery credentials are validated before Chromium starts, so a missing secret
-fails the run in seconds instead of after a 90-second render.
+`DELIVERY`, `ATTACH`, `STORE_TABLE`, and the delivery credentials are all
+validated before Chromium starts, so a typo or a missing secret fails the run in
+seconds instead of after a 90-second render.
 
 The Dive is rendered *as the service account*, so the export contains exactly
 what that account is allowed to read. Grant it read access on the databases the
@@ -104,6 +105,10 @@ Dive queries and nothing else.
   through Microsoft Graph (it appears in the channel's **Files** tab) and the
   optional `TEAMS_WEBHOOK_URL` posts a card that links to it. Without the
   webhook the file still lands, it is just not announced.
+- **A failing target does not block the others.** Every target in `DELIVERY` is
+  attempted; each failure is logged on its own line and the run ends FAILED
+  naming the targets that broke, so an expired token is visible without hiding
+  the deliveries that worked.
 - **Mail servers cap attachment size.** Most sit around 25 MB, and a
   `full_page` PNG at `SCALE=2` on a tall viewport can approach that. Send
   `ATTACH=pdf` only, or drop `SCALE` to `1.5`, if mail bounces on size.
