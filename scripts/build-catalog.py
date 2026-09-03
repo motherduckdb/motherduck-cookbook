@@ -85,6 +85,7 @@ ALLOWED_TAGS = {
     "s3",
     # messaging and alerting
     "slack",
+    "microsoft-teams",
     # crm and marketing
     "hubspot",
     # ecommerce

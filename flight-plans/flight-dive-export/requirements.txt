@@ -1,0 +1,7 @@
+duckdb==1.5.5
+# Playwright drives the headless Chromium that renders the Dive. The pip package
+# ships no browser; the Flight downloads the matching Chromium build on its first
+# run (see install_chromium), so the pinned version here decides which build.
+playwright==1.49.1
+# httpx talks to the MotherDuck REST API to mint the Dive embed session.
+httpx==0.28.1
