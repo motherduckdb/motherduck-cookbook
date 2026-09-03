@@ -100,6 +100,11 @@ Dive queries and nothing else.
   counts elements before going further (9 on that page against 539 on a loaded
   one) and fails the run instead, quoting what the page said. Lower
   `MIN_ELEMENTS`, or set it to `0`, if a genuinely sparse Dive trips it.
+- **Queries run on MotherDuck, not in the container.** The session URL carries
+  `queryMode=server`, so the Dive goes through the Postgres endpoint instead of
+  spinning up DuckDB-wasm inside Chromium. That halved load time on the test
+  Dive (roughly 8s to 4s) and keeps the Flight's memory use down. A session
+  without a `pgEndpoint` falls back to wasm on its own.
 - **Expect noisy logs on a successful run.** `Incomplete gRPC response no
   trailer transmitted` and `unassociated response: [undefined, MD_EVENT]` show up
   on every healthy render. So do Content Security Policy console errors from

@@ -25,7 +25,11 @@ import httpx
 # The REST API is scoped to your organization's region, so one hostname works
 # for every region. Override API_BASE only for a non-production environment.
 API_BASE = os.environ.get("API_BASE", "https://api.motherduck.com").rstrip("/")
-SANDBOX_BASE = "https://embed-motherduck.com/sandbox/#session="
+# `queryMode=server` runs the Dive's queries on MotherDuck through the Postgres
+# endpoint rather than in a DuckDB-wasm instance inside this container, which is
+# both faster and much lighter on the Flight's memory. It is a preference, not a
+# requirement: a session that carries no pgEndpoint falls back to wasm on its own.
+SANDBOX_BASE = "https://embed-motherduck.com/sandbox/?queryMode=server#session="
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MIME_TYPES = {"png": "image/png", "pdf": "application/pdf"}
