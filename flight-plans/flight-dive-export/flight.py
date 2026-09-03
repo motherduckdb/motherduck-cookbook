@@ -109,6 +109,7 @@ def main() -> None:
         for_text=env("WAIT_FOR_TEXT"),
     )
     scale = float(env("SCALE", "2"))
+    min_elements = env_int("MIN_ELEMENTS", 30)
     width, height = parse_viewport(env("VIEWPORT", "1440x1000"))
 
     unknown = [kind for kind in kinds if kind not in MIME_TYPES]
@@ -129,7 +130,7 @@ def main() -> None:
 
     install_chromium()
     captured_at = datetime.now(timezone.utc)
-    shots = capture(url, wait, (width, height), scale)
+    shots = capture(url, wait, (width, height), scale, min_elements)
 
     export = Export(
         label=label,
@@ -220,7 +221,11 @@ def install_chromium() -> None:
 
 
 def capture(
-    url: str, wait: "Wait", viewport: tuple[int, int], scale: float
+    url: str,
+    wait: "Wait",
+    viewport: tuple[int, int],
+    scale: float,
+    min_elements: int,
 ) -> dict[str, bytes]:
     """Open the URL and return {"png": ..., "pdf": ...}."""
     from playwright.sync_api import sync_playwright
@@ -249,6 +254,7 @@ def capture(
         page.goto(url, wait_until="domcontentloaded", timeout=90_000)
         log("title:", page.title())
         settle(page, wait)
+        check_rendered(page, min_elements)
 
         capture_height = grow_viewport(page, width, height)
 
@@ -338,6 +344,36 @@ def settle(page, wait: "Wait") -> None:
     log(
         f"WARNING: the Dive was still changing after {wait.ceiling_ms}ms; "
         "capturing anyway. Raise WAIT_MS, or set WAIT_FOR_TEXT."
+    )
+
+
+def check_rendered(page, min_elements: int) -> None:
+    """Refuse to go on when the Dive never rendered.
+
+    Nothing raises on a bad or expired session: `goto` succeeds and the sandbox
+    quietly paints "Unable to load Dive" instead. That page stores as a BLOB and
+    mails itself out exactly as happily as a real export, which is the worst way
+    for this Flight to fail. The gap is wide enough to test for: a failed render
+    carries 9 elements and 58 characters, against 539 and 3118 for the same Dive
+    loaded.
+
+    `MIN_ELEMENTS=0` turns this off, for a Dive genuinely sparse enough to trip
+    it.
+    """
+    if min_elements <= 0:
+        return
+    elements, text = page.evaluate(
+        """() => [
+          document.body.getElementsByTagName('*').length,
+          (document.body.innerText || '').trim().slice(0, 300),
+        ]"""
+    )
+    if elements >= min_elements:
+        return
+    raise RuntimeError(
+        f"the Dive did not render: {elements} elements on the page, under the "
+        f"MIN_ELEMENTS={min_elements} floor. Nothing was stored or delivered. "
+        f"The page reads: {text!r}"
     )
 
 

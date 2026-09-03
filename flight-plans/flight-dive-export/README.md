@@ -94,6 +94,12 @@ Dive queries and nothing else.
 - **The exports table grows.** Each run appends a few MB of BLOBs. Prune it on a
   schedule (`DELETE FROM ... WHERE captured_at < now() - INTERVAL 90 DAY`) or set
   `STORE_TABLE = ""` once delivery is enough.
+- **A failed render does not raise on its own.** An expired or wrong session
+  loads fine as far as Chromium is concerned; the sandbox just paints "Unable to
+  load Dive", and that page would store and mail like any other. The Flight
+  counts elements before going further (9 on that page against 539 on a loaded
+  one) and fails the run instead, quoting what the page said. Lower
+  `MIN_ELEMENTS`, or set it to `0`, if a genuinely sparse Dive trips it.
 - **Expect noisy logs on a successful run.** `Incomplete gRPC response no
   trailer transmitted` and `unassociated response: [undefined, MD_EVENT]` show up
   on every healthy render. So do Content Security Policy console errors from
@@ -182,6 +188,7 @@ to be edited in the code.
 | `ATTACH` | `pdf,png` | Which renditions to produce: `pdf`, `png`, or both. |
 | `VIEWPORT` | `1440x1000` | Layout width and *minimum* height as `WxH`. The capture grows past the height to fit the Dive. |
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
+| `MIN_ELEMENTS` | `30` | Refuse to store or deliver a page with fewer elements than this. `0` disables the check. |
 | `MIN_WAIT_MS` | `15000` | Never capture before this many ms have passed, however quiet the page looks. |
 | `WAIT_MS` | `120000` | Ceiling in ms. Past it the Flight captures anyway, or fails if `WAIT_FOR_TEXT` was set. |
 | `WAIT_FOR_TEXT` | (unset) | A string only the *loaded* Dive contains. Set it and the wait keys on that instead of on DOM quiet. |
