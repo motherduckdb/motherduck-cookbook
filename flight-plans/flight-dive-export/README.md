@@ -311,11 +311,11 @@ announcement:
    an application (**App registrations > New registration**). Copy the
    **Application (client) ID** and **Directory (tenant) ID**, then add a client
    secret under **Certificates & secrets**.
-2. Under **API permissions**, add Microsoft Graph **application** permissions
-   `ChannelSettings.Read.All` (resolve the channel's Files folder) and
-   `Files.ReadWrite.All` (write into it), then grant admin consent. If a call is
-   refused, the Graph error body names the permission it wanted; this Flight
-   surfaces that body verbatim.
+2. Under **API permissions**, add the Microsoft Graph **application**
+   permission `Files.ReadWrite.All`, then grant admin consent. That one covers
+   both calls: it resolves the channel's Files folder and writes into it. If a
+   call is refused, the Graph error body names the permission it wanted; this
+   Flight surfaces that body verbatim.
 3. Get the ids from Teams: on the channel, **Get link to channel** produces a URL
    containing `groupId=<TEAMS_TEAM_ID>` and
    `threadId=<TEAMS_CHANNEL_ID>` (the `19:...@thread.tacv2` value).
@@ -427,9 +427,14 @@ and do not create a new Flight version.
   `TEAMS_CLIENT_SECRET`, and `SMTP_PASSWORD` are read from the environment at run
   time and never logged; put them in a Flights secret, not in Flight config,
   which is visible to anyone who can read the Flight.
-- **Scope the Entra app narrowly.** `Files.ReadWrite.All` is tenant-wide. If your
-  tenant allows it, prefer `Sites.Selected` granted only on the site behind the
-  destination team, so the app cannot write anywhere else.
+- **`Files.ReadWrite.All` is tenant-wide**, and it is the narrowest permission
+  that covers both hops as written. `Sites.Selected` is the usual way to scope an
+  app to one site, but it is not accepted on
+  [`GET /teams/{id}/channels/{id}/filesFolder`](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder),
+  so the folder cannot be resolved with it. Using it means resolving the drive
+  and folder ids another way and hardcoding them, which this recipe does not do.
+  Grant the tenant-wide permission to a dedicated app registration used for
+  nothing else, and audit it accordingly.
 - **Delivery is a data egress path.** A Dive that renders sensitive numbers
   sends them to whoever can read the destination channel or mailbox, and an
   emailed attachment leaves your control entirely. Pick the destination with that
