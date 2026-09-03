@@ -30,6 +30,18 @@ SANDBOX_BASE = "https://embed-motherduck.com/sandbox/#session="
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MIME_TYPES = {"png": "image/png", "pdf": "application/pdf"}
 
+# The sandbox pins html and body to the viewport (`overflow: hidden`) and puts
+# the scroll on #root, so the document never grows past the fold on its own.
+CONTENT_SELECTOR = "#root"
+# Laying the Dive out at a new height can change that height again, so the grow
+# repeats. Three passes converged on every Dive tried.
+GROW_PASSES = 3
+# Chromium stitched a 30000px viewport without complaining in testing. The cap
+# is here so a runaway Dive cannot ask for an unbounded allocation.
+MAX_VIEWPORT_HEIGHT = 30000
+# How long to let the layout reflow after the viewport changes size.
+REFLOW_MS = 1500
+
 SLACK_API = "https://slack.com/api"
 GRAPH_API = "https://graph.microsoft.com/v1.0"
 ENTRA_LOGIN = "https://login.microsoftonline.com"
@@ -78,7 +90,7 @@ def main() -> None:
     dry_run = env("DRY_RUN", "false").lower() == "true"
     wait_ms = env_int("WAIT_MS", 15000)
     scale = float(env("SCALE", "2"))
-    width, height = parse_viewport(env("VIEWPORT", "1440x2600"))
+    width, height = parse_viewport(env("VIEWPORT", "1440x1000"))
 
     unknown = [kind for kind in kinds if kind not in MIME_TYPES]
     if unknown or not kinds:
@@ -222,24 +234,74 @@ def capture(
         page.wait_for_timeout(wait_ms)
         log("title:", page.title())
 
+        capture_height = grow_viewport(page, width, height)
+
         png = page.screenshot(full_page=True)
         log(f"png: {len(png)} bytes")
 
-        # One page sized to the content, so charts are never split in half.
-        content_height = page.evaluate(
-            "() => Math.max(document.body.scrollHeight,"
-            " document.documentElement.scrollHeight)"
-        )
+        # One page the size of the capture, so charts are never split in half.
         pdf = page.pdf(
             width=f"{width}px",
-            height=f"{int(content_height) + 40}px",
+            height=f"{capture_height + 40}px",
             print_background=True,
             margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
         )
-        log(f"pdf: {len(pdf)} bytes (content height {content_height}px)")
+        log(f"pdf: {len(pdf)} bytes ({width}x{capture_height}px)")
 
         browser.close()
     return {"png": png, "pdf": pdf}
+
+
+def content_height(page) -> int:
+    """Height of the Dive's own scroll container, in CSS pixels."""
+    return int(
+        page.evaluate(
+            """(selector) => {
+              const el = document.querySelector(selector);
+              return Math.max(
+                el ? el.scrollHeight : 0,
+                document.body.scrollHeight,
+                document.documentElement.scrollHeight,
+              );
+            }""",
+            CONTENT_SELECTOR,
+        )
+        or 0
+    )
+
+
+def grow_viewport(page, width: int, height: int) -> int:
+    """Stretch the viewport to cover the Dive, and return the height used.
+
+    The sandbox scrolls inside `#root` and keeps html and body pinned to the
+    viewport, so `document.body.scrollHeight` only ever reports the viewport
+    height and `full_page=True` stops at the fold. Anything below it would be
+    dropped with no error and no clue in the log. Growing the viewport to the
+    scroll height is what actually puts the whole Dive on screen, for the PNG
+    and for the PDF page size alike.
+
+    VIEWPORT stays the floor, so a short Dive still gets the shape you asked
+    for rather than being cropped to its content.
+    """
+    used = height
+    for _ in range(GROW_PASSES):
+        target = min(max(content_height(page), height), MAX_VIEWPORT_HEIGHT)
+        if target <= used:
+            break
+        log(f"growing the viewport to {width}x{target} to fit the Dive")
+        page.set_viewport_size({"width": width, "height": target})
+        page.wait_for_timeout(REFLOW_MS)
+        used = target
+
+    remaining = content_height(page)
+    if remaining > used:
+        # Either the Dive is taller than MAX_VIEWPORT_HEIGHT or it is still
+        # reflowing. Either way the capture is short, so say so out loud.
+        log(
+            f"WARNING: the Dive is {remaining}px tall but the capture stops at "
+            f"{used}px, so the bottom is cut off."
+        )
+    return used
 
 
 def store(store_table: str, export: Export) -> None:
@@ -589,7 +651,7 @@ def slugify(value: str) -> str:
 def parse_viewport(value: str) -> tuple[int, int]:
     match = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", value)
     if not match:
-        raise ValueError(f"VIEWPORT must look like 1440x2600, got {value!r}")
+        raise ValueError(f"VIEWPORT must look like 1440x1000, got {value!r}")
     return int(match.group(1)), int(match.group(2))
 
 

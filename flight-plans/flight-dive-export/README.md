@@ -43,9 +43,10 @@ later runs on a warm image are much quicker.
    is nothing to refresh.
 2. `playwright install chromium` pulls the browser into the Flight container.
    The image ships without one, which is what makes the first run slow.
-3. Chromium opens the session URL at `VIEWPORT`, waits `WAIT_MS` for the Dive's
-   queries to finish, then captures a `full_page` PNG at `SCALE` and a PDF sized
-   to the rendered content height (one tall page, so no chart is cut in half).
+3. Chromium opens the session URL at `VIEWPORT` and waits `WAIT_MS` for the
+   Dive's queries to finish. It then stretches the viewport to the Dive's own
+   scroll height and captures a PNG at `SCALE` plus a PDF on a single page of
+   the same size, so no chart is cut in half. See [Sizing](#sizing).
 4. Each rendition named in `ATTACH` is appended to `STORE_TABLE`
    (`captured_at`, `label`, `source_url`, `kind`, `filename`, `mime`,
    `byte_count`, `content`). The database and schema are created on first run.
@@ -67,8 +68,7 @@ Dive queries and nothing else.
 - Which service account renders it, and does it have read access to everything
   the Dive queries?
 - Is the PDF, the PNG, or both wanted?
-- How tall does the viewport have to be to fit the whole Dive (see
-  [Sizing](#sizing))?
+- What layout width should the Dive be rendered at (see [Sizing](#sizing))?
 - Which database holds the exports, and who is allowed to read that table?
 - Where should the report land: a Slack channel, a Teams channel, a mailbox, the
   exports table, or several of those?
@@ -84,10 +84,10 @@ Dive queries and nothing else.
 - **The Flight's token must be able to mint embed sessions.** That means a
   read/write token on an account with the admin permission; a read-scaling or
   read-only token fails the API call.
-- **A Dive scrolls inside its own frame**, so `full_page` stops at the fold
-  instead of growing the page. `VIEWPORT` is what decides how much is captured,
-  which makes this a good fit for KPI and chart layouts and a bad fit for long
-  browsable tables. See [Sizing](#sizing).
+- **A Dive scrolls inside its own frame**, so `full_page` on its own stops at
+  the fold. The Flight measures the Dive's scroll container and grows the
+  viewport to match before capturing, up to 30000px. Past that the capture is
+  short, and the log says so on a `WARNING:` line. See [Sizing](#sizing).
 - **The exports table grows.** Each run appends a few MB of BLOBs. Prune it on a
   schedule (`DELETE FROM ... WHERE captured_at < now() - INTERVAL 90 DAY`) or set
   `STORE_TABLE = ""` once delivery is enough.
@@ -109,19 +109,25 @@ Dive queries and nothing else.
   attempted; each failure is logged on its own line and the run ends FAILED
   naming the targets that broke, so an expired token is visible without hiding
   the deliveries that worked.
-- **Mail servers cap attachment size.** Most sit around 25 MB, and a
-  `full_page` PNG at `SCALE=2` on a tall viewport can approach that. Send
-  `ATTACH=pdf` only, or drop `SCALE` to `1.5`, if mail bounces on size.
+- **Mail servers cap attachment size.** Most sit around 25 MB, and because the
+  capture grows to the full height of the Dive, a long one at `SCALE=2` can
+  approach that. Send `ATTACH=pdf` only, or drop `SCALE` to `1.5`, if mail
+  bounces on size. The log reports both byte counts on every run.
 - **`WAIT_MS` is the whole correctness story for freshness.** The capture happens
   on a timer, not on a "queries finished" signal, so a Dive that is still loading
   at the deadline is captured half-rendered. Raise it if charts come out empty.
 
 ## Sizing
 
-Set `VIEWPORT` tall enough to fit everything you want in the shot. On a Dive with
-a KPI row, a chart, and a table, `1440x1000` captured 8 table rows and
-`1440x2600` captured about 25. `SCALE` is the PNG pixel ratio: `2` is crisp,
-`1.5` halves the file size.
+`VIEWPORT` is the layout width and the *minimum* height, not a ceiling. The
+Flight lays the Dive out at that size, measures how tall it actually came out,
+and grows the viewport to fit before capturing, so the whole Dive lands in the
+shot without you having to guess its height.
+
+Width still matters, because it decides the layout the Dive responds into:
+`1440` is a good desktop default. Height only matters as a floor, for a short
+Dive you want rendered on a taller canvas. `SCALE` is the PNG pixel ratio: `2`
+is crisp, `1.5` halves the file size.
 
 ## What you'll adjust
 
@@ -134,7 +140,7 @@ to be edited in the code.
 | `SERVICE_ACCOUNT` | (unset) | Service account username the Dive is rendered as. Must be a service account. |
 | `REPORT_NAME` | `Dive export` | Human name for the report. Used in the filenames (slugified) and in the message text. |
 | `ATTACH` | `pdf,png` | Which renditions to produce: `pdf`, `png`, or both. |
-| `VIEWPORT` | `1440x2600` | Browser viewport as `WxH`. Decides how much of the Dive is captured. |
+| `VIEWPORT` | `1440x1000` | Layout width and *minimum* height as `WxH`. The capture grows past the height to fit the Dive. |
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
 | `WAIT_MS` | `15000` | Settle time in ms after load, so the Dive's queries can finish. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
