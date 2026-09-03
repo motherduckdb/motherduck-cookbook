@@ -1,5 +1,5 @@
 {
-  "GIT_REF": "main",
+  "GIT_REF": "sundoo/flight-sqlmesh-example",
   "GIT_REPO": "https://github.com/motherduckdb/motherduck-cookbook.git",
   "GIT_USERNAME": "x-access-token",
   "LOAD_SCRIPT": "load/stock_data_pipeline.py",
