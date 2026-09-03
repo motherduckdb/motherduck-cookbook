@@ -12,7 +12,6 @@
     high: DOUBLE
     low: DOUBLE
     close: DOUBLE
-    adj_close: DOUBLE
     volume: BIGINT
     symbol: TEXT
     _dlt_load_id: TEXT
@@ -112,13 +111,8 @@
     exchange: TEXT
     quote_type: TEXT
     symbol: TEXT
-    underlying_symbol: TEXT
     short_name: TEXT
     long_name: TEXT
-    first_trade_date_epoch_utc: BIGINT
-    time_zone_full_name: TEXT
-    time_zone_short_name: TEXT
-    uuid: TEXT
     message_board_id: TEXT
     gmt_off_set_milliseconds: BIGINT
     current_price: DOUBLE

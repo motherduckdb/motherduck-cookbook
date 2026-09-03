@@ -1,0 +1,9 @@
+# SQLMesh + the packages the default LOAD_SCRIPT (sqlmesh-demo's dlt loader)
+# needs, plus a DuckDB client for the `md:` connect and the snapshot INSERT.
+# Swap the dlt/yfinance lines for your own loader's dependencies, or drop them
+# when LOAD_SCRIPT is empty. git is NOT listed — the Flights runtime preinstalls
+# the binary.
+sqlmesh>=0.230.1,<1.0
+dlt[motherduck]>=1.30.0,<2.0
+yfinance>=0.2.61
+duckdb>=1.3.0

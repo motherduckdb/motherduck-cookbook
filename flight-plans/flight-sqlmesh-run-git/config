@@ -1,0 +1,14 @@
+{
+  "GIT_REF": "main",
+  "GIT_REPO": "https://github.com/motherduckdb/motherduck-cookbook.git",
+  "GIT_USERNAME": "x-access-token",
+  "LOAD_SCRIPT": "load/stock_data_pipeline.py",
+  "MODELS_DATABASE": "dlt_test_db",
+  "REPO_SUBDIR": "sqlmesh-demo",
+  "RUN_MODE": "plan_run",
+  "SNAPSHOT_DATABASE": "sqlmesh_flight_git",
+  "SNAPSHOT_TABLE": "sqlmesh_flight_runs",
+  "SQLMESH_ENVIRONMENT": "prod",
+  "SQLMESH_GATEWAY": "local",
+  "SQLMESH_PROJECT": "transform"
+}

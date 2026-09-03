@@ -19,7 +19,6 @@ SELECT
   high::DOUBLE AS high,
   low::DOUBLE AS low,
   close::DOUBLE AS close,
-  adj_close::DOUBLE AS adj_close,
   volume::BIGINT AS volume,
   symbol::TEXT AS symbol
 FROM stock_data.stock_history
