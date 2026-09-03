@@ -41,6 +41,12 @@ GROW_PASSES = 3
 MAX_VIEWPORT_HEIGHT = 30000
 # How long to let the layout reflow after the viewport changes size.
 REFLOW_MS = 1500
+# How often to look at the DOM while waiting for the Dive to finish loading.
+POLL_MS = 1000
+# How many identical polls in a row count as "stopped changing".
+STABLE_POLLS = 3
+# A last pause once it has settled, for the paint the final mutation triggers.
+PAINT_MS = 1500
 
 SLACK_API = "https://slack.com/api"
 GRAPH_API = "https://graph.microsoft.com/v1.0"
@@ -58,6 +64,15 @@ class Rendition:
     filename: str
     mime: str
     content: bytes
+
+
+@dataclass
+class Wait:
+    """How long to wait for the Dive to load, and what to watch while waiting."""
+
+    floor_ms: int
+    ceiling_ms: int
+    for_text: str
 
 
 @dataclass
@@ -88,7 +103,11 @@ def main() -> None:
     kinds = env_list("ATTACH", "pdf,png")
     targets = env_list("DELIVERY", "")
     dry_run = env("DRY_RUN", "false").lower() == "true"
-    wait_ms = env_int("WAIT_MS", 15000)
+    wait = Wait(
+        floor_ms=env_int("MIN_WAIT_MS", 15000),
+        ceiling_ms=env_int("WAIT_MS", 120000),
+        for_text=env("WAIT_FOR_TEXT"),
+    )
     scale = float(env("SCALE", "2"))
     width, height = parse_viewport(env("VIEWPORT", "1440x1000"))
 
@@ -110,7 +129,7 @@ def main() -> None:
 
     install_chromium()
     captured_at = datetime.now(timezone.utc)
-    shots = capture(url, wait_ms, (width, height), scale)
+    shots = capture(url, wait, (width, height), scale)
 
     export = Export(
         label=label,
@@ -201,7 +220,7 @@ def install_chromium() -> None:
 
 
 def capture(
-    url: str, wait_ms: int, viewport: tuple[int, int], scale: float
+    url: str, wait: "Wait", viewport: tuple[int, int], scale: float
 ) -> dict[str, bytes]:
     """Open the URL and return {"png": ..., "pdf": ...}."""
     from playwright.sync_api import sync_playwright
@@ -227,12 +246,9 @@ def capture(
         page.on("pageerror", lambda err: log(f"[pageerror] {str(err)[:300]}"))
 
         log("navigating...")
-        # Do not wait for networkidle: the wasm client holds a connection open,
-        # so it never fires. A fixed settle window is what works.
         page.goto(url, wait_until="domcontentloaded", timeout=90_000)
-        log(f"loaded, settling {wait_ms}ms so the Dive's queries can finish")
-        page.wait_for_timeout(wait_ms)
         log("title:", page.title())
+        settle(page, wait)
 
         capture_height = grow_viewport(page, width, height)
 
@@ -250,6 +266,79 @@ def capture(
 
         browser.close()
     return {"png": png, "pdf": pdf}
+
+
+def settle(page, wait: "Wait") -> None:
+    """Wait for the Dive to finish loading before anything is captured.
+
+    There is no readiness signal to key on. `networkidle` never fires, because
+    the client keeps connections open: in testing the in-flight request count
+    never once reached zero. The hosted sandbox exposes no "connected"
+    attribute either. The `data-dive-connection` marker some tooling waits on
+    belongs to a local dev harness, not to embed-motherduck.com.
+
+    DOM stability alone does not work either, which is the trap here. A Dive
+    paints a skeleton whose shape then holds *perfectly* still for seconds
+    before the data lands: measured on one Dive, 65 elements and 321 characters
+    unchanged from 1.3s all the way to 7.3s, and only then 539 and 3118 at 8.8s.
+    A plain "unchanged for three polls" probe captures that skeleton and calls
+    it a success.
+
+    So stability is only trusted after `floor_ms` has passed, and it buys the
+    run an early finish rather than the whole budget. `WAIT_FOR_TEXT` is the way
+    out of the guesswork: give it a string only the loaded Dive contains and the
+    wait keys on that instead, which is the one fully reliable signal available.
+    """
+    started = time.monotonic()
+    floor = started + wait.floor_ms / 1000
+    deadline = started + wait.ceiling_ms / 1000
+    previous, repeats = None, 0
+
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(POLL_MS)
+        elapsed = time.monotonic() - started
+
+        if wait.for_text:
+            if page.evaluate(
+                "(needle) => (document.body.innerText || '').includes(needle)",
+                wait.for_text,
+            ):
+                log(f"WAIT_FOR_TEXT found after {elapsed:.0f}s")
+                page.wait_for_timeout(PAINT_MS)
+                return
+            continue
+
+        shape = page.evaluate(
+            """(selector) => {
+              const el = document.querySelector(selector);
+              return [
+                el ? el.scrollHeight : 0,
+                document.body.getElementsByTagName('*').length,
+                (document.body.innerText || '').length,
+              ];
+            }""",
+            CONTENT_SELECTOR,
+        )
+        repeats = repeats + 1 if shape == previous else 0
+        previous = shape
+        if repeats >= STABLE_POLLS and time.monotonic() >= floor:
+            log(
+                f"Dive settled after {elapsed:.0f}s: "
+                f"{shape[1]} elements, {shape[2]} chars, {shape[0]}px"
+            )
+            # One more pause, for the paint the last mutation kicked off.
+            page.wait_for_timeout(PAINT_MS)
+            return
+
+    if wait.for_text:
+        raise RuntimeError(
+            f"WAIT_FOR_TEXT {wait.for_text!r} never appeared in {wait.ceiling_ms}ms. "
+            "The Dive did not finish loading, so nothing was captured."
+        )
+    log(
+        f"WARNING: the Dive was still changing after {wait.ceiling_ms}ms; "
+        "capturing anyway. Raise WAIT_MS, or set WAIT_FOR_TEXT."
+    )
 
 
 def content_height(page) -> int:

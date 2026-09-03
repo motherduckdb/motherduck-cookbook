@@ -43,14 +43,17 @@ later runs on a warm image are much quicker.
    is nothing to refresh.
 2. `playwright install chromium` pulls the browser into the Flight container.
    The image ships without one, which is what makes the first run slow.
-3. Chromium opens the session URL at `VIEWPORT` and waits `WAIT_MS` for the
-   Dive's queries to finish. It then stretches the viewport to the Dive's own
-   scroll height and captures a PNG at `SCALE` plus a PDF on a single page of
-   the same size, so no chart is cut in half. See [Sizing](#sizing).
-4. Each rendition named in `ATTACH` is appended to `STORE_TABLE`
+3. Chromium opens the session URL at `VIEWPORT` and waits for the Dive to
+   finish loading: at least `MIN_WAIT_MS`, then until the DOM stops changing,
+   giving up at `WAIT_MS`. Set `WAIT_FOR_TEXT` to key on real content instead.
+   See [Waiting for the Dive](#waiting-for-the-dive).
+4. It stretches the viewport to the Dive's own scroll height, then captures a
+   PNG at `SCALE` and a PDF on a single page of the same size, so no chart is
+   cut in half. See [Sizing](#sizing).
+5. Each rendition named in `ATTACH` is appended to `STORE_TABLE`
    (`captured_at`, `label`, `source_url`, `kind`, `filename`, `mime`,
    `byte_count`, `content`). The database and schema are created on first run.
-5. Every target named in `DELIVERY` gets the same renditions. Delivery runs
+6. Every target named in `DELIVERY` gets the same renditions. Delivery runs
    after the store, so a broken webhook still leaves the file somewhere you can
    reach it. `DELIVERY=""` stores and stops.
 
@@ -113,9 +116,46 @@ Dive queries and nothing else.
   capture grows to the full height of the Dive, a long one at `SCALE=2` can
   approach that. Send `ATTACH=pdf` only, or drop `SCALE` to `1.5`, if mail
   bounces on size. The log reports both byte counts on every run.
-- **`WAIT_MS` is the whole correctness story for freshness.** The capture happens
-  on a timer, not on a "queries finished" signal, so a Dive that is still loading
-  at the deadline is captured half-rendered. Raise it if charts come out empty.
+- **Waiting for the Dive is a heuristic unless you make it one.** There is no
+  "queries finished" signal to key on, so the Flight waits out `MIN_WAIT_MS` and
+  then watches for the DOM to go quiet. That is a guess, and a Dive slower than
+  its skeleton is deceptive (see [Waiting for the
+  Dive](#waiting-for-the-dive)). `WAIT_FOR_TEXT` removes the guess.
+
+## Waiting for the Dive
+
+Nothing in the embed tells you the Dive has finished loading. `networkidle`
+never fires, because the client holds connections open (measured: the in-flight
+request count never reaches zero). The hosted sandbox exposes no "connected"
+attribute either.
+
+Watching the DOM go quiet is the obvious fallback, and on its own it is a trap.
+A Dive paints a skeleton whose shape then sits *perfectly* still while the
+queries run. On the Dive used to build this recipe:
+
+| Time | Elements | Characters | Content height |
+|---|---|---|---|
+| 1.3s to 7.3s | 65 | 321 | 1000px (nothing yet) |
+| 8.8s | 539 | 3118 | 2586px (loaded) |
+
+Six seconds of a motionless skeleton. A plain "unchanged for three polls" check
+captures that and reports success, which is why `MIN_WAIT_MS` (15s) exists: DOM
+quiet is only believed once it has passed. Raise it for a Dive whose first
+query is slow.
+
+For a report you actually depend on, set **`WAIT_FOR_TEXT`** instead. Give it a
+string that appears only once the Dive has real data (a table footer, a total, a
+column header that renders after the query), and the wait keys on that. It is
+the only fully reliable signal here, and it fails the run rather than delivering
+a half-rendered export:
+
+```
+WAIT_FOR_TEXT = "SHOWING 32 OF 32 TICKETS"
+```
+
+This is the same contract MotherDuck's own scheduled Dive-screenshot workflows
+use. The trade-off is that the string is per-Dive: if the Dive is redesigned,
+update it, or the run starts failing.
 
 ## Sizing
 
@@ -142,7 +182,9 @@ to be edited in the code.
 | `ATTACH` | `pdf,png` | Which renditions to produce: `pdf`, `png`, or both. |
 | `VIEWPORT` | `1440x1000` | Layout width and *minimum* height as `WxH`. The capture grows past the height to fit the Dive. |
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
-| `WAIT_MS` | `15000` | Settle time in ms after load, so the Dive's queries can finish. |
+| `MIN_WAIT_MS` | `15000` | Never capture before this many ms have passed, however quiet the page looks. |
+| `WAIT_MS` | `120000` | Ceiling in ms. Past it the Flight captures anyway, or fails if `WAIT_FOR_TEXT` was set. |
+| `WAIT_FOR_TEXT` | (unset) | A string only the *loaded* Dive contains. Set it and the wait keys on that instead of on DOM quiet. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
 | `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`, `email`. Empty stores the export and stops. |
 | `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. |
