@@ -1,0 +1,21 @@
+household_id,age_bracket,marital_status,income_bracket,homeownership,composition,size_category,child_category
+1,25-34,A,35-49K,Renter,2 Adults Kids,3,1
+2,35-44,A,50-74K,Homeowner,2 Adults Kids,4,2
+3,45-54,A,75-99K,Homeowner,2 Adults No Kids,2,0
+4,55-64,B,50-74K,Homeowner,Single Female,1,0
+5,35-44,A,100-124K,Homeowner,2 Adults No Kids,2,0
+6,25-34,B,25-34K,Renter,Single Male,1,0
+7,45-54,A,35-49K,Homeowner,2 Adults Kids,3,1
+8,65+,B,35-49K,Homeowner,Single Female,1,0
+9,35-44,A,75-99K,Homeowner,2 Adults Kids,4,2
+10,45-54,A,100-124K,Homeowner,2 Adults No Kids,2,0
+11,25-34,B,25-34K,Renter,Single Male,1,0
+12,55-64,A,50-74K,Homeowner,2 Adults No Kids,2,0
+13,35-44,A,50-74K,Homeowner,2 Adults Kids,3,1
+14,45-54,B,35-49K,Renter,1 Adult Kids,2,1
+15,65+,A,75-99K,Homeowner,2 Adults No Kids,2,0
+16,25-34,A,35-49K,Renter,2 Adults Kids,3,1
+17,55-64,B,50-74K,Homeowner,Single Male,1,0
+18,35-44,A,100-124K,Homeowner,2 Adults No Kids,2,0
+19,45-54,A,75-99K,Homeowner,2 Adults Kids,4,2
+20,25-34,B,25-34K,Renter,Single Female,1,0

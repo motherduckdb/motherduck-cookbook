@@ -1,0 +1,103 @@
+version: 2
+
+seeds:
+  - name: raw_transactions
+    description: "Sample retail line-item transactions. Discounts follow the common POS convention of negative amounts."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - not_null
+          - unique
+      - name: household_id
+        data_tests:
+          - not_null
+      - name: product_id
+        data_tests:
+          - not_null
+
+  - name: raw_products
+    description: "Sample retail product catalog with private-label and national-brand products."
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - unique
+      - name: brand
+        data_tests:
+          - accepted_values:
+              values: ['National', 'Private']
+
+  - name: raw_households
+    description: "Sample household demographic attributes for post-segmentation profiling."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: raw_campaigns
+    description: "Sample marketing campaign records."
+    columns:
+      - name: campaign_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: raw_coupons
+    description: "Campaign-product coupon mappings."
+    columns:
+      - name: coupon_id
+        data_tests:
+          - not_null
+          - unique
+      - name: campaign_id
+        data_tests:
+          - not_null
+      - name: product_id
+        data_tests:
+          - not_null
+
+  - name: raw_coupon_redemptions
+    description: "Observed household coupon redemption events. The transformation does not directly tie these rows to transaction lines."
+    columns:
+      - name: redemption_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: raw_campaign_households
+    description: "Household targeting membership for each campaign."
+    columns:
+      - name: campaign_id
+        data_tests:
+          - not_null
+      - name: household_id
+        data_tests:
+          - not_null
+
+  - name: segment_centroids
+    description: "Reviewable weighted segment prototypes used by the SQL centroid-distance model."
+    columns:
+      - name: segment_id
+        data_tests:
+          - not_null
+      - name: segment_name
+        data_tests:
+          - not_null
+      - name: feature_name
+        data_tests:
+          - not_null
+      - name: feature_weight
+        data_tests:
+          - not_null
+
+  - name: segment_playbook
+    description: "Business-facing labels, descriptions, recommended actions, and offers for each segment."
+    columns:
+      - name: segment_id
+        data_tests:
+          - not_null
+          - unique
+      - name: segment_name
+        data_tests:
+          - not_null

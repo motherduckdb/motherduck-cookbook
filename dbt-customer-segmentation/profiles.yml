@@ -1,0 +1,13 @@
+dbt_customer_segmentation:
+  outputs:
+    local:
+      type: duckdb
+      path: local.db
+      schema: main
+      threads: 4
+    prod:
+      type: duckdb
+      path: "md:{{ env_var('MOTHERDUCK_DATABASE', 'customer_segmentation') }}"
+      schema: main
+      threads: 4
+  target: local
