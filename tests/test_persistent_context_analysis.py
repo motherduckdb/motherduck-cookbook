@@ -506,6 +506,45 @@ def test_parse_rss_rejects_non_http_links_and_limits_text(flight):
     assert len(dict(signals[0].attributes)["description"]) == 1_000
 
 
+def test_parse_rss_deduplicates_guid_and_canonical_link_fallback(flight):
+    xml = b"""<rss><channel>
+      <item><title>First GUID</title><link>https://www.bbc.co.uk/news/first</link>
+      <guid>shared-guid</guid><pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item>
+      <item><title>Second GUID</title><link>https://www.bbc.co.uk/news/second</link>
+      <guid>shared-guid</guid><pubDate>Thu, 10 Sep 2026 11:00:00 GMT</pubDate></item>
+      <item><title>First fallback</title><link>https://www.bbc.co.uk/news/fallback</link>
+      <pubDate>Thu, 10 Sep 2026 12:00:00 GMT</pubDate></item>
+      <item><title>Second fallback</title><link>HTTPS://WWW.BBC.CO.UK/news/fallback#fragment</link>
+      <pubDate>Thu, 10 Sep 2026 13:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+
+    signals = flight.parse_rss(
+        "https://feeds.bbci.co.uk/news/england/london/rss.xml",
+        xml,
+        flight.datetime(2026, 9, 10, tzinfo=flight.timezone.utc),
+    )
+
+    assert [signal.title for signal in signals] == ["First GUID", "First fallback"]
+    assert len({signal.signal_id for signal in signals}) == 2
+
+
+def test_parse_rss_rejects_a_malformed_link_without_losing_valid_items(flight):
+    xml = b"""<rss><channel>
+      <item><title>Bad port</title><link>https://www.bbc.co.uk:invalid/news</link>
+      <guid>bad</guid><pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item>
+      <item><title>Valid story</title><link>https://www.bbc.co.uk/news/valid</link>
+      <guid>valid</guid><pubDate>Thu, 10 Sep 2026 11:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+
+    signals = flight.parse_rss(
+        "https://feeds.bbci.co.uk/news/england/london/rss.xml",
+        xml,
+        flight.datetime(2026, 9, 10, tzinfo=flight.timezone.utc),
+    )
+
+    assert [signal.provider_id for signal in signals] == ["valid"]
+
+
 def test_fetch_rss_signals_isolates_feed_failures(flight):
     payload = b"""<rss><channel><item><title>Story</title>
       <description>Desc</description>
@@ -568,6 +607,25 @@ def test_parse_weather_normalizes_one_london_signal_per_day(flight):
     }
 
 
+def test_parse_weather_deduplicates_repeated_dates(flight):
+    payload = {
+        "daily": {
+            "time": ["2026-09-10", "2026-09-10"],
+            "temperature_2m_max": [18.5, 20],
+            "temperature_2m_min": [11.2, 12],
+            "precipitation_sum": [0, 1.4],
+            "snowfall_sum": [0, 0],
+            "wind_speed_10m_max": [17.8, 14.3],
+            "weather_code": [2, 61],
+        }
+    }
+
+    signals = flight.parse_weather(payload)
+
+    assert [signal.provider_id for signal in signals] == ["london-weather-2026-09-10"]
+    assert dict(signals[0].attributes)["temperature_2m_max"] == "18.5"
+
+
 def test_fetch_weather_signals_uses_london_daily_request_and_caveats(flight):
     payload = json.dumps(
         {
@@ -592,7 +650,7 @@ def test_fetch_weather_signals_uses_london_daily_request_and_caveats(flight):
         opener, flight.date(2026, 9, 10), flight.date(2026, 9, 11)
     )
 
-    assert caveats == []
+    assert caveats == ["London weather is unavailable for 2026-09-11"]
     assert len(signals) == 1
     assert signals[0].source_url == calls[0][0].full_url
     assert calls[0][1] == 20
@@ -639,11 +697,23 @@ def test_fetch_weather_signals_caveats_an_unavailable_day(flight):
     signals, caveats = flight.fetch_weather_signals(
         lambda request, *, timeout: _FakeResponse(payload),
         flight.date(2026, 9, 10),
-        flight.date(2026, 9, 11),
+        flight.date(2026, 9, 10),
     )
 
     assert signals == []
     assert caveats == ["London weather is unavailable for 2026-09-10"]
+
+
+def test_fetch_weather_signals_caveats_a_non_mapping_json_root(flight):
+    signals, caveats = flight.fetch_weather_signals(
+        lambda request, *, timeout: _FakeResponse(b"[]"),
+        flight.date(2026, 9, 10),
+        flight.date(2026, 9, 10),
+    )
+
+    assert signals == []
+    assert len(caveats) == 1
+    assert "weather" in caveats[0].lower()
 
 
 class _FakeResponse:

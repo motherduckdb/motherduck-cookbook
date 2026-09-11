@@ -209,17 +209,20 @@ def _payload_hash(payload: bytes | Mapping[str, object]) -> str:
 
 
 def _canonical_http_url(value: str) -> str | None:
-    parsed = urllib.parse.urlsplit(value.strip())
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed = urllib.parse.urlsplit(value.strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.username or parsed.password:
+            return None
+        host = parsed.hostname.lower()
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return urllib.parse.urlunsplit(
+            (parsed.scheme.lower(), host, parsed.path or "/", parsed.query, "")
+        )
+    except ValueError:
         return None
-    if parsed.username or parsed.password:
-        return None
-    host = parsed.hostname.lower()
-    if parsed.port is not None:
-        host = f"{host}:{parsed.port}"
-    return urllib.parse.urlunsplit(
-        (parsed.scheme.lower(), host, parsed.path or "/", parsed.query, "")
-    )
 
 
 def _rss_child_text(item: ET.Element, name: str) -> str:
@@ -242,6 +245,7 @@ def parse_rss(
     feed_id = _rss_feed_id(feed_url)
     root = ET.fromstring(payload)
     signals: list[ExternalSignal] = []
+    seen_identities: set[tuple[str, str]] = set()
     payload_hash = _payload_hash(payload)
     for item in root.iter():
         if item.tag.rsplit("}", 1)[-1] != "item":
@@ -250,6 +254,10 @@ def parse_rss(
         if link is None:
             continue
         guid = _rss_child_text(item, "guid") or link
+        identity = (feed_id, guid)
+        if identity in seen_identities:
+            continue
+        seen_identities.add(identity)
         published_at = parsedate_to_datetime(_rss_child_text(item, "pubDate"))
         if published_at.tzinfo is None:
             published_at = published_at.replace(tzinfo=timezone.utc)
@@ -265,10 +273,10 @@ def parse_rss(
                 )
             )
         )
-        identity = f"{feed_id}|{guid}".encode()
+        signal_identity = f"{feed_id}|{guid}".encode()
         signals.append(
             ExternalSignal(
-                signal_id=f"rss-{hashlib.sha256(identity).hexdigest()[:16]}",
+                signal_id=f"rss-{hashlib.sha256(signal_identity).hexdigest()[:16]}",
                 provider=feed_id,
                 provider_id=guid,
                 starts_at=published_at,
@@ -319,8 +327,12 @@ def parse_weather(payload: Mapping[str, object]) -> list[ExternalSignal]:
     payload_hash = _payload_hash(payload)
     retrieved_at = datetime.now(timezone.utc)
     signals: list[ExternalSignal] = []
+    seen_days: set[date] = set()
     for index, raw_day in enumerate(dates):
         day = date.fromisoformat(str(raw_day))
+        if day in seen_days:
+            continue
+        seen_days.add(day)
         if any(values_by_name[name][index] is None for name in WEATHER_DAILY_VARIABLES):
             continue
         starts_at = datetime.combine(day, time(), LONDON_TIMEZONE).astimezone(
@@ -375,6 +387,8 @@ def fetch_weather_signals(
     try:
         with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read())
+        if not isinstance(payload, Mapping):
+            raise TypeError("Open-Meteo response root is not an object")
         signals = parse_weather(payload)
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         return [], [f"London weather is unavailable: {error}"]
@@ -384,13 +398,13 @@ def fetch_weather_signals(
         for signal in signals
     ]
     available_ids = {signal.provider_id for signal in available_signals}
-    unavailable_days = {
-        str(raw_day)
-        for raw_day in payload["daily"]["time"]
-        if f"london-weather-{raw_day}" not in available_ids
-    }
+    unavailable_days = [
+        (start + timedelta(days=offset)).isoformat()
+        for offset in range((end - start).days + 1)
+        if f"london-weather-{start + timedelta(days=offset)}" not in available_ids
+    ]
     return available_signals, [
-        f"London weather is unavailable for {day}" for day in sorted(unavailable_days)
+        f"London weather is unavailable for {day}" for day in unavailable_days
     ]
 
 
