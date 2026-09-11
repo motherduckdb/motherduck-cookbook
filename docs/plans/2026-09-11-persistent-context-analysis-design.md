@@ -59,8 +59,8 @@ day after the fixture's latest order date. The first run computes the completed
 daily period and any completed weekly or monthly periods that need work. Each
 period produces an analysis Guide. Running the same date again skips the LLM
 because the input fingerprints match. Changing a demo revision or adding an
-annotation makes only the affected period and its parent periods eligible for
-regeneration.
+annotation makes only reports whose current metrics, comparisons, rollups, or
+context depend on that input eligible for regeneration.
 
 For production use, the reader disables demo mode and replaces the source queries
 and metric definitions with their e-commerce tables. The update and Guide logic
@@ -147,9 +147,11 @@ ingestion idempotent.
 
 ### `period_dependencies`
 
-One row for each parent and child relationship. A week depends on its days. A
-month depends on overlapping days and weeks used as narrative context. The Flight
-uses these rows to invalidate parents after a completed child changes.
+One row for each report period and input period relationship, with a dependency
+kind of `rollup`, `comparison`, or `context`. A week depends on its days. A
+monthly report depends on its source days and any weekly Guides used as narrative
+context. A report also depends on each period used for a comparison baseline.
+The Flight uses these rows to invalidate only reports affected by changed input.
 
 ## Demo commerce data
 
@@ -314,8 +316,9 @@ The Flight runs these steps in order:
 14. Move expired Guides into an archive topic when archive mode is enabled.
 
 A daily run rechecks a configurable number of completed days. Seven days is the
-default. This catches late orders and refunds. A changed day invalidates its week
-and month. Weekly and monthly metrics always come from the commerce tables. Child
+default. This catches late orders and refunds. A changed day invalidates its
+covering week and month plus any report whose comparison range includes that
+day. Weekly and monthly metrics always come from the commerce tables. Child
 Guides supply prior interpretations and relevant narrative, not their numeric
 truth.
 
@@ -433,7 +436,8 @@ check.
 
 - The first demo run creates the expected daily, weekly, and monthly Guides.
 - An unchanged rerun makes no model call and creates no Guide version.
-- A changed day regenerates that day and only its affected parents.
+- A changed day regenerates only reports whose current metrics, comparisons,
+  rollups, or Guide context depend on that day.
 - Reports compare the e-commerce and physical London storefronts without mixing
   their order grain.
 - Weather, relevant RSS entries, and overlapping annotations appear with
