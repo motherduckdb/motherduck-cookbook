@@ -111,6 +111,45 @@ def test_load_demo_sales_adds_late_revision_to_both_completed_periods(
     assert late_min_date == late_max_date == flight.date(2026, 8, 31)
 
 
+def test_load_demo_sales_hash_is_independent_of_source_row_order(
+    flight, demo_fixture_path, tmp_path
+):
+    ascending = tmp_path / "ascending.parquet"
+    descending = tmp_path / "descending.parquet"
+    con = flight.duckdb.connect()
+    con.execute(
+        "CREATE TABLE hash_fixture AS SELECT * FROM read_parquet(?) LIMIT 0",
+        [str(demo_fixture_path)],
+    )
+    con.execute(
+        """
+        INSERT INTO hash_fixture VALUES
+            ('tied-order', TIMESTAMP '2026-08-31 12:00:00', 'tied-customer',
+             'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+             'organic', 'paid', false, 'duck-shirt', 'black', 'apparel', 1,
+             29.00, 0.00, 29.00, 29.00, NULL, 0.00),
+            ('tied-order', TIMESTAMP '2026-08-31 12:00:00', 'tied-customer',
+             'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+             'organic', 'paid', false, 'duck-shirt', 'yellow', 'apparel', 2,
+             29.00, 0.00, 58.00, 58.00, NULL, 0.00)
+        """
+    )
+    con.execute(
+        "COPY (SELECT * FROM hash_fixture ORDER BY variant_id) TO ? (FORMAT PARQUET)",
+        [str(ascending)],
+    )
+    con.execute(
+        "COPY (SELECT * FROM hash_fixture ORDER BY variant_id DESC) TO ? "
+        "(FORMAT PARQUET)",
+        [str(descending)],
+    )
+
+    ascending_meta = flight.load_demo_sales(con, str(ascending), demo_revision=0)
+    descending_meta = flight.load_demo_sales(con, str(descending), demo_revision=0)
+
+    assert ascending_meta == descending_meta
+
+
 def test_load_demo_sales_rejects_unknown_revision(flight, demo_fixture_path):
     con = flight.duckdb.connect()
     with pytest.raises(ValueError, match="DEMO_REVISION must be 0 or 1"):

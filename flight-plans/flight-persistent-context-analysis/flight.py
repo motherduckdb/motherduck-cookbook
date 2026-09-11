@@ -385,8 +385,13 @@ def load_demo_sales(
         "SELECT count(*), min(order_at)::DATE, max(order_at)::DATE FROM demo_sales"
     ).fetchone()
     source_hash = con.execute(
-        "SELECT sha256(string_agg(row_to_json(d)::VARCHAR, '' ORDER BY order_id, product_id)) "
-        "FROM demo_sales d"
+        """
+        SELECT sha256(string_agg(row_json, '\n' ORDER BY row_json))
+        FROM (
+            SELECT row_to_json(d)::VARCHAR AS row_json
+            FROM demo_sales d
+        )
+        """
     ).fetchone()[0]
     return FixtureMetadata(source_hash, row_count, min_date, max_date)
 
