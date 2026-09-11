@@ -211,22 +211,186 @@ def test_comparison_periods_use_fixed_half_open_ranges(flight):
     ]
 
 
-def test_order_count_deduplicates_repeated_order_fields(flight, tmp_path):
-    fixture = tmp_path / "fixture.parquet"
-    flight.build_demo_fixture(fixture)
+def create_controlled_demo_sales(flight):
     con = flight.duckdb.connect()
-    flight.load_demo_sales(con, str(fixture), 0)
+    con.execute(
+        """
+        CREATE TABLE demo_sales (
+            order_id VARCHAR,
+            order_at TIMESTAMP,
+            customer_id VARCHAR,
+            store_id VARCHAR,
+            store_name VARCHAR,
+            store_type VARCHAR,
+            market VARCHAR,
+            acquisition_channel VARCHAR,
+            financial_status VARCHAR,
+            cancelled BOOLEAN,
+            product_id VARCHAR,
+            variant_id VARCHAR,
+            product_category VARCHAR,
+            quantity INTEGER,
+            unit_price_gbp DECIMAL(12, 2),
+            discount_gbp DECIMAL(12, 2),
+            gross_revenue_gbp DECIMAL(12, 2),
+            net_revenue_gbp DECIMAL(12, 2),
+            refund_at TIMESTAMP,
+            refunded_amount_gbp DECIMAL(12, 2)
+        )
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO demo_sales VALUES
+            ('prior-order', TIMESTAMP '2026-09-09 12:00:00', 'customer-1',
+             'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+             'organic', 'refunded', false, 'duck-mug', 'standard', 'homeware',
+             1, 10.00, 0.00, 10.00, 0.00,
+             TIMESTAMP '2026-09-09 15:00:00', 10.00),
+            ('two-line-order', TIMESTAMP '2026-09-10 12:00:00', 'customer-1',
+             'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+             'organic', 'paid', false, 'duck-shirt', 'yellow', 'apparel',
+             1, 10.00, 0.00, 10.00, 10.00, NULL, 0.00),
+            ('two-line-order', TIMESTAMP '2026-09-10 12:00:00', 'customer-1',
+             'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+             'organic', 'paid', false, 'duck-mug', 'standard', 'homeware',
+             2, 10.00, 0.00, 20.00, 20.00, NULL, 0.00)
+        """
+    )
+    return con
+
+
+def test_order_count_deduplicates_repeated_order_fields(flight):
+    con = create_controlled_demo_sales(flight)
     period = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
     evidence = flight.compute_metric_evidence(con, period)
-    total_orders = next(
-        item for item in evidence if item.metric == "orders" and item.dimensions == ()
+    expected_revenue_by_dimensions = {
+        (): flight.Decimal("30.0000"),
+        (("store_id", "duck_shop_online"),): flight.Decimal("30.0000"),
+        (("store_type", "ecommerce"),): flight.Decimal("30.0000"),
+        (("acquisition_channel", "organic"),): flight.Decimal("30.0000"),
+        (("product_category", "apparel"),): flight.Decimal("10.0000"),
+        (("product_category", "homeware"),): flight.Decimal("20.0000"),
+    }
+    for dimensions, expected_revenue in expected_revenue_by_dimensions.items():
+        orders = next(
+            item
+            for item in evidence
+            if item.metric == "orders"
+            and item.dimensions == dimensions
+            and item.comparison_label == "prior_day"
+        )
+        revenue = next(
+            item
+            for item in evidence
+            if item.metric == "net_revenue"
+            and item.dimensions == dimensions
+            and item.comparison_label == "prior_day"
+        )
+        average_order_value = next(
+            item
+            for item in evidence
+            if item.metric == "average_order_value"
+            and item.dimensions == dimensions
+            and item.comparison_label == "prior_day"
+        )
+        assert orders.current_value == flight.Decimal("1.0000")
+        assert orders.sample_size == 1
+        assert revenue.current_value == expected_revenue
+        assert average_order_value.current_value == expected_revenue
+
+
+@pytest.mark.parametrize(
+    ("period", "expected_labels"),
+    [
+        (
+            ("day", (2026, 9, 10), (2026, 9, 11)),
+            {"prior_day", "same_weekday", "trailing_28_days"},
+        ),
+        (
+            ("week", (2026, 9, 7), (2026, 9, 14)),
+            {"prior_week", "trailing_4_weeks"},
+        ),
+        (
+            ("month", (2026, 9, 1), (2026, 10, 1)),
+            {"prior_month", "trailing_90_days"},
+        ),
+    ],
+)
+def test_metric_evidence_emits_every_comparison_label(flight, period, expected_labels):
+    con = create_controlled_demo_sales(flight)
+    grain, start, end = period
+    evidence = flight.compute_metric_evidence(
+        con,
+        flight.PeriodKey(grain, flight.date(*start), flight.date(*end)),
     )
-    line_count, expected = con.execute(
-        "SELECT count(*), count(DISTINCT order_id) FROM demo_sales "
-        "WHERE order_at::DATE = DATE '2026-09-10'"
-    ).fetchone()
-    assert line_count > expected
-    assert int(total_orders.current_value) == expected
+    observed_comparisons = {
+        item.comparison_label: item.comparison_period
+        for item in evidence
+        if item.metric == "orders" and item.dimensions == ()
+    }
+    assert set(observed_comparisons) == expected_labels
+    assert list(observed_comparisons.values()) == flight.comparison_periods(
+        flight.PeriodKey(grain, flight.date(*start), flight.date(*end))
+    )
+
+
+def test_metric_evidence_uses_sql_deltas_and_handles_zero_comparison(flight):
+    con = create_controlled_demo_sales(flight)
+    con.execute(
+        """
+        DELETE FROM demo_sales;
+        INSERT INTO demo_sales
+        SELECT
+            'prior-' || value,
+            TIMESTAMP '2026-09-09 12:00:00',
+            'prior-customer-' || value,
+            'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+            'organic', 'paid', false, 'duck-mug', 'standard', 'homeware', 1,
+            net_revenue, 0.00, net_revenue, net_revenue, NULL, 0.00
+        FROM (VALUES (1, 0.66), (2, 0.67), (3, 0.67))
+            AS rows(value, net_revenue);
+        INSERT INTO demo_sales
+        SELECT
+            'current-' || value,
+            TIMESTAMP '2026-09-10 12:00:00',
+            'current-customer-' || value,
+            'duck_shop_online', 'Duck Shop Online', 'ecommerce', 'London',
+            'organic', 'paid', false, 'duck-mug', 'standard', 'homeware', 1,
+            net_revenue, 0.00, net_revenue, net_revenue, NULL, 0.00
+        FROM (VALUES (1, 0.33), (2, 0.33), (3, 0.34))
+            AS rows(value, net_revenue)
+        """
+    )
+    period = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    evidence = flight.compute_metric_evidence(con, period)
+    average_order_value = next(
+        item
+        for item in evidence
+        if item.metric == "average_order_value"
+        and item.dimensions == ()
+        and item.comparison_label == "prior_day"
+    )
+    assert average_order_value.current_value == flight.Decimal("0.3333")
+    assert average_order_value.comparison_value == flight.Decimal("0.6667")
+    assert average_order_value.absolute_change == flight.Decimal("-0.3333")
+    assert average_order_value.percentage_change == flight.Decimal("-50.0000")
+
+    con.execute(
+        "UPDATE demo_sales SET net_revenue_gbp = 0, gross_revenue_gbp = 0 "
+        "WHERE order_at::DATE = DATE '2026-09-09'"
+    )
+    evidence = flight.compute_metric_evidence(con, period)
+    net_revenue = next(
+        item
+        for item in evidence
+        if item.metric == "net_revenue"
+        and item.dimensions == ()
+        and item.comparison_label == "prior_day"
+    )
+    assert net_revenue.comparison_value == flight.Decimal("0.0000")
+    assert net_revenue.absolute_change == flight.Decimal("1.0000")
+    assert net_revenue.percentage_change is None
 
 
 def test_order_count_keeps_store_type_evidence_separate(flight, demo_fixture_path):

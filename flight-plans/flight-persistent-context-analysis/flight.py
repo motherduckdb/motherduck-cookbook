@@ -69,6 +69,15 @@ PRODUCTS = (
     ("duck-cap", "yellow", "apparel", 2_400),
     ("duck-sticker-pack", "standard", "accessories", 600),
 )
+ComparisonLabel = Literal[
+    "prior_day",
+    "same_weekday",
+    "trailing_28_days",
+    "prior_week",
+    "trailing_4_weeks",
+    "prior_month",
+    "trailing_90_days",
+]
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,8 @@ class MetricEvidence:
     metric: str
     dimensions: tuple[tuple[str, str], ...]
     current_value: Decimal
+    comparison_label: ComparisonLabel
+    comparison_period: PeriodKey
     comparison_value: Decimal | None
     absolute_change: Decimal | None
     percentage_change: Decimal | None
@@ -458,70 +469,100 @@ def periods_to_process(
     )
 
 
-def comparison_periods(period: PeriodKey) -> list[PeriodKey]:
+def _comparison_periods_with_labels(
+    period: PeriodKey,
+) -> list[tuple[ComparisonLabel, PeriodKey]]:
     scope = period.scope
     if period.grain == "day":
         return [
-            PeriodKey(
-                "day",
-                period.period_start - timedelta(days=1),
-                period.period_start,
-                scope,
+            (
+                "prior_day",
+                PeriodKey(
+                    "day",
+                    period.period_start - timedelta(days=1),
+                    period.period_start,
+                    scope,
+                ),
             ),
-            PeriodKey(
-                "day",
-                period.period_start - timedelta(days=7),
-                period.period_end - timedelta(days=7),
-                scope,
+            (
+                "same_weekday",
+                PeriodKey(
+                    "day",
+                    period.period_start - timedelta(days=7),
+                    period.period_end - timedelta(days=7),
+                    scope,
+                ),
             ),
-            PeriodKey(
-                "day",
-                period.period_start - timedelta(days=28),
-                period.period_start,
-                scope,
+            (
+                "trailing_28_days",
+                PeriodKey(
+                    "day",
+                    period.period_start - timedelta(days=28),
+                    period.period_start,
+                    scope,
+                ),
             ),
         ]
     if period.grain == "week":
         return [
-            PeriodKey(
-                "week",
-                period.period_start - timedelta(days=7),
-                period.period_start,
-                scope,
+            (
+                "prior_week",
+                PeriodKey(
+                    "week",
+                    period.period_start - timedelta(days=7),
+                    period.period_start,
+                    scope,
+                ),
             ),
-            PeriodKey(
-                "week",
-                period.period_start - timedelta(days=28),
-                period.period_start,
-                scope,
+            (
+                "trailing_4_weeks",
+                PeriodKey(
+                    "week",
+                    period.period_start - timedelta(days=28),
+                    period.period_start,
+                    scope,
+                ),
             ),
         ]
     if period.grain == "month":
         return [
-            PeriodKey(
-                "month",
-                _previous_month_start(period.period_start),
-                period.period_start,
-                scope,
+            (
+                "prior_month",
+                PeriodKey(
+                    "month",
+                    _previous_month_start(period.period_start),
+                    period.period_start,
+                    scope,
+                ),
             ),
-            PeriodKey(
-                "month",
-                period.period_start - timedelta(days=90),
-                period.period_start,
-                scope,
+            (
+                "trailing_90_days",
+                PeriodKey(
+                    "month",
+                    period.period_start - timedelta(days=90),
+                    period.period_start,
+                    scope,
+                ),
             ),
         ]
     raise ValueError(f"Unsupported period grain: {period.grain}")
 
 
-def _query_metric_groups(
+def comparison_periods(period: PeriodKey) -> list[PeriodKey]:
+    return [
+        comparison_period
+        for _, comparison_period in _comparison_periods_with_labels(period)
+    ]
+
+
+def _query_metric_evidence_rows(
     con: duckdb.DuckDBPyConnection,
     *,
     source: str,
     unit_column: str,
     dimension: str | None,
-    period: PeriodKey,
-    limit: int | None,
+    current_period: PeriodKey,
+    comparison_period: PeriodKey,
 ) -> list[tuple[object, ...]]:
     dimension_select = (
         f"metrics.{dimension}::VARCHAR AS dimension_value"
@@ -529,10 +570,32 @@ def _query_metric_groups(
         else "NULL::VARCHAR AS dimension_value"
     )
     group_by = f"GROUP BY metrics.{dimension}" if dimension is not None else ""
-    order_and_limit = (
-        "ORDER BY net_revenue_gbp DESC NULLS LAST, dimension_value LIMIT 10"
-        if limit is not None
+    current_limit = (
+        "ORDER BY net_revenue DESC NULLS LAST, dimension_value LIMIT 10"
+        if dimension is not None
         else ""
+    )
+    metric_names = (
+        "net_revenue",
+        "gross_revenue",
+        "orders",
+        "average_order_value",
+        "refund_rate",
+        "cancellation_rate",
+        "units_per_order",
+        "returning_customer_share",
+    )
+    metric_rows = "\nUNION ALL\n".join(
+        f"""
+        SELECT
+            dimension_value,
+            sample_size,
+            '{metric}' AS metric,
+            current_{metric} AS current_value,
+            comparison_{metric} AS comparison_value
+        FROM paired
+        """
+        for metric in metric_names
     )
     return con.execute(
         f"""
@@ -540,11 +603,12 @@ def _query_metric_groups(
             SELECT customer_id, min(order_at) AS first_order_at
             FROM demo_orders
             GROUP BY customer_id
-        )
-        SELECT
+        ),
+        current_metrics AS (
+          SELECT
             {dimension_select},
-            coalesce(sum(metrics.net_revenue_gbp), 0) AS net_revenue_gbp,
-            coalesce(sum(metrics.gross_revenue_gbp), 0) AS gross_revenue_gbp,
+            coalesce(sum(metrics.net_revenue_gbp), 0) AS net_revenue,
+            coalesce(sum(metrics.gross_revenue_gbp), 0) AS gross_revenue,
             count(DISTINCT metrics.order_id) AS orders,
             coalesce(sum(metrics.net_revenue_gbp), 0)
                 / nullif(count(DISTINCT metrics.order_id), 0) AS average_order_value,
@@ -559,22 +623,101 @@ def _query_metric_groups(
                 WHEN first_orders.first_order_at < ? THEN metrics.customer_id
             END) / nullif(count(DISTINCT metrics.customer_id), 0)::DECIMAL
                 AS returning_customer_share
-        FROM {source} AS metrics
-        JOIN first_orders USING (customer_id)
-        WHERE metrics.order_at >= ? AND metrics.order_at < ?
-        {group_by}
-        {order_and_limit}
+          FROM {source} AS metrics
+          JOIN first_orders USING (customer_id)
+          WHERE metrics.order_at >= ? AND metrics.order_at < ?
+          {group_by}
+          {current_limit}
+        ),
+        comparison_metrics AS (
+          SELECT
+            {dimension_select},
+            coalesce(sum(metrics.net_revenue_gbp), 0) AS net_revenue,
+            coalesce(sum(metrics.gross_revenue_gbp), 0) AS gross_revenue,
+            count(DISTINCT metrics.order_id) AS orders,
+            coalesce(sum(metrics.net_revenue_gbp), 0)
+                / nullif(count(DISTINCT metrics.order_id), 0) AS average_order_value,
+            coalesce(sum(metrics.refunded_amount_gbp), 0)
+                / nullif(sum(metrics.gross_revenue_gbp), 0) AS refund_rate,
+            count(DISTINCT CASE WHEN metrics.cancelled THEN metrics.order_id END)
+                / nullif(count(DISTINCT metrics.order_id), 0)::DECIMAL
+                AS cancellation_rate,
+            coalesce(sum(metrics.{unit_column}), 0)
+                / nullif(count(DISTINCT metrics.order_id), 0) AS units_per_order,
+            count(DISTINCT CASE
+                WHEN first_orders.first_order_at < ? THEN metrics.customer_id
+            END) / nullif(count(DISTINCT metrics.customer_id), 0)::DECIMAL
+                AS returning_customer_share
+          FROM {source} AS metrics
+          JOIN first_orders USING (customer_id)
+          WHERE metrics.order_at >= ? AND metrics.order_at < ?
+          {group_by}
+        ),
+        paired AS (
+          SELECT
+            current_metrics.dimension_value,
+            current_metrics.orders AS sample_size,
+            current_metrics.net_revenue AS current_net_revenue,
+            comparison_metrics.net_revenue AS comparison_net_revenue,
+            current_metrics.gross_revenue AS current_gross_revenue,
+            comparison_metrics.gross_revenue AS comparison_gross_revenue,
+            current_metrics.orders AS current_orders,
+            comparison_metrics.orders AS comparison_orders,
+            current_metrics.average_order_value AS current_average_order_value,
+            comparison_metrics.average_order_value AS comparison_average_order_value,
+            current_metrics.refund_rate AS current_refund_rate,
+            comparison_metrics.refund_rate AS comparison_refund_rate,
+            current_metrics.cancellation_rate AS current_cancellation_rate,
+            comparison_metrics.cancellation_rate AS comparison_cancellation_rate,
+            current_metrics.units_per_order AS current_units_per_order,
+            comparison_metrics.units_per_order AS comparison_units_per_order,
+            current_metrics.returning_customer_share AS current_returning_customer_share,
+            comparison_metrics.returning_customer_share
+                AS comparison_returning_customer_share
+          FROM current_metrics
+          LEFT JOIN comparison_metrics
+            ON current_metrics.dimension_value
+              IS NOT DISTINCT FROM comparison_metrics.dimension_value
+        ),
+        metric_values AS (
+          {metric_rows}
+        )
+        SELECT
+          dimension_value,
+          sample_size,
+          metric,
+          cast(round(current_value, 4) AS DECIMAL(20, 4)) AS current_value,
+          cast(round(comparison_value, 4) AS DECIMAL(20, 4)) AS comparison_value,
+          cast(round(current_value - comparison_value, 4) AS DECIMAL(20, 4))
+            AS absolute_change,
+          CASE
+            WHEN comparison_value IS NULL OR comparison_value = 0 THEN NULL
+            ELSE cast(
+              round(
+                (current_value - comparison_value)
+                  / abs(comparison_value) * 100,
+                4
+              ) AS DECIMAL(20, 4)
+            )
+          END AS percentage_change
+        FROM metric_values
+        ORDER BY dimension_value NULLS FIRST, metric
         """,
-        [period.period_start, period.period_start, period.period_end],
+        [
+            current_period.period_start,
+            current_period.period_start,
+            current_period.period_end,
+            comparison_period.period_start,
+            comparison_period.period_start,
+            comparison_period.period_end,
+        ],
     ).fetchall()
-
-
-def _decimal(value: object) -> Decimal:
-    return Decimal(str(value)).quantize(Decimal("0.0001"))
 
 
 def _metric_id(
     period: PeriodKey,
+    comparison_label: ComparisonLabel,
+    comparison_period: PeriodKey,
     metric: str,
     dimensions: tuple[tuple[str, str], ...],
 ) -> str:
@@ -583,6 +726,9 @@ def _metric_id(
         period.period_start.isoformat(),
         period.period_end.isoformat(),
         period.scope,
+        comparison_label,
+        comparison_period.period_start.isoformat(),
+        comparison_period.period_end.isoformat(),
         metric,
         *[f"{name}={value}" for name, value in dimensions],
     )
@@ -617,18 +763,7 @@ def compute_metric_evidence(
         GROUP BY order_id;
         """
     )
-    primary_comparison = comparison_periods(period)[0]
     evidence: list[MetricEvidence] = []
-    metric_names = (
-        "net_revenue",
-        "gross_revenue",
-        "orders",
-        "average_order_value",
-        "refund_rate",
-        "cancellation_rate",
-        "units_per_order",
-        "returning_customer_share",
-    )
     group_specs = (
         ("demo_orders", "units", None),
         ("demo_orders", "units", "store_id"),
@@ -638,67 +773,51 @@ def compute_metric_evidence(
     )
 
     for source, unit_column, dimension in group_specs:
-        current_rows = _query_metric_groups(
-            con,
-            source=source,
-            unit_column=unit_column,
-            dimension=dimension,
-            period=period,
-            limit=10 if dimension is not None else None,
-        )
-        comparison_rows = _query_metric_groups(
-            con,
-            source=source,
-            unit_column=unit_column,
-            dimension=dimension,
-            period=primary_comparison,
-            limit=None,
-        )
-        comparisons = {row[0]: row[1:] for row in comparison_rows}
-
-        for current_row in current_rows:
-            dimension_value, *current_metrics = current_row
-            if not current_metrics or int(current_metrics[2]) == 0:
-                continue
-            dimensions = (
-                () if dimension is None else ((dimension, str(dimension_value)),)
+        for comparison_label, comparison_period in _comparison_periods_with_labels(
+            period
+        ):
+            rows = _query_metric_evidence_rows(
+                con,
+                source=source,
+                unit_column=unit_column,
+                dimension=dimension,
+                current_period=period,
+                comparison_period=comparison_period,
             )
-            dimensions = tuple(sorted(dimensions))
-            comparison_metrics = comparisons.get(dimension_value)
-            sample_size = int(current_metrics[2])
-
-            for metric, current_raw, comparison_raw in zip(
-                metric_names,
-                current_metrics,
-                comparison_metrics or (None,) * len(metric_names),
-            ):
-                current_value = _decimal(current_raw)
-                comparison_value = (
-                    _decimal(comparison_raw) if comparison_raw is not None else None
+            for (
+                dimension_value,
+                sample_size,
+                metric,
+                current_value,
+                comparison_value,
+                absolute_change,
+                percentage_change,
+            ) in rows:
+                if int(sample_size) == 0:
+                    continue
+                dimensions = (
+                    () if dimension is None else ((dimension, str(dimension_value)),)
                 )
-                absolute_change = (
-                    current_value - comparison_value
-                    if comparison_value is not None
-                    else None
-                )
-                percentage_change = (
-                    (absolute_change / abs(comparison_value) * Decimal(100)).quantize(
-                        Decimal("0.0001")
-                    )
-                    if absolute_change is not None and comparison_value != 0
-                    else None
-                )
+                dimensions = tuple(sorted(dimensions))
                 evidence.append(
                     MetricEvidence(
-                        evidence_id=_metric_id(period, metric, dimensions),
+                        evidence_id=_metric_id(
+                            period,
+                            comparison_label,
+                            comparison_period,
+                            metric,
+                            dimensions,
+                        ),
                         period=period,
                         metric=metric,
                         dimensions=dimensions,
+                        comparison_label=comparison_label,
+                        comparison_period=comparison_period,
                         current_value=current_value,
                         comparison_value=comparison_value,
                         absolute_change=absolute_change,
                         percentage_change=percentage_change,
-                        sample_size=sample_size,
+                        sample_size=int(sample_size),
                     )
                 )
 
