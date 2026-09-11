@@ -21,7 +21,7 @@ Organization members and their agents can then retrieve the same context.
 - Generate daily, weekly, and monthly e-commerce analysis.
 - Reuse an existing analysis when its evidence and context have not changed.
 - Recompute a completed period after late-arriving sales data or new context.
-- Enrich sales analysis with public weather and news metadata.
+- Enrich sales analysis with public weather and RSS feed entries.
 - Include organization events such as outages, campaigns, and staffing shortages.
 - Preserve the SQL evidence and source versions behind each finding.
 - Publish analysis through shallow, searchable Guide topics.
@@ -49,8 +49,8 @@ The catalog ID and folder name are `flight-persistent-context-analysis`.
 ## User experience
 
 A reader starts in demo mode. The Flight creates deterministic e-commerce demo
-tables covering the previous 120 days. The data includes sessions, orders, order
-items, products, and markets. A fixed seed produces the same rows for the same
+tables covering the previous 120 days. The data includes orders, order items,
+refunds, products, and markets. A fixed seed produces the same rows for the same
 date, which makes unchanged-run behavior reproducible.
 
 The reader runs the Flight with an `ANALYSIS_AS_OF` date. The first run computes
@@ -150,27 +150,37 @@ uses these rows to invalidate parents after a completed child changes.
 
 ## Demo commerce data
 
-Demo mode creates a small current e-commerce model rather than relying on a
-credentialed service or a frozen historical download.
+Demo mode creates a small current Shopify-shaped model rather than relying on a
+credentialed service or a frozen historical download. Its structure follows a
+private MotherDuck dataset containing Shopify orders, line items, products,
+variants, cancellations, refunds, currencies, and shipping countries.
 
-- `demo_sessions` has one row per website session with date, market, channel,
-  device, and conversion state.
-- `demo_orders` has one row per order with date, market, customer, gross amount,
-  discount, refund amount, and order status.
-- `demo_order_items` has one row per order and product with category, quantity,
-  and net revenue.
-- `demo_products` maps products to categories.
-- `demo_markets` stores market names, time zones, latitude, and longitude.
+- `demo_orders` has one row per order with date, synthetic customer key, market,
+  source channel, amounts, currency, cancellation state, and financial status.
+- `demo_order_items` has one row per order and synthetic product with category,
+  variant, quantity, price, discount, and net revenue.
+- `demo_refunds` has one row per refund event with order, date, quantity, and
+  amount.
+- `demo_products` maps synthetic duck merchandise to generic categories and
+  variants.
+- `demo_markets` stores coarse market names, time zones, latitude, and longitude.
 
-The generator uses a fixed seed and date-derived keys. It includes weekly
-seasonality, market differences, product-category differences, and a small number
-of documented anomalies. `DEMO_REVISION` changes a bounded set of late-arriving
-rows so tests and readers can observe invalidation without editing source code.
-The README labels all demo data and anomalies as synthetic.
+The public fixture has no copied orders and no one-to-one mapping to source rows.
+It excludes names, emails, addresses, phone numbers, IP addresses, checkout
+tokens, Shopify IDs, SKUs, and exact transaction values. The generator keeps only
+the useful structural relationships. It uses invented volumes and amounts,
+synthetic keys, generic duck products, coarse markets, shifted dates, and a fixed
+random seed. Generation parameters must be reviewed as public code before commit.
+
+The generated data includes weekly seasonality, market differences,
+product-category differences, refunds, cancellations, occasional bulk orders,
+and a small number of documented anomalies. `DEMO_REVISION` changes a bounded set
+of late-arriving rows so tests and readers can observe invalidation without
+editing source code. The README labels every demo row and anomaly as synthetic.
 
 The default metrics are net revenue, gross revenue, orders, average order value,
-refund rate, sessions, conversion rate, units per order, and new-customer share.
-The Flight computes totals plus breakdowns for market, channel, and product
+refund rate, cancellation rate, units per order, and returning-customer share.
+The Flight computes totals plus breakdowns for market, source channel, and product
 category. Configuration caps the number of breakdown rows sent to the model.
 
 Comparisons follow fixed rules rather than model judgment. A daily report compares
@@ -191,21 +201,31 @@ snowfall, wind, and weather codes for each configured market coordinate. The
 Flight stores the normalized daily values and the source request URL. Weather is
 available for both backfills and current runs.
 
-### News metadata
+### RSS entries
 
-The GDELT DOC API supplies recent article metadata for configured market and
-disruption queries. The Flight stores the article title, publication time, source
-domain, and URL. It does not fetch or store article bodies. A configurable result
-limit and deduplication by URL keep this input bounded.
+The sample reads two configurable RSS 2.0 feeds:
 
-The GDELT source covers a rolling recent window. A historical backfill can have
-weather without news. Missing news is recorded in the evidence bundle and does
-not fail the analysis.
+- BBC News "Ducks" at
+  `https://feeds.bbci.co.uk/news/topics/czednw5qgllt/rss.xml`
+- Het Parool English-language Amsterdam news at
+  `https://www.parool.nl/international/rss.xml`
 
-Public text is untrusted data. The prompt wraps titles in a delimited data block
-and tells the model to treat them only as claims reported by external sources.
-Instructions inside titles are ignored. A generated finding links to the source
-and uses language such as "may be related" rather than claiming causation.
+The Flight stores the feed name, item GUID, title, short description when
+present, publication time, source URL, and retrieval time. It does not fetch
+article pages, images, or full article bodies. It preserves source attribution
+and the canonical link. Deduplication uses the feed URL plus GUID, with the item
+URL as a fallback.
+
+RSS feeds expose a moving set of recent entries rather than a historical archive.
+The Flight accumulates entries from each scheduled run. An initial historical
+backfill can have weather without matching RSS context. Missing or unavailable
+feeds produce an explicit caveat and do not fail the sales analysis.
+
+Public text is untrusted data. The prompt wraps titles and descriptions in a
+delimited data block and treats them only as claims reported by an external
+publisher. Instructions inside an RSS entry are ignored. A generated finding
+links to the source and uses language such as "may be related" rather than
+claiming causation.
 
 ## Organization annotations
 
@@ -316,8 +336,11 @@ would need coordinated cleanup.
 - The Flight uses parameterized queries for values and validates all configured
   identifiers before interpolating them into SQL.
 - The model cannot execute SQL or write Guides directly.
-- Public news titles are untrusted text and remain inside delimited prompt data.
-- The Flight stores no article body and follows source URLs for attribution only.
+- Public RSS titles and descriptions are untrusted text and remain inside
+  delimited prompt data.
+- The Flight stores no article body and preserves the publisher link for
+  attribution.
+- Feed use must follow each publisher's RSS terms and attribution requirements.
 - Organization publication requires an admin-authorized Flight identity.
 - Source-table and state-schema permissions should follow least privilege.
 - Generated reports can reveal commercial data. Their access must match the
@@ -373,7 +396,8 @@ check.
 - The first demo run creates the expected daily, weekly, and monthly Guides.
 - An unchanged rerun makes no model call and creates no Guide version.
 - A changed day regenerates that day and only its affected parents.
-- Weather, news metadata, and overlapping annotations appear with provenance.
+- Weather, relevant RSS entries, and overlapping annotations appear with
+  provenance.
 - Reports distinguish correlation from causation.
 - A changed annotation version invalidates only overlapping periods.
 - Generated Guides can use organization access when the Flight identity is an
