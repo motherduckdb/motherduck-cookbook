@@ -10,12 +10,14 @@ import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Iterable, Literal, Mapping, Protocol, Sequence
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import duckdb
 import yaml
@@ -34,6 +36,21 @@ GUIDE_ROOT = "persistent-analysis/ecommerce"
 WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"
 LONDON_LATITUDE = 51.5072
 LONDON_LONGITUDE = -0.1276
+RSS_FEEDS = (
+    ("bbc-ducks", "https://feeds.bbci.co.uk/news/topics/czednw5qgllt/rss.xml"),
+    ("bbc-london", "https://feeds.bbci.co.uk/news/england/london/rss.xml"),
+)
+WEATHER_DAILY_VARIABLES = (
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "precipitation_sum",
+    "snowfall_sum",
+    "wind_speed_10m_max",
+    "weather_code",
+)
+HTTP_TIMEOUT_SECONDS = 20
+PUBLIC_SIGNAL_USER_AGENT = "MotherDuck persistent-context-analysis Flight/1.0"
+LONDON_TIMEZONE = ZoneInfo("Europe/London")
 PROMPT_VERSION = "persistent-context-v1"
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 FIXTURE_COLUMNS = (
@@ -181,6 +198,200 @@ class AnalysisDraft(BaseModel):
     summary: str
     findings: list[Finding]
     caveats: list[str] = Field(default_factory=list)
+
+
+def _payload_hash(payload: bytes | Mapping[str, object]) -> str:
+    if isinstance(payload, bytes):
+        content = payload
+    else:
+        content = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+def _canonical_http_url(value: str) -> str | None:
+    parsed = urllib.parse.urlsplit(value.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    host = parsed.hostname.lower()
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return urllib.parse.urlunsplit(
+        (parsed.scheme.lower(), host, parsed.path or "/", parsed.query, "")
+    )
+
+
+def _rss_child_text(item: ET.Element, name: str) -> str:
+    for child in item:
+        if child.tag.rsplit("}", 1)[-1] == name:
+            return "".join(child.itertext()).strip()
+    return ""
+
+
+def _rss_feed_id(feed_url: str) -> str:
+    for feed_id, known_url in RSS_FEEDS:
+        if feed_url == known_url:
+            return feed_id
+    raise ValueError(f"Unsupported RSS feed URL: {feed_url}")
+
+
+def parse_rss(
+    feed_url: str, payload: bytes, retrieved_at: datetime
+) -> list[ExternalSignal]:
+    feed_id = _rss_feed_id(feed_url)
+    root = ET.fromstring(payload)
+    signals: list[ExternalSignal] = []
+    payload_hash = _payload_hash(payload)
+    for item in root.iter():
+        if item.tag.rsplit("}", 1)[-1] != "item":
+            continue
+        link = _canonical_http_url(_rss_child_text(item, "link"))
+        if link is None:
+            continue
+        guid = _rss_child_text(item, "guid") or link
+        published_at = parsedate_to_datetime(_rss_child_text(item, "pubDate"))
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+        published_at = published_at.astimezone(timezone.utc)
+        title = _rss_child_text(item, "title")[:300]
+        description = _rss_child_text(item, "description")[:1_000]
+        attributes = tuple(
+            sorted(
+                (
+                    ("feed_id", feed_id),
+                    ("guid", guid),
+                    ("description", description),
+                )
+            )
+        )
+        identity = f"{feed_id}|{guid}".encode()
+        signals.append(
+            ExternalSignal(
+                signal_id=f"rss-{hashlib.sha256(identity).hexdigest()[:16]}",
+                provider=feed_id,
+                provider_id=guid,
+                starts_at=published_at,
+                ends_at=published_at,
+                location="London",
+                title=title,
+                source_url=link,
+                attributes=attributes,
+                payload_hash=payload_hash,
+                retrieved_at=retrieved_at.astimezone(timezone.utc),
+            )
+        )
+    return signals
+
+
+def fetch_rss_signals(
+    opener: Callable[..., object], retrieved_at: datetime
+) -> tuple[list[ExternalSignal], list[str]]:
+    signals: list[ExternalSignal] = []
+    caveats: list[str] = []
+    for feed_id, feed_url in RSS_FEEDS:
+        request = urllib.request.Request(
+            feed_url, headers={"User-Agent": PUBLIC_SIGNAL_USER_AGENT}
+        )
+        try:
+            with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+                payload = response.read()
+            signals.extend(parse_rss(feed_url, payload, retrieved_at))
+        except (OSError, ET.ParseError, UnicodeDecodeError, ValueError) as error:
+            caveats.append(f"{feed_id} RSS is unavailable: {error}")
+    return signals, caveats
+
+
+def parse_weather(payload: Mapping[str, object]) -> list[ExternalSignal]:
+    daily = payload.get("daily")
+    if not isinstance(daily, Mapping):
+        raise ValueError("Open-Meteo response does not contain daily weather")
+    values_by_name: dict[str, list[object]] = {}
+    for name in ("time", *WEATHER_DAILY_VARIABLES):
+        values = daily.get(name)
+        if not isinstance(values, list):
+            raise ValueError(f"Open-Meteo response is missing daily {name}")
+        values_by_name[name] = values
+    dates = values_by_name["time"]
+    if any(len(values) != len(dates) for values in values_by_name.values()):
+        raise ValueError("Open-Meteo daily values have inconsistent lengths")
+
+    payload_hash = _payload_hash(payload)
+    retrieved_at = datetime.now(timezone.utc)
+    signals: list[ExternalSignal] = []
+    for index, raw_day in enumerate(dates):
+        day = date.fromisoformat(str(raw_day))
+        if any(values_by_name[name][index] is None for name in WEATHER_DAILY_VARIABLES):
+            continue
+        starts_at = datetime.combine(day, time(), LONDON_TIMEZONE).astimezone(
+            timezone.utc
+        )
+        ends_at = datetime.combine(
+            day + timedelta(days=1), time(), LONDON_TIMEZONE
+        ).astimezone(timezone.utc)
+        attributes = tuple(
+            sorted(
+                (name, str(values_by_name[name][index]))
+                for name in WEATHER_DAILY_VARIABLES
+            )
+        )
+        provider_id = f"london-weather-{day.isoformat()}"
+        signals.append(
+            ExternalSignal(
+                signal_id=provider_id,
+                provider="open-meteo",
+                provider_id=provider_id,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                location="London",
+                title=f"London weather for {day.isoformat()}",
+                source_url=WEATHER_URL,
+                attributes=attributes,
+                payload_hash=payload_hash,
+                retrieved_at=retrieved_at,
+            )
+        )
+    return signals
+
+
+def fetch_weather_signals(
+    opener: Callable[..., object], start: date, end: date
+) -> tuple[list[ExternalSignal], list[str]]:
+    request_url = f"{WEATHER_URL}?{
+        urllib.parse.urlencode(
+            {
+                'latitude': LONDON_LATITUDE,
+                'longitude': LONDON_LONGITUDE,
+                'daily': ','.join(WEATHER_DAILY_VARIABLES),
+                'timezone': 'Europe/London',
+                'start_date': start.isoformat(),
+                'end_date': end.isoformat(),
+            }
+        )
+    }"
+    request = urllib.request.Request(
+        request_url, headers={"User-Agent": PUBLIC_SIGNAL_USER_AGENT}
+    )
+    try:
+        with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read())
+        signals = parse_weather(payload)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        return [], [f"London weather is unavailable: {error}"]
+    retrieved_at = datetime.now(timezone.utc)
+    available_signals = [
+        replace(signal, source_url=request_url, retrieved_at=retrieved_at)
+        for signal in signals
+    ]
+    available_ids = {signal.provider_id for signal in available_signals}
+    unavailable_days = {
+        str(raw_day)
+        for raw_day in payload["daily"]["time"]
+        if f"london-weather-{raw_day}" not in available_ids
+    }
+    return available_signals, [
+        f"London weather is unavailable for {day}" for day in sorted(unavailable_days)
+    ]
 
 
 def _amount_from_pence(pence: int) -> Decimal:
