@@ -1407,15 +1407,26 @@ def upsert_analysis_guide(
             references=references,
         )
 
-    first_read = store.get(matches[0].id)
+    listed = matches[0]
+    first_read = store.get(listed.id)
+    if (
+        first_read.id != listed.id
+        or first_read.topic != topic
+        or first_read.title != title
+    ):
+        raise RuntimeError(f"Guide {listed.id} metadata changed after list")
     if first_read.external_id == fingerprint:
         return first_read
     current = store.get(first_read.id)
+    if current.id != first_read.id:
+        raise RuntimeError(f"Guide {first_read.id} identity changed before update")
     if current.current_version != first_read.current_version:
         raise RuntimeError(
             f"Guide {first_read.id} changed from version "
             f"{first_read.current_version} to {current.current_version} before update"
         )
+    if current.topic != first_read.topic or current.title != first_read.title:
+        raise RuntimeError(f"Guide {first_read.id} metadata changed before update")
     return store.update(
         guide_id=first_read.id,
         content=content,

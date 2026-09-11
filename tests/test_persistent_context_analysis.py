@@ -1135,6 +1135,81 @@ def test_guide_upsert_rejects_a_concurrent_version_change(flight):
     assert [call[0] for call in store.calls] == ["list", "get", "get"]
 
 
+@pytest.mark.parametrize(
+    "protected_topic",
+    [
+        "persistent-analysis/ecommerce/definitions",
+        "persistent-analysis/ecommerce/annotations",
+    ],
+)
+def test_guide_upsert_rejects_a_concurrent_move_to_read_only_topics(
+    flight, protected_topic
+):
+    values = _upsert_values(flight)
+    existing = _guide_record(
+        flight,
+        topic="persistent-analysis/ecommerce/daily",
+        title="Commerce analysis for 2026-09-10",
+        content="old content",
+        external_id="sha256:old",
+    )
+    listed = flight.replace(existing, content=None, external_id=None)
+    moved = flight.replace(existing, topic=protected_topic)
+    store = FakeGuideStore(flight, [listed])
+    store.get_responses[existing.id] = [existing, moved]
+
+    with pytest.raises(RuntimeError, match="metadata changed before update"):
+        flight.upsert_analysis_guide(store, **values)
+
+    assert [call[0] for call in store.calls] == ["list", "get", "get"]
+    assert all(call[0] != "update" for call in store.calls)
+
+
+def test_guide_upsert_rejects_a_retitle_before_the_first_read(flight):
+    values = _upsert_values(flight)
+    existing = _guide_record(
+        flight,
+        topic="persistent-analysis/ecommerce/daily",
+        title="Commerce analysis for 2026-09-10",
+        content="old content",
+        external_id="sha256:old",
+    )
+    listed = flight.replace(existing, content=None, external_id=None)
+    retitled = flight.replace(existing, title="Renamed by a person")
+    store = FakeGuideStore(flight, [listed])
+    store.get_responses[existing.id] = [retitled]
+
+    with pytest.raises(RuntimeError, match="metadata changed after list"):
+        flight.upsert_analysis_guide(store, **values)
+
+    assert [call[0] for call in store.calls] == ["list", "get"]
+    assert all(call[0] != "update" for call in store.calls)
+
+
+def test_guide_upsert_rejects_a_different_guide_on_the_second_read(flight):
+    values = _upsert_values(flight)
+    existing = _guide_record(
+        flight,
+        topic="persistent-analysis/ecommerce/daily",
+        title="Commerce analysis for 2026-09-10",
+        content="old content",
+        external_id="sha256:old",
+    )
+    listed = flight.replace(existing, content=None, external_id=None)
+    different_guide = flight.replace(
+        existing,
+        id=flight.UUID("22222222-2222-2222-2222-222222222222"),
+    )
+    store = FakeGuideStore(flight, [listed])
+    store.get_responses[existing.id] = [existing, different_guide]
+
+    with pytest.raises(RuntimeError, match="identity changed before update"):
+        flight.upsert_analysis_guide(store, **values)
+
+    assert [call[0] for call in store.calls] == ["list", "get", "get"]
+    assert all(call[0] != "update" for call in store.calls)
+
+
 def test_guide_upsert_rejects_duplicate_titles_without_writing(flight):
     first = _guide_record(
         flight,
