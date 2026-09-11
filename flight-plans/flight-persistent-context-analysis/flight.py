@@ -185,6 +185,213 @@ class GuideRecord:
     external_id: str | None = None
 
 
+class GuideStore(Protocol):
+    def list(self, topic: str) -> list[GuideRecord]: ...
+
+    def get(self, guide_id: UUID) -> GuideRecord: ...
+
+    def create(
+        self,
+        *,
+        topic: str,
+        title: str,
+        description: str,
+        content: str,
+        access: str,
+        external_id: str,
+        references: Sequence[dict[str, object]],
+    ) -> GuideRecord: ...
+
+    def update(
+        self,
+        *,
+        guide_id: UUID,
+        content: str,
+        external_id: str,
+        references: Sequence[dict[str, object]],
+    ) -> GuideRecord: ...
+
+    def move(self, guide_id: UUID, topic: str) -> GuideRecord: ...
+
+
+GUIDE_REFERENCE_SQL_TYPE = """STRUCT(
+  "type" VARCHAR,
+  "url" VARCHAR,
+  "schema" VARCHAR,
+  "table" VARCHAR,
+  "column" VARCHAR,
+  "view" VARCHAR,
+  "macro" VARCHAR,
+  "uuid" UUID,
+  "description" VARCHAR
+)[]"""
+GUIDE_REFERENCE_FIELDS = (
+    "type",
+    "url",
+    "schema",
+    "table",
+    "column",
+    "view",
+    "macro",
+    "uuid",
+    "description",
+)
+
+
+def _guide_record_from_metadata(
+    row: Sequence[object],
+    *,
+    content: str | None = None,
+    external_id: str | None = None,
+) -> GuideRecord:
+    guide_id, topic, title, description, access, current_version = row
+    return GuideRecord(
+        id=UUID(str(guide_id)),
+        topic=str(topic or ""),
+        title=str(title),
+        description=str(description or ""),
+        access=str(access),
+        current_version=int(current_version),
+        content=content,
+        external_id=external_id,
+    )
+
+
+def _bind_guide_references(
+    references: Sequence[dict[str, object]],
+) -> list[dict[str, object | None]]:
+    return [
+        {field: reference.get(field) for field in GUIDE_REFERENCE_FIELDS}
+        for reference in references
+    ]
+
+
+class MotherDuckGuideStore:
+    def __init__(self, con: duckdb.DuckDBPyConnection):
+        self.con = con
+
+    def list(self, topic: str) -> list[GuideRecord]:
+        records: list[GuideRecord] = []
+        offset = 0
+        while True:
+            rows = self.con.execute(
+                """
+                SELECT id, topic, title, description, access, current_version
+                FROM MD_LIST_GUIDES(topic = ?, "limit" = ?, "offset" = ?)
+                """,
+                [topic, 100, offset],
+            ).fetchall()
+            records.extend(_guide_record_from_metadata(row) for row in rows)
+            if len(rows) < 100:
+                return records
+            offset += 100
+
+    def get(self, guide_id: UUID) -> GuideRecord:
+        row = self.con.execute(
+            """
+            SELECT
+              id,
+              topic,
+              title,
+              description,
+              access,
+              current_version,
+              content,
+              version_external_id
+            FROM MD_GET_GUIDE(id = ?)
+            """,
+            [guide_id],
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"Guide {guide_id} was not found")
+        return _guide_record_from_metadata(row[:6], content=row[6], external_id=row[7])
+
+    def create(
+        self,
+        *,
+        topic: str,
+        title: str,
+        description: str,
+        content: str,
+        access: str,
+        external_id: str,
+        references: Sequence[dict[str, object]],
+    ) -> GuideRecord:
+        row = self.con.execute(
+            f"""
+            SELECT id, topic, title, description, access, current_version
+            FROM MD_CREATE_GUIDE(
+              topic = ?,
+              title = ?,
+              description = ?,
+              content = ?,
+              access = ?,
+              external_id = ?,
+              "references" = ?::{GUIDE_REFERENCE_SQL_TYPE}
+            )
+            """,
+            [
+                topic,
+                title,
+                description,
+                content,
+                access,
+                external_id,
+                _bind_guide_references(references),
+            ],
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("MD_CREATE_GUIDE did not return the created Guide")
+        return _guide_record_from_metadata(
+            row, content=content, external_id=external_id
+        )
+
+    def update(
+        self,
+        *,
+        guide_id: UUID,
+        content: str,
+        external_id: str,
+        references: Sequence[dict[str, object]],
+    ) -> GuideRecord:
+        row = self.con.execute(
+            f"""
+            SELECT id, topic, title, description, access, current_version
+            FROM MD_UPDATE_GUIDE(
+              id = ?,
+              content = ?,
+              external_id = ?,
+              "references" = ?::{GUIDE_REFERENCE_SQL_TYPE}
+            )
+            """,
+            [
+                guide_id,
+                content,
+                external_id,
+                _bind_guide_references(references),
+            ],
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"MD_UPDATE_GUIDE did not return Guide {guide_id}")
+        return _guide_record_from_metadata(
+            row, content=content, external_id=external_id
+        )
+
+    def move(self, guide_id: UUID, topic: str) -> GuideRecord:
+        row = self.con.execute(
+            """
+            SELECT id, topic, title, description, access, current_version
+            FROM MD_UPDATE_GUIDE_METADATA(id = ?, topic = ?)
+            """,
+            [guide_id, topic],
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"MD_UPDATE_GUIDE_METADATA did not return Guide {guide_id}"
+            )
+        return _guide_record_from_metadata(row)
+
+
 class Finding(BaseModel):
     title: str
     summary: str
@@ -1047,6 +1254,174 @@ def compute_metric_evidence(
                 )
 
     return evidence
+
+
+def load_definition_guides(store: GuideStore, guide_root: str) -> list[GuideRecord]:
+    topic = f"{guide_root.rstrip('/')}/definitions"
+    return [store.get(record.id) for record in store.list(topic)]
+
+
+def _annotation_front_matter(content: str) -> tuple[Mapping[str, object], str]:
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("Annotation must start with YAML front matter")
+    closing_index = next(
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.strip() == "---"
+        ),
+        None,
+    )
+    if closing_index is None:
+        raise ValueError("Annotation YAML front matter has no closing delimiter")
+    try:
+        metadata = yaml.safe_load("".join(lines[1:closing_index]))
+    except yaml.YAMLError as error:
+        raise ValueError(f"Annotation YAML is malformed: {error}") from error
+    if not isinstance(metadata, Mapping):
+        raise ValueError("Annotation YAML front matter must be a mapping")
+    return metadata, "".join(lines[closing_index + 1 :])
+
+
+def _annotation_string(metadata: Mapping[str, object], name: str) -> str:
+    value = metadata.get(name)
+    if not isinstance(value, str):
+        raise ValueError(f"Annotation field {name} must be a string")
+    return value
+
+
+def _annotation_timestamp(metadata: Mapping[str, object], name: str) -> datetime:
+    value = metadata.get(name)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError(
+                f"Annotation field {name} must be an ISO 8601 timestamp"
+            ) from error
+    else:
+        raise ValueError(f"Annotation field {name} must be a string")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"Annotation field {name} must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_annotation(record: GuideRecord) -> Annotation:
+    if record.content is None:
+        raise ValueError("Annotation Guide has no content")
+    metadata, body = _annotation_front_matter(record.content)
+    starts_at = _annotation_timestamp(metadata, "start_at")
+    ends_at = _annotation_timestamp(metadata, "end_at")
+    if ends_at <= starts_at:
+        raise ValueError("Annotation end_at must be later than start_at")
+    return Annotation(
+        annotation_id=str(record.id),
+        guide_id=record.id,
+        guide_version=record.current_version,
+        event_id=_annotation_string(metadata, "event_id"),
+        starts_at=starts_at,
+        ends_at=ends_at,
+        scope=_annotation_string(metadata, "scope"),
+        category=_annotation_string(metadata, "category"),
+        source=_annotation_string(metadata, "source"),
+        body=body,
+    )
+
+
+def load_annotations(
+    store: GuideStore, guide_root: str
+) -> tuple[list[Annotation], list[str]]:
+    topic = f"{guide_root.rstrip('/')}/annotations"
+    annotations: list[Annotation] = []
+    caveats: list[str] = []
+    for listed_record in store.list(topic):
+        record = store.get(listed_record.id)
+        try:
+            annotations.append(parse_annotation(record))
+        except ValueError as error:
+            caveats.append(
+                f"Annotation Guide {record.title} ({record.id}) was skipped: {error}"
+            )
+    return annotations, caveats
+
+
+def annotations_for_period(
+    annotations: Iterable[Annotation], period: PeriodKey
+) -> list[Annotation]:
+    period_start = datetime.combine(period.period_start, time.min, timezone.utc)
+    period_end = datetime.combine(period.period_end, time.min, timezone.utc)
+    return [
+        annotation
+        for annotation in annotations
+        if annotation.starts_at < period_end and annotation.ends_at > period_start
+    ]
+
+
+def guide_title(period: PeriodKey) -> str:
+    if period.grain == "day":
+        suffix = period.period_start.isoformat()
+    elif period.grain == "week":
+        year, week, _ = period.period_start.isocalendar()
+        suffix = f"{year}-W{week:02d}"
+    else:
+        suffix = period.period_start.strftime("%Y-%m")
+    return f"Commerce analysis for {suffix}"
+
+
+def _analysis_guide_topic(guide_root: str, period: PeriodKey) -> str:
+    topic_suffix = {"day": "daily", "week": "weekly", "month": "monthly"}[period.grain]
+    return f"{guide_root.rstrip('/')}/{topic_suffix}"
+
+
+def upsert_analysis_guide(
+    store: GuideStore,
+    *,
+    guide_root: str,
+    period: PeriodKey,
+    description: str,
+    content: str,
+    access: str,
+    fingerprint: str,
+    references: Sequence[dict[str, object]],
+) -> GuideRecord:
+    topic = _analysis_guide_topic(guide_root, period)
+    title = guide_title(period)
+    matches = [
+        record
+        for record in store.list(topic)
+        if record.topic == topic and record.title == title
+    ]
+    if len(matches) > 1:
+        raise ValueError(f"Duplicate Guides found for {title!r} in topic {topic!r}")
+    if not matches:
+        return store.create(
+            topic=topic,
+            title=title,
+            description=description,
+            content=content,
+            access=access,
+            external_id=fingerprint,
+            references=references,
+        )
+
+    first_read = store.get(matches[0].id)
+    if first_read.external_id == fingerprint:
+        return first_read
+    current = store.get(first_read.id)
+    if current.current_version != first_read.current_version:
+        raise RuntimeError(
+            f"Guide {first_read.id} changed from version "
+            f"{first_read.current_version} to {current.current_version} before update"
+        )
+    return store.update(
+        guide_id=first_read.id,
+        content=content,
+        external_id=fingerprint,
+        references=references,
+    )
 
 
 def parse_config(env: Mapping[str, str]) -> Config:
