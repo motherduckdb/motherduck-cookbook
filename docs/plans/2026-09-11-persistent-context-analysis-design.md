@@ -50,8 +50,9 @@ The catalog ID and folder name are `flight-persistent-context-analysis`.
 
 A reader starts in demo mode. The Flight creates deterministic e-commerce demo
 tables covering the previous 120 days. The data includes orders, order items,
-refunds, products, and markets. A fixed seed produces the same rows for the same
-date, which makes unchanged-run behavior reproducible.
+refunds, products, and markets, with London as the primary market and weather
+location. A fixed seed produces the same rows for the same date, which makes
+unchanged-run behavior reproducible.
 
 The reader runs the Flight with an `ANALYSIS_AS_OF` date. The first run computes
 the completed daily period and any completed weekly or monthly periods that need
@@ -197,9 +198,10 @@ The Flight has two narrow public-signal adapters.
 ### Weather
 
 The Open-Meteo Historical Weather API supplies daily temperature, precipitation,
-snowfall, wind, and weather codes for each configured market coordinate. The
-Flight stores the normalized daily values and the source request URL. Weather is
-available for both backfills and current runs.
+snowfall, wind, and weather codes for London. The Flight stores the normalized
+daily values and the source request URL. Weather is available for both backfills
+and current runs. Adapters can add coordinates for other markets, but the sample
+does not apply London weather to sales outside the London market.
 
 ### RSS entries
 
@@ -207,8 +209,8 @@ The sample reads two configurable RSS 2.0 feeds:
 
 - BBC News "Ducks" at
   `https://feeds.bbci.co.uk/news/topics/czednw5qgllt/rss.xml`
-- Het Parool English-language Amsterdam news at
-  `https://www.parool.nl/international/rss.xml`
+- BBC News London at
+  `https://feeds.bbci.co.uk/news/england/london/rss.xml`
 
 The Flight stores the feed name, item GUID, title, short description when
 present, publication time, source URL, and retrieval time. It does not fetch
