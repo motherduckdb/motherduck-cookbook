@@ -396,6 +396,315 @@ def load_demo_sales(
     return FixtureMetadata(source_hash, row_count, min_date, max_date)
 
 
+def _previous_month_start(value: date) -> date:
+    if value.month == 1:
+        return date(value.year - 1, 12, 1)
+    return date(value.year, value.month - 1, 1)
+
+
+def periods_to_process(
+    as_of: date,
+    reconciliation_days: int,
+    bootstrap: bool,
+) -> list[PeriodKey]:
+    if reconciliation_days < 1:
+        raise ValueError("reconciliation_days must be at least 1")
+
+    window_start = as_of - timedelta(days=reconciliation_days)
+    periods = {
+        PeriodKey("day", day, day + timedelta(days=1))
+        for day in (
+            window_start + timedelta(days=offset)
+            for offset in range(reconciliation_days)
+        )
+    }
+
+    latest_week_end = as_of - timedelta(days=as_of.weekday())
+    week_end = latest_week_end
+    while week_end > window_start:
+        periods.add(PeriodKey("week", week_end - timedelta(days=7), week_end))
+        week_end -= timedelta(days=7)
+
+    latest_month_end = date(as_of.year, as_of.month, 1)
+    month_end = latest_month_end
+    while month_end > window_start:
+        periods.add(PeriodKey("month", _previous_month_start(month_end), month_end))
+        month_end = _previous_month_start(month_end)
+
+    if bootstrap:
+        periods.add(
+            PeriodKey(
+                "week",
+                latest_week_end - timedelta(days=7),
+                latest_week_end,
+            )
+        )
+        periods.add(
+            PeriodKey(
+                "month",
+                _previous_month_start(latest_month_end),
+                latest_month_end,
+            )
+        )
+
+    grain_order = {"day": 0, "week": 1, "month": 2}
+    return sorted(
+        periods,
+        key=lambda period: (
+            period.period_start,
+            grain_order[period.grain],
+            period.period_end,
+        ),
+    )
+
+
+def comparison_periods(period: PeriodKey) -> list[PeriodKey]:
+    scope = period.scope
+    if period.grain == "day":
+        return [
+            PeriodKey(
+                "day",
+                period.period_start - timedelta(days=1),
+                period.period_start,
+                scope,
+            ),
+            PeriodKey(
+                "day",
+                period.period_start - timedelta(days=7),
+                period.period_end - timedelta(days=7),
+                scope,
+            ),
+            PeriodKey(
+                "day",
+                period.period_start - timedelta(days=28),
+                period.period_start,
+                scope,
+            ),
+        ]
+    if period.grain == "week":
+        return [
+            PeriodKey(
+                "week",
+                period.period_start - timedelta(days=7),
+                period.period_start,
+                scope,
+            ),
+            PeriodKey(
+                "week",
+                period.period_start - timedelta(days=28),
+                period.period_start,
+                scope,
+            ),
+        ]
+    if period.grain == "month":
+        return [
+            PeriodKey(
+                "month",
+                _previous_month_start(period.period_start),
+                period.period_start,
+                scope,
+            ),
+            PeriodKey(
+                "month",
+                period.period_start - timedelta(days=90),
+                period.period_start,
+                scope,
+            ),
+        ]
+    raise ValueError(f"Unsupported period grain: {period.grain}")
+
+
+def _query_metric_groups(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    source: str,
+    unit_column: str,
+    dimension: str | None,
+    period: PeriodKey,
+    limit: int | None,
+) -> list[tuple[object, ...]]:
+    dimension_select = (
+        f"metrics.{dimension}::VARCHAR AS dimension_value"
+        if dimension is not None
+        else "NULL::VARCHAR AS dimension_value"
+    )
+    group_by = f"GROUP BY metrics.{dimension}" if dimension is not None else ""
+    order_and_limit = (
+        "ORDER BY net_revenue_gbp DESC NULLS LAST, dimension_value LIMIT 10"
+        if limit is not None
+        else ""
+    )
+    return con.execute(
+        f"""
+        WITH first_orders AS (
+            SELECT customer_id, min(order_at) AS first_order_at
+            FROM demo_orders
+            GROUP BY customer_id
+        )
+        SELECT
+            {dimension_select},
+            coalesce(sum(metrics.net_revenue_gbp), 0) AS net_revenue_gbp,
+            coalesce(sum(metrics.gross_revenue_gbp), 0) AS gross_revenue_gbp,
+            count(DISTINCT metrics.order_id) AS orders,
+            coalesce(sum(metrics.net_revenue_gbp), 0)
+                / nullif(count(DISTINCT metrics.order_id), 0) AS average_order_value,
+            coalesce(sum(metrics.refunded_amount_gbp), 0)
+                / nullif(sum(metrics.gross_revenue_gbp), 0) AS refund_rate,
+            count(DISTINCT CASE WHEN metrics.cancelled THEN metrics.order_id END)
+                / nullif(count(DISTINCT metrics.order_id), 0)::DECIMAL
+                AS cancellation_rate,
+            coalesce(sum(metrics.{unit_column}), 0)
+                / nullif(count(DISTINCT metrics.order_id), 0) AS units_per_order,
+            count(DISTINCT CASE
+                WHEN first_orders.first_order_at < ? THEN metrics.customer_id
+            END) / nullif(count(DISTINCT metrics.customer_id), 0)::DECIMAL
+                AS returning_customer_share
+        FROM {source} AS metrics
+        JOIN first_orders USING (customer_id)
+        WHERE metrics.order_at >= ? AND metrics.order_at < ?
+        {group_by}
+        {order_and_limit}
+        """,
+        [period.period_start, period.period_start, period.period_end],
+    ).fetchall()
+
+
+def _decimal(value: object) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.0001"))
+
+
+def _metric_id(
+    period: PeriodKey,
+    metric: str,
+    dimensions: tuple[tuple[str, str], ...],
+) -> str:
+    identity = (
+        period.grain,
+        period.period_start.isoformat(),
+        period.period_end.isoformat(),
+        period.scope,
+        metric,
+        *[f"{name}={value}" for name, value in dimensions],
+    )
+    digest = hashlib.sha256("|".join(identity).encode()).hexdigest()[:16]
+    return f"metric-{digest}"
+
+
+def compute_metric_evidence(
+    con: duckdb.DuckDBPyConnection,
+    period: PeriodKey,
+) -> list[MetricEvidence]:
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP VIEW demo_order_lines AS
+        SELECT * FROM demo_sales;
+
+        CREATE OR REPLACE TEMP VIEW demo_orders AS
+        SELECT
+          order_id,
+          min(order_at) AS order_at,
+          any_value(customer_id) AS customer_id,
+          any_value(store_id) AS store_id,
+          any_value(store_type) AS store_type,
+          any_value(acquisition_channel) AS acquisition_channel,
+          bool_or(cancelled) AS cancelled,
+          any_value(financial_status) AS financial_status,
+          sum(gross_revenue_gbp) AS gross_revenue_gbp,
+          sum(net_revenue_gbp) AS net_revenue_gbp,
+          sum(refunded_amount_gbp) AS refunded_amount_gbp,
+          sum(quantity) AS units
+        FROM demo_sales
+        GROUP BY order_id;
+        """
+    )
+    primary_comparison = comparison_periods(period)[0]
+    evidence: list[MetricEvidence] = []
+    metric_names = (
+        "net_revenue",
+        "gross_revenue",
+        "orders",
+        "average_order_value",
+        "refund_rate",
+        "cancellation_rate",
+        "units_per_order",
+        "returning_customer_share",
+    )
+    group_specs = (
+        ("demo_orders", "units", None),
+        ("demo_orders", "units", "store_id"),
+        ("demo_orders", "units", "store_type"),
+        ("demo_orders", "units", "acquisition_channel"),
+        ("demo_order_lines", "quantity", "product_category"),
+    )
+
+    for source, unit_column, dimension in group_specs:
+        current_rows = _query_metric_groups(
+            con,
+            source=source,
+            unit_column=unit_column,
+            dimension=dimension,
+            period=period,
+            limit=10 if dimension is not None else None,
+        )
+        comparison_rows = _query_metric_groups(
+            con,
+            source=source,
+            unit_column=unit_column,
+            dimension=dimension,
+            period=primary_comparison,
+            limit=None,
+        )
+        comparisons = {row[0]: row[1:] for row in comparison_rows}
+
+        for current_row in current_rows:
+            dimension_value, *current_metrics = current_row
+            if not current_metrics or int(current_metrics[2]) == 0:
+                continue
+            dimensions = (
+                () if dimension is None else ((dimension, str(dimension_value)),)
+            )
+            dimensions = tuple(sorted(dimensions))
+            comparison_metrics = comparisons.get(dimension_value)
+            sample_size = int(current_metrics[2])
+
+            for metric, current_raw, comparison_raw in zip(
+                metric_names,
+                current_metrics,
+                comparison_metrics or (None,) * len(metric_names),
+            ):
+                current_value = _decimal(current_raw)
+                comparison_value = (
+                    _decimal(comparison_raw) if comparison_raw is not None else None
+                )
+                absolute_change = (
+                    current_value - comparison_value
+                    if comparison_value is not None
+                    else None
+                )
+                percentage_change = (
+                    (absolute_change / abs(comparison_value) * Decimal(100)).quantize(
+                        Decimal("0.0001")
+                    )
+                    if absolute_change is not None and comparison_value != 0
+                    else None
+                )
+                evidence.append(
+                    MetricEvidence(
+                        evidence_id=_metric_id(period, metric, dimensions),
+                        period=period,
+                        metric=metric,
+                        dimensions=dimensions,
+                        current_value=current_value,
+                        comparison_value=comparison_value,
+                        absolute_change=absolute_change,
+                        percentage_change=percentage_change,
+                        sample_size=sample_size,
+                    )
+                )
+
+    return evidence
+
+
 def parse_config(env: Mapping[str, str]) -> Config:
     access = env.get("GUIDE_ACCESS", "user").strip()
     if access not in {"user", "organization"}:

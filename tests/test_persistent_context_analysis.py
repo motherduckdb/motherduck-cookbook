@@ -171,3 +171,98 @@ def test_load_demo_sales_rejects_unexpected_schema(flight, demo_fixture_path, tm
 
     with pytest.raises(ValueError, match="Unexpected demo fixture schema"):
         flight.load_demo_sales(con, str(malformed), demo_revision=0)
+
+
+def test_periods_include_completed_day_week_and_month(flight):
+    periods = flight.periods_to_process(flight.date(2026, 9, 1), 7, True)
+    assert (
+        flight.PeriodKey("day", flight.date(2026, 8, 31), flight.date(2026, 9, 1))
+        in periods
+    )
+    assert (
+        flight.PeriodKey("week", flight.date(2026, 8, 24), flight.date(2026, 8, 31))
+        in periods
+    )
+    assert (
+        flight.PeriodKey("month", flight.date(2026, 8, 1), flight.date(2026, 9, 1))
+        in periods
+    )
+
+
+def test_comparison_periods_use_fixed_half_open_ranges(flight):
+    assert flight.comparison_periods(
+        flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    ) == [
+        flight.PeriodKey("day", flight.date(2026, 9, 9), flight.date(2026, 9, 10)),
+        flight.PeriodKey("day", flight.date(2026, 9, 3), flight.date(2026, 9, 4)),
+        flight.PeriodKey("day", flight.date(2026, 8, 13), flight.date(2026, 9, 10)),
+    ]
+    assert flight.comparison_periods(
+        flight.PeriodKey("week", flight.date(2026, 8, 24), flight.date(2026, 8, 31))
+    ) == [
+        flight.PeriodKey("week", flight.date(2026, 8, 17), flight.date(2026, 8, 24)),
+        flight.PeriodKey("week", flight.date(2026, 7, 27), flight.date(2026, 8, 24)),
+    ]
+    assert flight.comparison_periods(
+        flight.PeriodKey("month", flight.date(2026, 8, 1), flight.date(2026, 9, 1))
+    ) == [
+        flight.PeriodKey("month", flight.date(2026, 7, 1), flight.date(2026, 8, 1)),
+        flight.PeriodKey("month", flight.date(2026, 5, 3), flight.date(2026, 8, 1)),
+    ]
+
+
+def test_order_count_deduplicates_repeated_order_fields(flight, tmp_path):
+    fixture = tmp_path / "fixture.parquet"
+    flight.build_demo_fixture(fixture)
+    con = flight.duckdb.connect()
+    flight.load_demo_sales(con, str(fixture), 0)
+    period = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    evidence = flight.compute_metric_evidence(con, period)
+    total_orders = next(
+        item for item in evidence if item.metric == "orders" and item.dimensions == ()
+    )
+    line_count, expected = con.execute(
+        "SELECT count(*), count(DISTINCT order_id) FROM demo_sales "
+        "WHERE order_at::DATE = DATE '2026-09-10'"
+    ).fetchone()
+    assert line_count > expected
+    assert int(total_orders.current_value) == expected
+
+
+def test_order_count_keeps_store_type_evidence_separate(flight, demo_fixture_path):
+    con = flight.duckdb.connect()
+    flight.load_demo_sales(con, str(demo_fixture_path), 0)
+    period = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    evidence = flight.compute_metric_evidence(con, period)
+    store_type_orders = {
+        item.dimensions[0][1]: int(item.current_value)
+        for item in evidence
+        if item.metric == "orders"
+        and item.dimensions
+        and item.dimensions[0][0] == "store_type"
+    }
+    assert store_type_orders == {"ecommerce": 28, "physical": 18}
+    totals = {item.metric for item in evidence if item.dimensions == ()}
+    assert totals == {
+        "net_revenue",
+        "gross_revenue",
+        "orders",
+        "average_order_value",
+        "refund_rate",
+        "cancellation_rate",
+        "units_per_order",
+        "returning_customer_share",
+    }
+    dimension_names = {item.dimensions[0][0] for item in evidence if item.dimensions}
+    assert dimension_names == {
+        "store_id",
+        "store_type",
+        "acquisition_channel",
+        "product_category",
+    }
+    evidence_ids = [item.evidence_id for item in evidence]
+    assert len(evidence_ids) == len(set(evidence_ids))
+    assert all(
+        flight.re.fullmatch(r"metric-[0-9a-f]{16}", evidence_id)
+        for evidence_id in evidence_ids
+    )
