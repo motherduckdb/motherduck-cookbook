@@ -48,17 +48,18 @@ The catalog ID and folder name are `flight-persistent-context-analysis`.
 
 ## User experience
 
-A reader starts in demo mode. The Flight creates deterministic e-commerce demo
-tables covering the previous 120 days. The data includes orders, order items,
-refunds, products, and markets, with London as the primary market and weather
-location. A fixed seed produces the same rows for the same date, which makes
-unchanged-run behavior reproducible.
+A reader starts in demo mode. The Flight reads a public Parquet fixture covering
+120 days of synthetic sales from two London storefronts: one e-commerce store
+serving London customers and one physical shop. The data includes order, item,
+product, refund, cancellation, customer, and storefront attributes. The fixed
+fixture makes unchanged-run behavior reproducible.
 
-The reader runs the Flight with an `ANALYSIS_AS_OF` date. The first run computes
-the completed daily period and any completed weekly or monthly periods that need
-work. Each period produces an analysis Guide. Running the same date again skips
-the LLM because the input fingerprints match. Changing a demo revision or adding
-an annotation makes only the affected period and its parent periods eligible for
+The reader runs the Flight with an `ANALYSIS_AS_OF` date, which defaults to the
+day after the fixture's latest order date. The first run computes the completed
+daily period and any completed weekly or monthly periods that need work. Each
+period produces an analysis Guide. Running the same date again skips the LLM
+because the input fingerprints match. Changing a demo revision or adding an
+annotation makes only the affected period and its parent periods eligible for
 regeneration.
 
 For production use, the reader disables demo mode and replaces the source queries
@@ -117,9 +118,9 @@ The code organizes state around a `PeriodKey` with four fields:
 - `period_end`: exclusive date
 - `scope`: `all` in the first version
 
-The first version does not create one Guide per market or product. Metrics inside
-one period Guide carry those dimensions. This bounds Guide growth and gives the
-company one canonical report for each period.
+The first version does not create one Guide per storefront or product. Metrics
+inside one period Guide carry those dimensions. This bounds Guide growth and
+gives the company one canonical report for each period.
 
 The Flight maintains four tables in a configurable state schema.
 
@@ -133,15 +134,16 @@ last error. A unique constraint on the period fields prevents duplicate state.
 
 One row per period, metric, and dimension set. Columns include the current value,
 comparison value, absolute change, percentage change, sample size, and an evidence
-label. A JSON column stores dimensions such as market, channel, or product
-category. SQL computes every value before the model runs.
+label. A JSON column stores dimensions such as storefront, store type,
+acquisition channel, or product category. SQL computes every value before the
+model runs.
 
 ### `external_signals`
 
 One row per normalized public signal. It stores the provider, provider ID, event
-time range, market, title or weather label, source URL, compact attributes, raw
-payload hash, and retrieval time. A provider ID and payload hash make ingestion
-idempotent.
+time range, location, title or weather label, source URL, compact attributes,
+raw payload hash, and retrieval time. A provider ID and payload hash make
+ingestion idempotent.
 
 ### `period_dependencies`
 
@@ -151,38 +153,67 @@ uses these rows to invalidate parents after a completed child changes.
 
 ## Demo commerce data
 
-Demo mode creates a small current Shopify-shaped model rather than relying on a
-credentialed service or a frozen historical download. Its structure follows a
-private MotherDuck dataset containing Shopify orders, line items, products,
-variants, cancellations, refunds, currencies, and shipping countries.
+Demo mode reads a small Shopify-shaped Parquet fixture rather than requiring a
+credentialed service. Its structure follows a private MotherDuck dataset
+containing Shopify orders, line items, products, variants, cancellations,
+refunds, and currencies.
 
-- `demo_orders` has one row per order with date, synthetic customer key, market,
-  source channel, amounts, currency, cancellation state, and financial status.
-- `demo_order_items` has one row per order and synthetic product with category,
-  variant, quantity, price, discount, and net revenue.
-- `demo_refunds` has one row per refund event with order, date, quantity, and
-  amount.
-- `demo_products` maps synthetic duck merchandise to generic categories and
-  variants.
-- `demo_markets` stores coarse market names, time zones, latitude, and longitude.
+The fixture contains one row per order line. Order-level values repeat across
+the order's lines, and metric queries explicitly deduplicate by synthetic order
+ID before calculating order counts, cancellations, average order value, or
+returning-customer share. The main fields are:
+
+- synthetic order, customer, product, and variant keys
+- order and refund timestamps
+- `store_id`, `store_name`, and `store_type`
+- product category, quantity, price, discount, gross revenue, net revenue, and
+  refunded amount in GBP
+- cancellation and financial status
+- acquisition channel for e-commerce orders
+- `market = 'London'` for both storefronts
+
+The two storefronts are stable synthetic entities:
+
+- `duck_shop_online`, an e-commerce store serving London customers
+- `duck_shop_london`, a physical shop in London
+
+The physical shop makes daily weather a plausible footfall signal. London news
+can supply context for both storefronts. The analysis compares the storefronts
+but does not assume that weather or news caused a sales change.
+
+The immutable versioned fixture is published at equivalent public paths:
+
+- `s3://us-prd-motherduck-open-datasets/persistent-context-analysis/v1/duck_shop_sales.parquet`
+- `https://us.data.motherduck.com/persistent-context-analysis/v1/duck_shop_sales.parquet`
+
+The longer
+`https://us-prd-motherduck-open-datasets.s3.us-east-1.amazonaws.com/...` form is
+the regional S3 HTTPS endpoint, not an `s3://` bucket name. The Flight defaults
+to the shorter HTTPS mirror so the sample can be inspected in a browser and read
+without AWS credentials. A configurable `DEMO_DATA_URL` accepts either public
+form. The implementation records the fixture checksum, row count, minimum date,
+and maximum date so the evidence fingerprint includes the exact source version.
 
 The public fixture has no copied orders and no one-to-one mapping to source rows.
 It excludes names, emails, addresses, phone numbers, IP addresses, checkout
 tokens, Shopify IDs, SKUs, and exact transaction values. The generator keeps only
 the useful structural relationships. It uses invented volumes and amounts,
-synthetic keys, generic duck products, coarse markets, shifted dates, and a fixed
-random seed. Generation parameters must be reviewed as public code before commit.
+synthetic keys, generic duck products, a London location, shifted dates, and a
+fixed random seed. Generation parameters must be reviewed as public code before
+commit.
 
-The generated data includes weekly seasonality, market differences,
-product-category differences, refunds, cancellations, occasional bulk orders,
-and a small number of documented anomalies. `DEMO_REVISION` changes a bounded set
-of late-arriving rows so tests and readers can observe invalidation without
-editing source code. The README labels every demo row and anomaly as synthetic.
+The generated data includes weekly seasonality, differences between e-commerce
+and physical-store behavior, product-category differences, refunds,
+cancellations, occasional bulk orders, and a small number of documented
+anomalies. `DEMO_REVISION` applies a bounded local overlay after reading the
+fixture so tests and readers can observe late-data invalidation without changing
+the public object. The README labels every demo row and anomaly as synthetic.
 
 The default metrics are net revenue, gross revenue, orders, average order value,
 refund rate, cancellation rate, units per order, and returning-customer share.
-The Flight computes totals plus breakdowns for market, source channel, and product
-category. Configuration caps the number of breakdown rows sent to the model.
+The Flight computes totals plus breakdowns for storefront, store type,
+acquisition channel, and product category. Configuration caps the number of
+breakdown rows sent to the model.
 
 Comparisons follow fixed rules rather than model judgment. A daily report compares
 with the previous day, the same weekday in the previous week, and the trailing
@@ -200,8 +231,8 @@ The Flight has two narrow public-signal adapters.
 The Open-Meteo Historical Weather API supplies daily temperature, precipitation,
 snowfall, wind, and weather codes for London. The Flight stores the normalized
 daily values and the source request URL. Weather is available for both backfills
-and current runs. Adapters can add coordinates for other markets, but the sample
-does not apply London weather to sales outside the London market.
+and current runs. Adapters can add coordinates for other locations, but the
+sample applies London weather only because both storefronts serve London.
 
 ### RSS entries
 
@@ -241,7 +272,7 @@ recommended shape is:
 event_id: inc-142
 start_at: 2026-09-10T09:12:00Z
 end_at: 2026-09-10T10:04:00Z
-scope: market=NL,channel=web
+scope: store_id=duck_shop_online
 category: incident
 source: INC-142
 ---
@@ -362,9 +393,11 @@ flight-plans/flight-persistent-context-analysis/
 ```
 
 `flight.py` remains a single deployable file. The domain skill, typed models,
-demo generator, signal adapters, Guide operations, and orchestration live in that
-file because Flight Plan templates are single-file artifacts. Sections and small
-functions keep the file navigable.
+demo fixture builder and loader, signal adapters, Guide operations, and
+orchestration live in that file because Flight Plan templates are single-file
+artifacts. Sections and small functions keep the file navigable. A local fixture
+build mode writes the deterministic Parquet used for the versioned public upload;
+normal Flight runs only read the published object.
 
 The README follows the cookbook structure. It explains the persistent context
 pattern, the topic hierarchy, the demo, the production adaptation points, Guide
@@ -378,12 +411,15 @@ No generated `catalog.json` or create-Flight SQL file is committed.
 Unit tests will import `flight.py` and cover period construction, metric
 fingerprints, late-arrival invalidation, annotation-version invalidation,
 dependency propagation, rendering, identifier validation, public-signal
-normalization, and idempotent second runs. Network and model calls use recorded or
-fake responses.
+normalization, correct order-level aggregation from repeated line-item fields,
+and idempotent second runs. Network and model calls use recorded or fake
+responses.
 
 Repository checks will build and schema-validate the catalog. A local demo run
-will use a temporary DuckDB database plus a fake Guide store to prove the full
-period flow without changing a MotherDuck account.
+will read the fixture into a temporary DuckDB database and use a fake Guide store
+to prove the full period flow without changing a MotherDuck account. Publication
+verification will confirm the generated Parquet schema and checksum, upload the
+versioned object, and read the same rows through both the S3 URI and HTTPS mirror.
 
 Live validation requires an account where the Guide SQL functions are enabled.
 The current production and staging CLI sessions returned `Catalog Error: Table
@@ -398,6 +434,8 @@ check.
 - The first demo run creates the expected daily, weekly, and monthly Guides.
 - An unchanged rerun makes no model call and creates no Guide version.
 - A changed day regenerates that day and only its affected parents.
+- Reports compare the e-commerce and physical London storefronts without mixing
+  their order grain.
 - Weather, relevant RSS entries, and overlapping annotations appear with
   provenance.
 - Reports distinguish correlation from causation.
