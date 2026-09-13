@@ -107,7 +107,7 @@ def test_load_demo_sales_adds_late_revision_to_both_completed_periods(
         """
     ).fetchone()
     assert revised.row_count == baseline.row_count + 1
-    assert revised.content_hash != baseline.content_hash
+    assert revised.content_hash == baseline.content_hash
     assert (late_rows, late_orders) == (1, 1)
     assert late_min_date == late_max_date == flight.date(2026, 8, 31)
 
@@ -780,7 +780,7 @@ class FakeGuideStore:
         self._assert_writable_topic(values["topic"])
         self.calls.append(("create", values))
         record = self.flight.GuideRecord(
-            self.flight.UUID("99999999-9999-9999-9999-999999999999"),
+            self.flight.uuid4(),
             values["topic"],
             values["title"],
             values["description"],
@@ -1383,3 +1383,708 @@ def test_motherduck_guide_store_parameterizes_values_and_maps_versions(flight):
     assert bound_references[0]["uuid"] == references[0]["uuid"]
     assert "STRUCT" in con.calls[1][0]
     assert "STRUCT" in con.calls[2][0]
+
+
+def _state_config(flight):
+    return flight.replace(flight.parse_config({}), state_database="memory")
+
+
+def _fingerprint_inputs(flight):
+    period = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    metric = flight.MetricEvidence(
+        evidence_id="metric-1",
+        period=period,
+        metric="orders",
+        dimensions=(("store_type", "ecommerce"),),
+        comparison_label="prior_day",
+        comparison_period=flight.PeriodKey(
+            "day", flight.date(2026, 9, 9), flight.date(2026, 9, 10)
+        ),
+        current_value=flight.Decimal("10.0000"),
+        comparison_value=flight.Decimal("8.0000"),
+        absolute_change=flight.Decimal("2.0000"),
+        percentage_change=flight.Decimal("25.0000"),
+        sample_size=10,
+    )
+    signal = flight.ExternalSignal(
+        signal_id="signal-1",
+        provider="test",
+        provider_id="test-1",
+        starts_at=flight.datetime(2026, 9, 10, tzinfo=flight.timezone.utc),
+        ends_at=flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+        location="London",
+        title="Signal",
+        source_url="https://example.com/signal",
+        attributes=(("kind", "test"),),
+        payload_hash="payload-1",
+        retrieved_at=flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+    )
+    definition = _guide_record(
+        flight,
+        guide_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        topic="persistent-analysis/ecommerce/definitions",
+        current_version=1,
+        content="definition",
+    )
+    annotation = flight.Annotation(
+        annotation_id="annotation-1",
+        guide_id=flight.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        guide_version=1,
+        event_id="event-1",
+        starts_at=flight.datetime(2026, 9, 10, tzinfo=flight.timezone.utc),
+        ends_at=flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+        scope="all",
+        category="test",
+        source="test",
+        body="body",
+    )
+    fixture = flight.FixtureMetadata(
+        "fixture-1", 1, flight.date(2026, 9, 10), flight.date(2026, 9, 10)
+    )
+    return period, metric, signal, definition, annotation, fixture
+
+
+def test_evidence_fingerprint_tracks_changed_inputs(flight):
+    period, metric, signal, definition, annotation, fixture = _fingerprint_inputs(flight)
+    watermark = flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc)
+    baseline = flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        definitions=[definition],
+        annotations=[annotation],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+
+    assert baseline == flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        definitions=[definition],
+        annotations=[annotation],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+    assert baseline != flight.evidence_fingerprint(
+        period=period,
+        metrics=[flight.replace(metric, current_value=flight.Decimal("11.0000"))],
+        signals=[signal],
+        definitions=[definition],
+        annotations=[annotation],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+    assert baseline != flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[flight.replace(signal, payload_hash="payload-2")],
+        definitions=[definition],
+        annotations=[annotation],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+    assert baseline != flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        definitions=[flight.replace(definition, current_version=2)],
+        annotations=[annotation],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+    assert baseline != flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        definitions=[definition],
+        annotations=[flight.replace(annotation, guide_version=2)],
+        fixture=fixture,
+        source_watermark=watermark,
+    )
+    assert baseline != flight.evidence_fingerprint(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        definitions=[definition],
+        annotations=[annotation],
+        fixture=flight.replace(fixture, content_hash="fixture-2"),
+        source_watermark=watermark,
+    )
+
+
+def test_period_state_transitions_preserve_success_until_replacement(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    period, metric, _, _, _, _ = _fingerprint_inputs(flight)
+    guide = _guide_record(
+        flight,
+        guide_id="cccccccc-cccc-cccc-cccc-cccccccccccc",
+        topic="persistent-analysis/ecommerce/daily",
+    )
+    now = flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+
+    flight.ensure_state_schema(con, config)
+    run_id = flight.claim_period(con, config, period, now)
+    assert run_id is not None
+    assert flight.claim_period(con, config, period, now) is None
+    flight.complete_period(
+        con,
+        config,
+        period=period,
+        run_id=run_id,
+        fingerprint="fingerprint-1",
+        guide=guide,
+        metrics=[metric],
+        source_watermark=now,
+        now=now,
+    )
+    complete = flight.period_state(con, config, period)
+    assert complete is not None
+    assert complete.status == "complete"
+    assert complete.fingerprint == "fingerprint-1"
+    assert complete.guide_id == guide.id
+    assert con.execute("SELECT count(*) FROM memory.main.metric_evidence").fetchone()[0] == 1
+
+    second_run = flight.claim_period(con, config, period, now)
+    assert second_run is not None
+    flight.fail_period(
+        con,
+        config,
+        period=period,
+        run_id=second_run,
+        error=RuntimeError("failed replacement"),
+    )
+    after_failure = flight.period_state(con, config, period)
+    assert after_failure is not None
+    assert after_failure.status == "failed"
+    assert after_failure.fingerprint == "fingerprint-1"
+    assert after_failure.guide_id == guide.id
+
+
+def test_complete_period_rolls_back_when_dependency_persistence_fails(
+    flight, monkeypatch
+):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+    period, metric, _, _, _, _ = _fingerprint_inputs(flight)
+    guide = _guide_record(
+        flight,
+        guide_id="cccccccc-cccc-cccc-cccc-cccccccccccc",
+        topic="persistent-analysis/ecommerce/daily",
+    )
+    now = flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+    run_id = flight.claim_period(con, config, period, now)
+    assert run_id is not None
+
+    def fail_dependencies(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("dependency write failed")
+
+    monkeypatch.setattr(flight, "record_dependencies", fail_dependencies)
+    with pytest.raises(RuntimeError, match="dependency write failed"):
+        flight.complete_period(
+            con,
+            config,
+            period=period,
+            run_id=run_id,
+            fingerprint="fingerprint-1",
+            guide=guide,
+            metrics=[metric],
+            source_watermark=now,
+            now=now,
+            dependencies=[("current", period)],
+        )
+
+    assert con.execute("SELECT count(*) FROM memory.main.metric_evidence").fetchone()[0] == 0
+    running = flight.period_state(con, config, period)
+    assert running is not None
+    assert running.status == "running"
+
+
+def test_parent_gate_blocks_only_overlapping_failed_children(flight):
+    weekly = flight.PeriodKey(
+        "week", flight.date(2026, 8, 31), flight.date(2026, 9, 7)
+    )
+    monthly = flight.PeriodKey(
+        "month", flight.date(2026, 9, 1), flight.date(2026, 10, 1)
+    )
+    overlapping_day = flight.PeriodKey(
+        "day", flight.date(2026, 9, 2), flight.date(2026, 9, 3)
+    )
+    unrelated_day = flight.PeriodKey(
+        "day", flight.date(2026, 8, 1), flight.date(2026, 8, 2)
+    )
+
+    assert flight._has_failed_required_child(weekly, [overlapping_day])
+    assert not flight._has_failed_required_child(monthly, [unrelated_day])
+
+
+def test_record_unclaimed_failure_persists_a_retryable_period_state(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+    period = flight.PeriodKey(
+        "day", flight.date(2026, 9, 10), flight.date(2026, 9, 11)
+    )
+
+    flight.record_unclaimed_failure(
+        con, config, period=period, error=RuntimeError("metric query failed")
+    )
+
+    state = flight.period_state(con, config, period)
+    assert state is not None
+    assert state.status == "failed"
+    assert flight.claim_period(
+        con,
+        config,
+        period,
+        flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc),
+    ) is not None
+
+
+def test_affected_periods_follow_recorded_ranges_without_unrelated_reports(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+    changed = flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11))
+    weekly = flight.PeriodKey("week", flight.date(2026, 9, 7), flight.date(2026, 9, 14))
+    monthly = flight.PeriodKey("month", flight.date(2026, 9, 1), flight.date(2026, 10, 1))
+    unrelated = flight.PeriodKey("week", flight.date(2026, 8, 3), flight.date(2026, 8, 10))
+    touching = flight.PeriodKey("week", flight.date(2026, 9, 14), flight.date(2026, 9, 21))
+    flight.record_dependencies(con, config, report=weekly, dependencies=[("rollup", changed)])
+    flight.record_dependencies(
+        con, config, report=monthly, dependencies=[("comparison", changed)]
+    )
+    flight.record_dependencies(
+        con,
+        config,
+        report=unrelated,
+        dependencies=[
+            (
+                "rollup",
+                flight.PeriodKey("day", flight.date(2026, 8, 3), flight.date(2026, 8, 4)),
+            )
+        ],
+    )
+    flight.record_dependencies(
+        con,
+        config,
+        report=touching,
+        dependencies=[
+            (
+                "comparison",
+                flight.PeriodKey("day", flight.date(2026, 9, 11), flight.date(2026, 9, 12)),
+            )
+        ],
+    )
+
+    assert flight.affected_periods(con, config, changed) == [monthly, weekly]
+
+
+def test_affected_guide_periods_select_only_reports_with_stale_guide_versions(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+    report = flight.PeriodKey(
+        "day", flight.date(2026, 9, 10), flight.date(2026, 9, 11)
+    )
+    unrelated = flight.PeriodKey(
+        "day", flight.date(2026, 9, 11), flight.date(2026, 9, 12)
+    )
+    guide_id = flight.UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    flight.record_guide_dependencies(
+        con,
+        config,
+        report=report,
+        dependencies=[(guide_id, 1, "annotation")],
+    )
+    flight.record_guide_dependencies(
+        con,
+        config,
+        report=unrelated,
+        dependencies=[(guide_id, 2, "annotation")],
+    )
+
+    assert flight.affected_guide_periods(
+        con, config, [(guide_id, 2, "annotation")]
+    ) == [report]
+
+
+def _insert_complete_period_state(flight, con, config, period, guide):
+    con.execute(
+        """
+        INSERT INTO memory.main.analysis_periods (
+          grain, period_start, period_end, scope, evidence_fingerprint, guide_id,
+          guide_version, status, prompt_version, last_success_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?)
+        """,
+        [
+            period.grain,
+            period.period_start,
+            period.period_end,
+            period.scope,
+            f"fingerprint-{guide.id}",
+            str(guide.id),
+            guide.current_version,
+            flight.PROMPT_VERSION,
+            flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc),
+        ],
+    )
+
+
+def test_context_references_select_prior_rollups_and_rollup_children(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+
+    monthly = flight.PeriodKey(
+        "month", flight.date(2026, 8, 1), flight.date(2026, 9, 1)
+    )
+    weekly = flight.PeriodKey(
+        "week", flight.date(2026, 8, 31), flight.date(2026, 9, 7)
+    )
+    monthly_child_week = flight.PeriodKey(
+        "week", flight.date(2026, 9, 7), flight.date(2026, 9, 14)
+    )
+    daily = flight.PeriodKey(
+        "day", flight.date(2026, 9, 8), flight.date(2026, 9, 9)
+    )
+    month_guide = _guide_record(
+        flight,
+        guide_id="11111111-1111-1111-1111-111111111111",
+        topic="persistent-analysis/ecommerce/monthly",
+    )
+    week_guide = _guide_record(
+        flight,
+        guide_id="22222222-2222-2222-2222-222222222222",
+        topic="persistent-analysis/ecommerce/weekly",
+    )
+    day_guide = _guide_record(
+        flight,
+        guide_id="33333333-3333-3333-3333-333333333333",
+        topic="persistent-analysis/ecommerce/daily",
+    )
+    monthly_child_guide = _guide_record(
+        flight,
+        guide_id="44444444-4444-4444-4444-444444444444",
+        topic="persistent-analysis/ecommerce/weekly",
+    )
+    for period, guide in (
+        (monthly, month_guide),
+        (weekly, week_guide),
+        (daily, day_guide),
+        (monthly_child_week, monthly_child_guide),
+    ):
+        _insert_complete_period_state(flight, con, config, period, guide)
+
+    daily_context = flight.context_references(con, config, daily)
+    week_context = flight.context_references(
+        con,
+        config,
+        flight.PeriodKey("week", flight.date(2026, 9, 7), flight.date(2026, 9, 14)),
+    )
+    month_context = flight.context_references(
+        con,
+        config,
+        flight.PeriodKey("month", flight.date(2026, 9, 1), flight.date(2026, 10, 1)),
+    )
+
+    assert {(item.period, item.guide_id) for item in daily_context} == {
+        (monthly, month_guide.id),
+        (weekly, week_guide.id),
+    }
+    assert [(item.period, item.guide_id) for item in week_context] == [
+        (daily, day_guide.id)
+    ]
+    assert [(item.period, item.guide_id) for item in month_context] == [
+        (monthly_child_week, monthly_child_guide.id)
+    ]
+
+
+def test_evidence_fingerprint_tracks_narrative_context_versions(flight):
+    period, metric, signal, definition, annotation, fixture = _fingerprint_inputs(flight)
+    context = flight.ContextReference(
+        period=flight.PeriodKey(
+            "week", flight.date(2026, 8, 31), flight.date(2026, 9, 7)
+        ),
+        guide_id=flight.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        guide_version=1,
+    )
+    common = {
+        "period": period,
+        "metrics": [metric],
+        "signals": [signal],
+        "definitions": [definition],
+        "annotations": [annotation],
+        "fixture": fixture,
+        "source_watermark": flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+    }
+
+    assert flight.evidence_fingerprint(**common, context=[context]) != flight.evidence_fingerprint(
+        **common,
+        context=[flight.replace(context, guide_version=2)],
+    )
+
+
+def test_store_external_signals_preserves_the_timestamp_for_an_unchanged_payload(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    flight.ensure_state_schema(con, config)
+    _, _, signal, _, _, _ = _fingerprint_inputs(flight)
+    original = flight.replace(
+        signal,
+        starts_at=flight.datetime(2026, 9, 10, tzinfo=flight.timezone.utc),
+        ends_at=flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+        retrieved_at=flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+    )
+    refreshed = flight.replace(
+        original, retrieved_at=flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+    )
+
+    flight.store_external_signals(con, config, [original])
+    flight.store_external_signals(con, config, [refreshed])
+
+    stored = flight.signals_for_period(
+        con,
+        config,
+        flight.PeriodKey("day", flight.date(2026, 9, 10), flight.date(2026, 9, 11)),
+    )
+    assert stored[0].retrieved_at == original.retrieved_at
+
+
+def test_render_guide_uses_trusted_metrics_and_rejects_unknown_references(flight):
+    period, metric, signal, definition, annotation, _ = _fingerprint_inputs(flight)
+    draft = flight.AnalysisDraft(
+        summary="The model summary is narrative only.",
+        findings=[
+            flight.Finding(
+                title="Online orders increased",
+                summary="Possible context only.",
+                evidence_ids=[metric.evidence_id],
+                signal_ids=[signal.signal_id],
+                annotation_ids=[annotation.annotation_id],
+                confidence="medium",
+            )
+        ],
+    )
+
+    content, references = flight.render_guide(
+        period=period,
+        metrics=[metric],
+        signals=[signal],
+        annotations=[annotation],
+        definitions=[definition],
+        prior_context=[],
+        draft=draft,
+        caveats=[],
+    )
+
+    assert "10.0000" in content
+    assert "8.0000" in content
+    assert "BEGIN UNTRUSTED DATA" in content
+    assert "Temporal association does not establish causation." in content
+    assert references[0]["table"] == "metric_evidence"
+
+    with pytest.raises(ValueError, match="unknown evidence IDs"):
+        flight.validate_draft_references(
+            flight.AnalysisDraft(
+                summary="Invalid",
+                findings=[
+                    flight.Finding(
+                        title="Invalid",
+                        summary="Invalid",
+                        evidence_ids=["metric-unknown"],
+                        confidence="low",
+                    )
+                ],
+            ),
+            metrics=[metric],
+            signals=[signal],
+            annotations=[annotation],
+        )
+
+
+class FakeAnalyzer:
+    def __init__(self, flight):
+        self.flight = flight
+        self.calls = []
+
+    def analyze(self, **values):
+        self.calls.append(values)
+        metric = values["metrics"][0]
+        return self.flight.AnalysisDraft(
+            summary="Synthetic analysis.",
+            findings=[
+                self.flight.Finding(
+                    title="Synthetic change",
+                    summary="Possible context only.",
+                    evidence_ids=[metric.evidence_id],
+                    confidence="low",
+                )
+            ],
+        )
+
+
+def test_run_analysis_skips_unchanged_periods(flight, demo_fixture_path):
+    rss_payload = b"""<rss><channel><item><title>Story</title>
+      <link>https://www.bbc.co.uk/news/example</link><guid>story</guid>
+      <pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>"""
+    weather_payload = json.dumps(
+        {
+            "daily": {
+                "time": ["2026-09-10"],
+                "temperature_2m_max": [18.5],
+                "temperature_2m_min": [11.2],
+                "precipitation_sum": [0],
+                "snowfall_sum": [0],
+                "wind_speed_10m_max": [17.8],
+                "weather_code": [2],
+            }
+        }
+    ).encode()
+
+    def opener(request, *, timeout):
+        del timeout
+        return _FakeResponse(
+            weather_payload if "open-meteo" in request.full_url else rss_payload
+        )
+
+    config = flight.replace(
+        _state_config(flight),
+        demo_data_url=str(demo_fixture_path),
+        analysis_as_of=flight.date(2026, 9, 11),
+        reconciliation_days=1,
+    )
+    con = flight.duckdb.connect()
+    store = FakeGuideStore(flight)
+    analyzer = FakeAnalyzer(flight)
+    now = flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+
+    first = flight.run_analysis(config, con, store, analyzer, opener, now)
+    calls_after_first = len(analyzer.calls)
+    writes_after_first = len(
+        [call for call in store.calls if call[0] in {"create", "update"}]
+    )
+    second = flight.run_analysis(config, con, store, analyzer, opener, now)
+
+    assert first == {
+        "created": 3,
+        "updated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "lease_conflicts": 0,
+    }
+    assert second == {
+        "created": 0,
+        "updated": 0,
+        "skipped": 1,
+        "failed": 0,
+        "lease_conflicts": 0,
+    }
+    assert len(analyzer.calls) == calls_after_first
+    assert len([call for call in store.calls if call[0] in {"create", "update"}]) == writes_after_first
+
+
+def test_run_analysis_invalidates_only_dependent_periods_after_late_data(
+    flight, demo_fixture_path
+):
+    rss_payload = b"""<rss><channel><item><title>Story</title>
+      <link>https://www.bbc.co.uk/news/example</link><guid>story</guid>
+      <pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>"""
+    weather_payload = json.dumps(
+        {
+            "daily": {
+                "time": ["2026-09-10"],
+                "temperature_2m_max": [18.5],
+                "temperature_2m_min": [11.2],
+                "precipitation_sum": [0],
+                "snowfall_sum": [0],
+                "wind_speed_10m_max": [17.8],
+                "weather_code": [2],
+            }
+        }
+    ).encode()
+
+    def opener(request, *, timeout):
+        del timeout
+        return _FakeResponse(
+            weather_payload if "open-meteo" in request.full_url else rss_payload
+        )
+
+    config = flight.replace(
+        _state_config(flight),
+        demo_data_url=str(demo_fixture_path),
+        analysis_as_of=flight.date(2026, 9, 8),
+        reconciliation_days=8,
+    )
+    con = flight.duckdb.connect()
+    store = FakeGuideStore(flight)
+    analyzer = FakeAnalyzer(flight)
+    now = flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+
+    first = flight.run_analysis(config, con, store, analyzer, opener, now)
+    unrelated_period = flight.PeriodKey(
+        "day", flight.date(2026, 8, 30), flight.date(2026, 8, 31)
+    )
+    unrelated_guide = _guide_record(
+        flight,
+        guide_id="eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        topic="persistent-analysis/ecommerce/daily",
+        title=flight.guide_title(unrelated_period),
+        current_version=1,
+        content="Unrelated analysis.",
+        external_id="unrelated",
+    )
+    store.records.append(unrelated_guide)
+    _insert_complete_period_state(flight, con, config, unrelated_period, unrelated_guide)
+    calls_after_first = len(analyzer.calls)
+    writes_after_first = len(
+        [call for call in store.calls if call[0] in {"create", "update"}]
+    )
+    second = flight.run_analysis(config, con, store, analyzer, opener, now)
+    revised = flight.run_analysis(
+        flight.replace(config, demo_revision=1), con, store, analyzer, opener, now
+    )
+
+    changed_day = flight.PeriodKey(
+        "day", flight.date(2026, 8, 31), flight.date(2026, 9, 1)
+    )
+    changed_week = flight.PeriodKey(
+        "week", flight.date(2026, 8, 31), flight.date(2026, 9, 7)
+    )
+    changed_month = flight.PeriodKey(
+        "month", flight.date(2026, 8, 1), flight.date(2026, 9, 1)
+    )
+    updated_ids = {
+        call[1]["guide_id"]
+        for call in store.calls[writes_after_first:]
+        if call[0] == "update"
+    }
+    versions = {
+        (record.topic, record.title): record.current_version for record in store.records
+    }
+
+    assert first["created"] == 10
+    assert first["failed"] == 0
+    assert first["lease_conflicts"] == 0
+    assert second == {
+        "created": 0,
+        "updated": 0,
+        "skipped": 10,
+        "failed": 0,
+        "lease_conflicts": 0,
+    }
+    assert len(analyzer.calls) == calls_after_first + revised["updated"]
+    assert revised["created"] == 0
+    assert revised["failed"] == 0
+    for period in (changed_day, changed_week, changed_month):
+        record = next(
+            item
+            for item in store.records
+            if item.topic == flight._analysis_guide_topic(config.guide_root, period)
+            and item.title == flight.guide_title(period)
+        )
+        assert record.id in updated_ids
+    assert versions[("persistent-analysis/ecommerce/daily", "Commerce analysis for 2026-08-30")] == 1
