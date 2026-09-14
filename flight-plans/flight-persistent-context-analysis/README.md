@@ -76,7 +76,9 @@ SQL objects, not model prose.
 | `RETENTION_MODE` | `keep` | Set `archive` to move old daily and weekly Guides. |
 | `DAILY_GUIDE_KEEP_DAYS` | `90` | Keep this many daily Guides before archival. |
 | `WEEKLY_GUIDE_KEEP_WEEKS` | `52` | Keep this many weekly Guides before archival. |
-| `MODEL` | `anthropic/claude-sonnet-4.6` | OpenRouter model used after evidence changes. |
+| `MODEL` | `anthropic/claude-sonnet-4.6` | OpenRouter model used after evidence changes. Set as a Flight config value or local environment variable. |
+| `ANALYSIS_INSTRUCTIONS` | Built-in evidence and causation rules | Operator instructions inserted before trusted and untrusted data. Set as a Flight config value or local environment variable; keep the default safety rules when overriding it. |
+| `OPENROUTER_SECRET_NAME` | `openrouter` | Flights secret name. The Flight reads `<secret_name>_OPENROUTER_API_KEY` first, then `OPENROUTER_API_KEY` for local runs. |
 
 ## Run it
 
@@ -110,10 +112,20 @@ timestamp must include a timezone. The Flight treats the body as untrusted data.
 
 ### Deploy as a Flight
 
-Create an OpenRouter Flights secret that provides `OPENROUTER_API_KEY`. Create
-the Flight with `MD_CREATE_FLIGHT`, passing a name, [`flight.py`](flight.py),
-[`requirements.txt`](requirements.txt), the secret name, and any config values
-from the table. The Flight runtime injects `MOTHERDUCK_TOKEN` automatically.
+First create an API key at [OpenRouter API keys](https://openrouter.ai/settings/keys).
+Then, in [MotherDuck Settings > Secrets](https://app.motherduck.com/settings/secrets),
+create a `TYPE flights` secret named `openrouter` with an
+`OPENROUTER_API_KEY` parameter. The OpenRouter page creates the key; the
+MotherDuck secret makes it available only to the Flight. Do not put the key in
+source, Flight config, or a Guide.
+
+Create the Flight with `MD_CREATE_FLIGHT`, passing a name,
+[`flight.py`](flight.py), [`requirements.txt`](requirements.txt),
+`flight_secret_names: ["openrouter"]`, and any config values from the table.
+Set `OPENROUTER_SECRET_NAME` if the secret has a different name. A Flight
+injects the secret both as `openrouter_OPENROUTER_API_KEY` and as the bare
+`OPENROUTER_API_KEY`; local runs can set only the bare variable. The Flight
+runtime injects `MOTHERDUCK_TOKEN` automatically.
 
 Create the Flight without a schedule. Run it with `MD_RUN_FLIGHT`, then inspect
 the returned run with `MD_GET_FLIGHT_RUN`. Confirm that the generated Guides

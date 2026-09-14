@@ -40,6 +40,50 @@ def test_parse_config_uses_public_fixture_and_private_guides(flight):
     assert config.demo_revision == 0
 
 
+def test_parse_config_allows_operator_model_prompt_and_secret_configuration(flight):
+    config = flight.parse_config(
+        {
+            "MODEL": "openai/gpt-5.6",
+            "ANALYSIS_INSTRUCTIONS": "Use compact operational language.",
+            "OPENROUTER_SECRET_NAME": "analysis_openrouter",
+        }
+    )
+
+    assert config.model == "openai/gpt-5.6"
+    assert config.analysis_instructions == "Use compact operational language."
+    assert config.openrouter_secret_name == "analysis_openrouter"
+
+
+def test_analysis_prompt_includes_operator_instructions_outside_untrusted_data(flight):
+    instructions = "Prioritize stockouts, but do not infer causation."
+
+    prompt = flight.analysis_prompt(
+        period=flight.PeriodKey(
+            "day", flight.date(2026, 9, 10), flight.date(2026, 9, 11)
+        ),
+        metrics=[],
+        definitions=[],
+        signals=[],
+        annotations=[],
+        prior_context=[],
+        analysis_instructions=instructions,
+    )
+
+    assert prompt.index(instructions) < prompt.index("BEGIN UNTRUSTED DATA")
+
+
+def test_openrouter_api_key_prefers_namespaced_flights_secret(flight):
+    key = flight.openrouter_api_key(
+        "analysis_openrouter",
+        {
+            "analysis_openrouter_OPENROUTER_API_KEY": "namespaced-key",
+            "OPENROUTER_API_KEY": "bare-key",
+        },
+    )
+
+    assert key == "namespaced-key"
+
+
 def test_parse_config_rejects_unknown_guide_access(flight):
     with pytest.raises(ValueError, match="GUIDE_ACCESS"):
         flight.parse_config({"GUIDE_ACCESS": "public"})
@@ -661,8 +705,10 @@ def test_fetch_weather_signals_uses_london_daily_request_and_caveats(flight):
         "latitude": ["51.5072"],
         "longitude": ["-0.1276"],
         "daily": [
-            "temperature_2m_max,temperature_2m_min,precipitation_sum,"
-            "snowfall_sum,wind_speed_10m_max,weather_code"
+            (
+                "temperature_2m_max,temperature_2m_min,precipitation_sum,"
+                "snowfall_sum,wind_speed_10m_max,weather_code"
+            )
         ],
         "timezone": ["Europe/London"],
         "start_date": ["2026-09-10"],
@@ -970,7 +1016,7 @@ Body
         ).replace("2026-09-10T00:00:00Z", "2026-09-10T00:00:00"),
     )
 
-    with pytest.raises(ValueError, match="event_id.*string"):
+    with pytest.raises(TypeError, match="event_id.*string"):
         flight.parse_annotation(numeric_event)
     with pytest.raises(ValueError, match="timezone"):
         flight.parse_annotation(naive_time)
@@ -1513,6 +1559,30 @@ def test_evidence_fingerprint_tracks_changed_inputs(flight):
     )
 
 
+def test_evidence_fingerprint_tracks_model_and_analysis_instructions(flight):
+    period, metric, signal, definition, annotation, fixture = _fingerprint_inputs(flight)
+    common = {
+        "period": period,
+        "metrics": [metric],
+        "signals": [signal],
+        "definitions": [definition],
+        "annotations": [annotation],
+        "fixture": fixture,
+        "source_watermark": flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc),
+    }
+
+    baseline = flight.evidence_fingerprint(**common)
+
+    assert baseline != flight.evidence_fingerprint(
+        **common,
+        model="openai/gpt-5.6",
+    )
+    assert baseline != flight.evidence_fingerprint(
+        **common,
+        analysis_instructions="Use a concise executive summary.",
+    )
+
+
 def test_period_state_transitions_preserve_success_until_replacement(flight):
     con = flight.duckdb.connect()
     config = _state_config(flight)
@@ -1717,8 +1787,9 @@ def _insert_complete_period_state(flight, con, config, period, guide):
         """
         INSERT INTO memory.main.analysis_periods (
           grain, period_start, period_end, scope, evidence_fingerprint, guide_id,
-          guide_version, status, prompt_version, last_success_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?)
+          guide_version, status, prompt_version, analysis_configuration_fingerprint,
+          last_success_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?, ?)
         """,
         [
             period.grain,
@@ -1729,9 +1800,30 @@ def _insert_complete_period_state(flight, con, config, period, guide):
             str(guide.id),
             guide.current_version,
             flight.PROMPT_VERSION,
+            flight.analysis_configuration_fingerprint(config),
             flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc),
         ],
     )
+
+
+def test_stale_configuration_periods_queues_legacy_complete_state(flight):
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    period = flight.PeriodKey(
+        "day", flight.date(2026, 9, 10), flight.date(2026, 9, 11)
+    )
+    guide = _guide_record(flight)
+
+    flight.ensure_state_schema(con, config)
+    _insert_complete_period_state(flight, con, config, period, guide)
+    con.execute(
+        """
+        UPDATE memory.main.analysis_periods
+        SET analysis_configuration_fingerprint = NULL
+        """
+    )
+
+    assert flight.stale_configuration_periods(con, config) == [period]
 
 
 def test_context_references_select_prior_rollups_and_rollup_children(flight):
@@ -1985,6 +2077,137 @@ def test_run_analysis_skips_unchanged_periods(flight, demo_fixture_path):
     }
     assert len(analyzer.calls) == calls_after_first
     assert len([call for call in store.calls if call[0] in {"create", "update"}]) == writes_after_first
+
+
+def test_run_analysis_reruns_historical_guides_after_model_change(
+    flight, demo_fixture_path
+):
+    rss_payload = b"""<rss><channel><item><title>Story</title>
+      <link>https://www.bbc.co.uk/news/example</link><guid>story</guid>
+      <pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>"""
+    weather_payload = json.dumps(
+        {
+            "daily": {
+                "time": ["2026-09-10"],
+                "temperature_2m_max": [18.5],
+                "temperature_2m_min": [11.2],
+                "precipitation_sum": [0],
+                "snowfall_sum": [0],
+                "wind_speed_10m_max": [17.8],
+                "weather_code": [2],
+            }
+        }
+    ).encode()
+
+    def opener(request, *, timeout):
+        del timeout
+        return _FakeResponse(
+            weather_payload if "open-meteo" in request.full_url else rss_payload
+        )
+
+    config = flight.replace(
+        _state_config(flight),
+        demo_data_url=str(demo_fixture_path),
+        analysis_as_of=flight.date(2026, 9, 11),
+        reconciliation_days=3,
+    )
+    con = flight.duckdb.connect()
+    store = FakeGuideStore(flight)
+    analyzer = FakeAnalyzer(flight)
+    now = flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc)
+
+    first = flight.run_analysis(config, con, store, analyzer, opener, now)
+    completed = con.execute(
+        "SELECT count(*) FROM memory.main.analysis_periods WHERE status = 'complete'"
+    ).fetchone()[0]
+    original_guide_ids = {
+        record.id
+        for record in store.records
+        if record.topic.startswith("persistent-analysis/ecommerce/")
+    }
+    calls_after_first = len(analyzer.calls)
+    calls_before_change = len(store.calls)
+    changed = flight.run_analysis(
+        flight.replace(
+            config,
+            reconciliation_days=1,
+            model="openai/gpt-5.6",
+        ),
+        con,
+        store,
+        analyzer,
+        opener,
+        now,
+    )
+
+    assert first["created"] == completed
+    assert changed["created"] == 0
+    assert changed["updated"] >= completed
+    assert changed["failed"] == 0
+    assert len(analyzer.calls) >= calls_after_first + completed
+    updated_guide_ids = {
+        call[1]["guide_id"]
+        for call in store.calls[calls_before_change:]
+        if call[0] == "update"
+    }
+    assert original_guide_ids <= updated_guide_ids
+
+
+def test_run_analysis_records_unexpected_analyzer_exceptions(
+    flight, demo_fixture_path
+):
+    class UnexpectedAnalyzerError(Exception):
+        pass
+
+    class UnexpectedAnalyzer:
+        def analyze(self, **values):
+            del values
+            raise UnexpectedAnalyzerError("provider protocol changed")
+
+    rss_payload = b"""<rss><channel><item><title>Story</title>
+      <link>https://www.bbc.co.uk/news/example</link><guid>story</guid>
+      <pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>"""
+    weather_payload = json.dumps(
+        {
+            "daily": {
+                "time": ["2026-09-10"],
+                "temperature_2m_max": [18.5],
+                "temperature_2m_min": [11.2],
+                "precipitation_sum": [0],
+                "snowfall_sum": [0],
+                "wind_speed_10m_max": [17.8],
+                "weather_code": [2],
+            }
+        }
+    ).encode()
+
+    def opener(request, *, timeout):
+        del timeout
+        return _FakeResponse(
+            weather_payload if "open-meteo" in request.full_url else rss_payload
+        )
+
+    config = flight.replace(
+        _state_config(flight),
+        demo_data_url=str(demo_fixture_path),
+        analysis_as_of=flight.date(2026, 9, 11),
+        reconciliation_days=1,
+    )
+    con = flight.duckdb.connect()
+
+    summary = flight.run_analysis(
+        config,
+        con,
+        FakeGuideStore(flight),
+        UnexpectedAnalyzer(),
+        opener,
+        flight.datetime(2026, 9, 12, tzinfo=flight.timezone.utc),
+    )
+
+    assert summary["failed"] == 3
+    assert con.execute(
+        "SELECT count(*) FROM memory.main.analysis_periods WHERE status = 'failed'"
+    ).fetchone()[0] == 3
 
 
 def test_run_analysis_invalidates_only_dependent_periods_after_late_data(
