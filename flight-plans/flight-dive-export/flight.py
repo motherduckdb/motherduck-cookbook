@@ -9,9 +9,11 @@ Every knob is a config value or an env var; see the README "What you'll adjust"
 table. Credentials arrive as Flight secret params under their bare names.
 """
 
+import math
 import os
 import re
 import smtplib
+import ssl
 import subprocess
 import time
 from dataclasses import dataclass
@@ -23,8 +25,8 @@ import duckdb
 import httpx
 
 # The REST API is scoped to your organization's region, so one hostname works
-# for every region. Override API_BASE only for a non-production environment.
-API_BASE = os.environ.get("API_BASE", "https://api.motherduck.com").rstrip("/")
+# for every region. Keep the token destination fixed, never per-run config.
+API_BASE = "https://api.motherduck.com"
 # `queryMode=server` runs the Dive's queries on MotherDuck through the Postgres
 # endpoint rather than in a DuckDB-wasm instance inside this container, which is
 # both faster and much lighter on the Flight's memory. It is a preference, not a
@@ -106,7 +108,7 @@ def main() -> None:
     store_table = env("STORE_TABLE", "flights_demo.main.dive_exports")
     kinds = env_list("ATTACH", "pdf,png")
     targets = env_list("DELIVERY", "")
-    dry_run = env("DRY_RUN", "false").lower() == "true"
+    dry_run = env_bool("DRY_RUN", False)
     wait = Wait(
         floor_ms=env_int("MIN_WAIT_MS", 15000),
         ceiling_ms=env_int("WAIT_MS", 120000),
@@ -115,6 +117,11 @@ def main() -> None:
     scale = float(env("SCALE", "2"))
     min_elements = env_int("MIN_ELEMENTS", 30)
     width, height = parse_viewport(env("VIEWPORT", "1440x1000"))
+
+    if not 0 <= wait.floor_ms < wait.ceiling_ms:
+        raise ValueError("require 0 <= MIN_WAIT_MS < WAIT_MS")
+    if not math.isfinite(scale) or scale <= 0:
+        raise ValueError("SCALE must be finite and positive")
 
     unknown = [kind for kind in kinds if kind not in MIME_TYPES]
     if unknown or not kinds:
@@ -134,7 +141,7 @@ def main() -> None:
 
     install_chromium()
     captured_at = datetime.now(timezone.utc)
-    shots = capture(url, wait, (width, height), scale, min_elements)
+    shots = capture(url, wait, (width, height), scale, min_elements, kinds)
 
     export = Export(
         label=label,
@@ -169,7 +176,14 @@ def main() -> None:
         except Exception as exc:
             # One unreachable target should not stop the others, but the run
             # still has to end FAILED so the failure is not silent.
-            log(f"{target}: delivery FAILED: {exc}")
+            # HTTP exception strings may include pre-authorized upload/webhook URLs.
+            detail = (
+                f"HTTP {exc.response.status_code}"
+                if isinstance(exc, httpx.HTTPStatusError)
+                else type(exc).__name__ if isinstance(exc, httpx.RequestError)
+                else str(exc)
+            )
+            log(f"{target}: delivery FAILED: {detail}")
             failed.append(target)
     if failed:
         raise RuntimeError(f"delivery failed for {failed}; see the log above")
@@ -230,8 +244,9 @@ def capture(
     viewport: tuple[int, int],
     scale: float,
     min_elements: int,
+    kinds: list[str],
 ) -> dict[str, bytes]:
-    """Open the URL and return {"png": ..., "pdf": ...}."""
+    """Open the URL and render only the requested formats."""
     from playwright.sync_api import sync_playwright
 
     width, height = viewport
@@ -251,31 +266,42 @@ def capture(
             viewport={"width": width, "height": height},
             device_scale_factor=scale,
         )
-        page.on("console", lambda msg: log(f"[console:{msg.type}] {msg.text[:300]}"))
-        page.on("pageerror", lambda err: log(f"[pageerror] {str(err)[:300]}"))
+        # Browser messages can contain embed credentials or query data.
+        page.on("pageerror", lambda err: log("[pageerror] Dive script error"))
 
         log("navigating...")
-        page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+        except Exception:
+            # Playwright navigation errors echo the session-bearing URL.
+            raise RuntimeError("Could not navigate to the Dive URL") from None
         log("title:", page.title())
         settle(page, wait)
         check_rendered(page, min_elements)
 
         capture_height = grow_viewport(page, width, height)
 
-        png = page.screenshot(full_page=True)
-        log(f"png: {len(png)} bytes")
+        shots = {}
+        if "png" in kinds:
+            shots["png"] = page.screenshot(full_page=True)
+            log(f"png: {len(shots['png'])} bytes")
 
-        # One page the size of the capture, so charts are never split in half.
-        pdf = page.pdf(
-            width=f"{width}px",
-            height=f"{capture_height + 40}px",
-            print_background=True,
-            margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
-        )
-        log(f"pdf: {len(pdf)} bytes ({width}x{capture_height}px)")
+        if "pdf" in kinds:
+            page.emulate_media(media="screen")
+            page.add_style_tag(content=(
+                "* { -webkit-print-color-adjust: exact !important; "
+                "print-color-adjust: exact !important; }"
+            ))
+            shots["pdf"] = page.pdf(
+                width=f"{width}px",
+                height=f"{capture_height + 40}px",
+                print_background=True,
+                margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+            )
+            log(f"pdf: {len(shots['pdf'])} bytes ({width}x{capture_height}px)")
 
         browser.close()
-    return {"png": png, "pdf": pdf}
+    return shots
 
 
 def settle(page, wait: "Wait") -> None:
@@ -312,7 +338,7 @@ def settle(page, wait: "Wait") -> None:
             if page.evaluate(
                 "(needle) => (document.body.innerText || '').includes(needle)",
                 wait.for_text,
-            ):
+            ) and time.monotonic() >= floor:
                 log(f"WAIT_FOR_TEXT found after {elapsed:.0f}s")
                 page.wait_for_timeout(PAINT_MS)
                 return
@@ -651,7 +677,12 @@ def graph_upload(
         )
         graph_ok(response, f"upload bytes {start}-{end} of {rendition.filename}")
     # The response to the final chunk is the created driveItem.
-    return (response.json() or {}).get("webUrl", "")
+    if response is None or response.status_code not in {200, 201}:
+        raise RuntimeError("Microsoft Graph upload did not complete")
+    url = response.json().get("webUrl")
+    if not url:
+        raise RuntimeError("Microsoft Graph upload returned no file URL")
+    return url
 
 
 def post_teams_card(webhook: str, export: Export, links: list[tuple[str, str]]) -> None:
@@ -732,16 +763,18 @@ def deliver_email(export: Export, dry_run: bool) -> None:
         )
 
     if tls == "ssl":
-        smtp = smtplib.SMTP_SSL(host, port, timeout=60)
+        smtp = smtplib.SMTP_SSL(host, port, timeout=60, context=ssl.create_default_context())
     else:
         smtp = smtplib.SMTP(host, port, timeout=60)
     with smtp:
         if tls == "starttls":
-            smtp.starttls()
+            smtp.starttls(context=ssl.create_default_context())
         # An unauthenticated relay is a valid setup, so only log in when asked.
         if user:
             smtp.login(user, password)
-        smtp.send_message(message)
+        refused = smtp.send_message(message)
+        if refused:
+            raise RuntimeError(f"SMTP refused {len(refused)} recipient(s)")
     log(f"email: sent {filenames(export)} to {', '.join(recipients)}")
 
 
@@ -781,11 +814,21 @@ def parse_viewport(value: str) -> tuple[int, int]:
     match = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", value)
     if not match:
         raise ValueError(f"VIEWPORT must look like 1440x1000, got {value!r}")
-    return int(match.group(1)), int(match.group(2))
+    width, height = int(match.group(1)), int(match.group(2))
+    if width <= 0 or not 0 < height <= MAX_VIEWPORT_HEIGHT:
+        raise ValueError("VIEWPORT needs positive dimensions and height <= 30000")
+    return width, height
 
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = env(name, str(default)).lower()
+    if value not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return value == "true"
 
 
 def env_int(name: str, default: int) -> int:
@@ -795,7 +838,7 @@ def env_int(name: str, default: int) -> int:
 
 def env_list(name: str, default: str) -> list[str]:
     parts = env(name, default).split(",")
-    return [part.strip().lower() for part in parts if part.strip()]
+    return list(dict.fromkeys(part.strip().lower() for part in parts if part.strip()))
 
 
 def split_table(value: str) -> tuple[str, str, str]:

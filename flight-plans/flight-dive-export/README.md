@@ -18,7 +18,7 @@ prompt: >-
   adapt the "Export a Dive to PDF and Deliver It" recipe to my own data and use
   case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-dive-export
-published_date: 2026-09-02
+published_date: 2026-09-15
 ---
 
 # Export a Dive to PDF and Deliver It
@@ -105,11 +105,9 @@ Dive queries and nothing else.
   spinning up DuckDB-wasm inside Chromium. That halved load time on the test
   Dive (roughly 8s to 4s) and keeps the Flight's memory use down. A session
   without a `pgEndpoint` falls back to wasm on its own.
-- **Expect noisy logs on a successful run.** `Incomplete gRPC response no
-  trailer transmitted` and `unassociated response: [undefined, MD_EVENT]` show up
-  on every healthy render. So do Content Security Policy console errors from
-  third-party scripts. None of them mean the capture failed; check the reported
-  PNG and PDF byte counts instead.
+- **Browser diagnostics are limited.** Console text is not logged because it
+  may contain embed credentials or query data. Script errors produce a generic
+  log entry. Inspect a local browser session when deeper diagnosis is needed.
 - **Slack needs a bot token, not a webhook.** Incoming webhooks cannot carry a
   file. Delivery uses a bot token with `files:write`, and the bot has to be a
   member of the target channel or the upload is rejected with `not_in_channel`.
@@ -157,7 +155,7 @@ query is slow.
 For a report you actually depend on, set **`WAIT_FOR_TEXT`** instead. Give it a
 string that appears only once the Dive has real data (a table footer, a total, a
 column header that renders after the query), and the wait keys on that. It is
-the only fully reliable signal here, and it fails the run rather than delivering
+a Dive-specific readiness signal, and it fails the run rather than delivering
 a half-rendered export:
 
 ```
@@ -199,9 +197,8 @@ to be edited in the code.
 | `WAIT_FOR_TEXT` | (unset) | A string only the *loaded* Dive contains. Set it and the wait keys on that instead of on DOM quiet. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
 | `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`, `email`. Empty stores the export and stops. |
-| `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. |
+| `DRY_RUN` | `false` | `true` renders and stores, then logs what each target would send instead of sending it. Only `true` and `false` are accepted. |
 | `MESSAGE` | (generated) | Message text stored with the export. Defaults to `<REPORT_NAME> captured <timestamp> UTC.` |
-| `API_BASE` | `https://api.motherduck.com` | REST API base. The API is region-scoped, so only a non-production environment needs this. |
 | `SHOT_URL` | (unset) | Debugging only: capture this URL instead of minting a Dive session. |
 | `LABEL` | `adhoc` | Label stored with a `SHOT_URL` capture. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth for the REST API and for the write. Select a token on the Flight; never hard-code it. |
@@ -211,7 +208,7 @@ in config:
 
 | Knob | Purpose |
 |---|---|
-| `SLACK_BOT_TOKEN` | Bot User OAuth token (`xoxb-...`) with the `files:write` and `chat:write` scopes. |
+| `SLACK_BOT_TOKEN` | Bot User OAuth token (`xoxb-...`) with the `files:write` scope. |
 | `SLACK_CHANNEL_ID` | Destination channel id (`C...`), from the channel's details in Slack. |
 
 Teams delivery needs an Entra app registration, the channel's ids, and
@@ -282,7 +279,7 @@ the [external upload flow](https://docs.slack.dev/messaging/working-with-files/)
    {
        "display_information": { "name": "Dive Export" },
        "features": { "bot_user": { "display_name": "Dive Export" } },
-       "oauth_config": { "scopes": { "bot": ["files:write", "chat:write"] } },
+       "oauth_config": { "scopes": { "bot": ["files:write"] } },
        "settings": {
            "org_deploy_enabled": false,
            "socket_mode_enabled": false,
@@ -445,7 +442,7 @@ and do not create a new Flight version.
   emailed attachment leaves your control entirely. Pick the destination with that
   in mind, and keep `EMAIL_TO` in config where it is reviewable rather than
   buried in a secret.
-- **Keep mail on TLS.** `SMTP_TLS=none` sends the report, and any SMTP
+- **Keep mail on TLS.** Both TLS modes verify the server certificate and hostname. `SMTP_TLS=none` sends the report, and any SMTP
   credentials, in the clear. Use it only on a trusted network.
 - **Treat the exports table as sensitive.** It holds rendered business data; the
   same read grants you would put on the Dive's tables belong on it.

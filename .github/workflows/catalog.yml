@@ -11,6 +11,9 @@ on:
       - "tests/test_build_catalog.py"
       - "tests/test_catalog_workflow.py"
       - "tests/test_excel_ingest_env.py"
+      - "tests/test_dive_export.py"
+      - "flight-plans/flight-dive-export/flight.py"
+      - "flight-plans/flight-dive-export/requirements.txt"
       - ".github/workflows/catalog.yml"
   push:
     paths:
@@ -22,6 +25,9 @@ on:
       - "tests/test_build_catalog.py"
       - "tests/test_catalog_workflow.py"
       - "tests/test_excel_ingest_env.py"
+      - "tests/test_dive_export.py"
+      - "flight-plans/flight-dive-export/flight.py"
+      - "flight-plans/flight-dive-export/requirements.txt"
       - ".github/workflows/catalog.yml"
   workflow_dispatch:
 
@@ -50,6 +56,9 @@ jobs:
 
       - name: Run catalog tests
         run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py tests/test_excel_ingest_env.py -q
+
+      - name: Run Dive export tests
+        run: uv run --with pytest --with-requirements flight-plans/flight-dive-export/requirements.txt python -m pytest tests/test_dive_export.py -q
 
       - name: Build catalog preview
         run: |
