@@ -97,11 +97,13 @@ non-zero if any table failed after retries.
 ### Deploy as a Flight
 
 Create it with `MD_CREATE_FLIGHT`, passing `name`, `source_code` ([`flight.py`](flight.py)),
-`requirements_txt` ([`requirements.txt`](requirements.txt)), and a `config` with at least
-`TABLE_BUCKET_ARN` plus any `INCLUDED_*`/`EXCLUDED_*` scoping and `TARGET_DATABASE`. No secret
-arguments are needed: the Flight reads a stored `IN MOTHERDUCK` secret, and a MotherDuck token is
-attached for you. Run it once with `MD_RUN_FLIGHT`, confirm `flight_tracker` has one row per table,
-then add a schedule with `MD_UPDATE_FLIGHT`. Use long-lived IAM keys for scheduled runs.
+`requirements_txt` ([`requirements.txt`](requirements.txt)), optionally `max_runtime_sec` (cap on a
+run's duration in seconds; `0` = no cap), and a `config` with at least `TABLE_BUCKET_ARN` plus any
+`INCLUDED_*`/`EXCLUDED_*` scoping and `TARGET_DATABASE`. No secret arguments are needed: the Flight
+reads a stored `IN MOTHERDUCK` secret, and a MotherDuck token is attached for you. Run it once with
+`MD_RUN_FLIGHT`, confirm `flight_tracker` has one row per table (inspect the run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), then add a schedule with
+`MD_UPDATE_FLIGHT`. Use long-lived IAM keys for scheduled runs.
 
 ## Caveats
 

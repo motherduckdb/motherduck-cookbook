@@ -8,7 +8,8 @@ ecommerce_metrics:
 
     motherduck:
       type: duckdb
-      path: md:ecommerce_test_db
+      # Database name defaults to ecommerce_test_db. Set MD_DATABASE to override it.
+      path: "md:{{ env_var('MD_DATABASE', 'ecommerce_test_db') }}"
       threads: 4
       settings:
         # MotherDuck token will be picked up from environment variable

@@ -17,21 +17,23 @@ Inputs
 ------
 Note that inputs are case sensitive (use uppercase).
 
-Secret `pg` (TYPE flights) -> Postgres connection params: 
-    Required: `HOST`, `DATABASE`, `USER`, `PASSWORD`
-    Optional: `PORT`, `SSLMODE`
+Secret (TYPE flights, any name) -> Postgres connection params, named as the
+libpq env vars so the injected bare params are libpq-ready as-is:
+    Required: `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
+    Optional: `PGPORT`, `PGSSLMODE`
     Example:
         CREATE SECRET pg IN motherduck (
             TYPE flights,
             PARAMS MAP {
-                'HOST':     '<your-postgres-host>',
-                'PORT':     '5432',
-                'DATABASE': '<your_database>',
-                'USER':     '<YOUR_USER>',
-                'PASSWORD': '<YOUR_PASSWORD>',
-                'SSLMODE':  'require'
+                'PGHOST':     '<your-postgres-host>',
+                'PGPORT':     '5432',
+                'PGDATABASE': '<your_database>',
+                'PGUSER':     '<YOUR_USER>',
+                'PGPASSWORD': '<YOUR_PASSWORD>',
+                'PGSSLMODE':  'require'
             }
         );
+    (A legacy secret named `pg` with HOST/PORT/... params still works.)
 Config (non-secret env vars):
     MOTHERDUCK_HOST  - staging host; exported as `motherduck_host` before connect.
     TARGET_DATABASE  - MotherDuck database to write into (default: postgres_ingest).
@@ -67,15 +69,16 @@ log = logging.getLogger("pg2md")
 # PostgreSQL system schemas that are never mirrored. 
 SYSTEM_SCHEMAS = {"information_schema", "pg_catalog", "pg_toast"}
 
-# Postgres connection params from the flight secret. 
-# The secret injects each as `<secret_name>_<KEY>`
+# Postgres connection params from the flight secret. Params named as libpq vars
+# (PGHOST, ...) arrive bare and are libpq-ready; a legacy secret named `pg` with
+# HOST/PORT/... params arrives namespaced as pg_HOST, pg_PORT, ...
 PG_PARAMS = (
-    ("HOST", "PGHOST", None, True),
-    ("PORT", "PGPORT", "5432", False),
-    ("DATABASE", "PGDATABASE", None, True),
-    ("USER", "PGUSER", None, True),
-    ("PASSWORD", "PGPASSWORD", None, True),
-    ("SSLMODE", "PGSSLMODE", "prefer", False),
+    ("PGHOST", "pg_HOST", None, True),
+    ("PGPORT", "pg_PORT", "5432", False),
+    ("PGDATABASE", "pg_DATABASE", None, True),
+    ("PGUSER", "pg_USER", None, True),
+    ("PGPASSWORD", "pg_PASSWORD", None, True),
+    ("PGSSLMODE", "pg_SSLMODE", "prefer", False),
 )
 
 # Local DuckDB catalog name the source Postgres database is ATTACHed as. Referenced by
@@ -143,16 +146,15 @@ def connect_motherduck() -> duckdb.DuckDBPyConnection:
     return duckdb.connect("md:")
 
 
-def attach_postgres(con: duckdb.DuckDBPyConnection, secret_name: str) -> None:
+def attach_postgres(con: duckdb.DuckDBPyConnection) -> None:
     """Wire up the read-only Postgres source so tables can be streamed out, keeping the
-    password out of SQL by passing credentials through libpq env vars. 
+    password out of SQL by passing credentials through libpq env vars.
     ATTACHes READ_ONLY as `pg`."""
-    for key, libpq_var, default, required in PG_PARAMS:
-        env_var = f"{secret_name}_{key}"
-        value = os.environ.get(env_var, default)
+    for libpq_var, legacy_var, default, required in PG_PARAMS:
+        value = os.environ.get(libpq_var) or os.environ.get(legacy_var) or default
         if value is None:
             if required:
-                raise RuntimeError(f"Required Postgres secret env var {env_var!r} is not set")
+                raise RuntimeError(f"Required Postgres secret param {libpq_var!r} is not set")
             continue
         os.environ[libpq_var] = str(value)
 
@@ -173,7 +175,7 @@ def ensure_target(con: duckdb.DuckDBPyConnection, target_db: str) -> None:
     con.execute(
         f"CREATE TABLE IF NOT EXISTS {target}.main.flight_tracker ("
         "  run_id               VARCHAR,"
-        "  flight_secret_name   VARCHAR,"
+        "  source_host          VARCHAR,"
         "  source_schema        VARCHAR,"
         "  source_table         VARCHAR,"
         "  destination_database VARCHAR,"
@@ -211,7 +213,7 @@ def load_table(con: duckdb.DuckDBPyConnection, target_db: str, schema: str, tabl
 
 
 def record_success(
-    con: duckdb.DuckDBPyConnection, target_db: str, run_id: str, secret_name: str,
+    con: duckdb.DuckDBPyConnection, target_db: str, run_id: str,
     schema: str, table: str, rows_loaded: int, attempts: int,
     started_at: datetime, finished_at: datetime, update_ts: datetime,
 ) -> None:
@@ -219,7 +221,7 @@ def record_success(
     con.execute(
         f"INSERT INTO {quote_ident(target_db)}.main.flight_tracker "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [run_id, secret_name, schema, table, target_db, schema, table,
+        [run_id, os.environ.get("PGHOST", ""), schema, table, target_db, schema, table,
          rows_loaded, attempts, started_at, finished_at, update_ts],
     )
 
@@ -239,14 +241,11 @@ def main() -> None:
     EXCLUDED_SCHEMAS = csv_set("EXCLUDED_SCHEMAS")
     INCLUDED_TABLES = csv_set("INCLUDED_TABLES")
     EXCLUDED_TABLES = csv_set("EXCLUDED_TABLES")
-    # MotherDuck Flights secret holding the Postgres connection; its params arrive as
-    # <SECRET_NAME>_HOST, <SECRET_NAME>_PORT, ... Change it to point at another secret.
-    SECRET_NAME = "pg"
 
     log.info("Run %s -> target %r", RUN_ID, TARGET_DB)
 
     con = connect_motherduck()
-    attach_postgres(con, SECRET_NAME)
+    attach_postgres(con)
     ensure_target(con, TARGET_DB)
 
     all_tables = discover_base_tables(con)
@@ -281,7 +280,7 @@ def main() -> None:
             rows = retryer(load_table, con, TARGET_DB, schema, table)
             attempts = retryer.statistics.get("attempt_number", 1)
             finished = datetime.now(timezone.utc)
-            record_success(con, TARGET_DB, RUN_ID, SECRET_NAME, schema, table, rows,
+            record_success(con, TARGET_DB, RUN_ID, schema, table, rows,
                            attempts, started, finished, datetime.now(timezone.utc))
             succeeded += 1
             rows_total += rows

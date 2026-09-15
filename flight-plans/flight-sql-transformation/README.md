@@ -94,12 +94,14 @@ Deploy through the Flight SQL surface (`MD_CREATE_FLIGHT`, then
 
 - `source_code`: [`flight.py`](flight.py), with `sql_statements()` edited to your statements
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `config`: `TARGET_DATABASE`, `MAX_WORKERS` as needed
 
 The Flight runtime injects `MOTHERDUCK_TOKEN`; make sure it can write the
 destination database. Create the Flight without a schedule, trigger one run with
-`MD_RUN_FLIGHT` to confirm it loads, then add a `schedule_cron` using cron
-syntax based on user input.
+`MD_RUN_FLIGHT` to confirm it loads (inspect the run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), then add a
+`schedule_cron` using cron syntax based on user input.
 
 ## Learn more
 

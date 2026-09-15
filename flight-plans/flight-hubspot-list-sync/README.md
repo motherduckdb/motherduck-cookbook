@@ -103,10 +103,11 @@ credential, so it must be a secret, never config).
 | `RETRY_BASE_SECONDS` | `2` | Exponential-backoff multiplier (seconds). |
 | `DRY_RUN` | `false` | `true` computes and logs the diff without changing the list. |
 | `AUDIT_TABLE` | `hubspot_list_sync.main.flight_tracker` | Ledger table (created if absent); `""` to skip. |
-| `hubspot` **secret** | (required) | `TYPE flights` secret with param `ACCESS_TOKEN` (Service Key or private app token). |
+| `hubspot` **secret** | (required) | `TYPE flights` secret with param `HUBSPOT_ACCESS_TOKEN` (Service Key or private app token). |
 
-The secret injects its param as `HUBSPOT_ACCESS_TOKEN`. The Flight reads that at
-runtime; for a local run you can instead export `HUBSPOT_PRIVATE_APP_TOKEN`.
+Flight secret params are injected under their bare names, so the param arrives
+as `HUBSPOT_ACCESS_TOKEN` whatever the secret is called. The Flight reads that
+at runtime; for a local run you can instead export `HUBSPOT_PRIVATE_APP_TOKEN`.
 
 ## Run it
 
@@ -131,13 +132,13 @@ it to `false`) to apply the diff and write an audit row.
 
 First store the HubSpot token as a **Flights secret** named `hubspot` (UI:
 [Settings > Secrets](https://app.motherduck.com/settings/secrets), type
-**Flights**, param `ACCESS_TOKEN`). Or via SQL from a write-enabled connection
-(read-only connections reject `CREATE SECRET`):
+**Flights**, param `HUBSPOT_ACCESS_TOKEN`). Or via SQL from a write-enabled
+connection (read-only connections reject `CREATE SECRET`):
 
 ```sql
 CREATE SECRET hubspot IN motherduck (
   TYPE flights,
-  PARAMS MAP { 'ACCESS_TOKEN': 'your_service_key_or_pat' }
+  PARAMS MAP { 'HUBSPOT_ACCESS_TOKEN': 'your_service_key_or_pat' }
 );
 ```
 
@@ -148,7 +149,7 @@ client-side there:
 ```sql
 CREATE SECRET hubspot IN motherduck (
   TYPE flights,
-  PARAMS MAP { 'ACCESS_TOKEN': getenv('HUBSPOT_PRIVATE_APP_TOKEN') }
+  PARAMS MAP { 'HUBSPOT_ACCESS_TOKEN': getenv('HUBSPOT_PRIVATE_APP_TOKEN') }
 );
 ```
 
@@ -158,6 +159,7 @@ checked in; adapt the arguments), passing:
 - `name`: a Flight name, for example `hubspot-list-sync`
 - `source_code`: [`flight.py`](flight.py)
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["hubspot"]` so `HUBSPOT_ACCESS_TOKEN` is injected
 - `config`: at least `QUERY` and `HUBSPOT_LIST_ID`, plus any other knobs above.
   The token stays in the `hubspot` secret, never in config.
@@ -166,9 +168,10 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and confirm
-the list membership matches the query and `AUDIT_TABLE` has a new row. Decide a
-schedule with the user before adding one.
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a
+specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and
+confirm the list membership matches the query and `AUDIT_TABLE` has a new row.
+Decide a schedule with the user before adding one.
 
 ## Security
 

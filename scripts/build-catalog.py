@@ -65,6 +65,7 @@ ALLOWED_TAGS = {
     "sqlmesh",
     "metricflow",
     "connectorx",
+    "adbc",
     # libraries
     "pandas",
     "pyarrow",
@@ -85,8 +86,11 @@ ALLOWED_TAGS = {
     "s3",
     # messaging and alerting
     "slack",
+    "microsoft-teams",
     # crm and marketing
     "hubspot",
+    # ecommerce
+    "shopify",
     # external databases
     "postgres",
     "sqlite",

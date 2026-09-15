@@ -76,22 +76,17 @@ class RetryableHTTPError(Exception):
 # Config / helpers
 # --------------------------------------------------------------------------- #
 def resolve_token() -> str:
-    """Find the HubSpot token without ever logging it. Accepts the deployed
-    secret env var (HUBSPOT_ACCESS_TOKEN), the common local name
-    (HUBSPOT_PRIVATE_APP_TOKEN), or any '*_ACCESS_TOKEN' / '*_PRIVATE_APP_TOKEN'
-    secret-injected var (excluding MOTHERDUCK_TOKEN)."""
+    """Find the HubSpot token without ever logging it. Flight secret params are
+    injected under their bare names (plus a namespaced `<secret_name>_<PARAM>`
+    variant to disambiguate same-named params across secrets), so the deployed
+    secret and a local env var both arrive under the same name."""
     for name in ("HUBSPOT_ACCESS_TOKEN", "HUBSPOT_PRIVATE_APP_TOKEN"):
         val = os.environ.get(name, "").strip()
         if val:
             return val
-    for key, value in os.environ.items():
-        if key == "MOTHERDUCK_TOKEN":
-            continue
-        if (key.endswith("_ACCESS_TOKEN") or key.endswith("_PRIVATE_APP_TOKEN")) and value.strip():
-            return value.strip()
     raise RuntimeError(
-        "No HubSpot token found. Set HUBSPOT_ACCESS_TOKEN (local) or attach the "
-        "'hubspot' flight secret with an ACCESS_TOKEN param."
+        "No HubSpot token found. Set HUBSPOT_ACCESS_TOKEN locally or attach a "
+        "flight secret with a HUBSPOT_ACCESS_TOKEN param."
     )
 
 

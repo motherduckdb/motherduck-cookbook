@@ -215,12 +215,10 @@ CREATE SECRET openrouter IN motherduck (
 );
 ```
 
-A `TYPE flights` secret injects each param under the env var
-`<secret_name>_<PARAM>`, not the bare param name: the param above arrives as
-`openrouter_OPENROUTER_API_KEY`, not `OPENROUTER_API_KEY`. (DuckDB lowercases the
-unquoted secret name into the prefix.) `flight.py` handles this: it reads
-`OPENROUTER_API_KEY` for local runs and otherwise picks up any env var ending in
-`_OPENROUTER_API_KEY`, so the secret name you choose does not matter.
+A `TYPE flights` secret injects each param under its bare name, so the param
+above arrives as `OPENROUTER_API_KEY` whatever you name the secret. (Each param
+is also injected namespaced as `<secret_name>_<PARAM>`, which disambiguates
+when several secrets define the same param name.)
 
 Then create the Flight with the `MD_CREATE_FLIGHT` SQL function (adapt the
 arguments to your situation), passing:
@@ -228,6 +226,7 @@ arguments to your situation), passing:
 - `name`: a Flight name, for example `analysis_agent`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["openrouter"]` so the key is injected (as
   `openrouter_OPENROUTER_API_KEY`; `flight.py` resolves it)
 - `config` (optional): override `MODEL`, `CONCURRENCY`, `BRIEF_WINDOW_DAYS`,
@@ -238,11 +237,13 @@ time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`), and confirm it succeeds and briefs land in
-`RESULTS_TABLE`. Keep `MAX_BOROUGHS` small for that first run to bound cost. Then
-clear the cap and add a schedule (for example `0 13 * * *`, daily at 13:00 UTC)
-by updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT`. Schedule updates
-are metadata-only and do not create a new Flight version.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and confirm it
+succeeds and briefs land in `RESULTS_TABLE`. Keep `MAX_BOROUGHS` small for that
+first run to bound cost. Then clear the cap and add a schedule (for example `0
+13 * * *`, daily at 13:00 UTC) by updating the Flight's `schedule_cron` with
+`MD_UPDATE_FLIGHT`. Schedule updates are metadata-only and do not create a new
+Flight version.
 
 ## Building agents, briefly
 

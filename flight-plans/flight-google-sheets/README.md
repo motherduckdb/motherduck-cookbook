@@ -106,11 +106,10 @@ MotherDuck **Flights secret** holding the Google service-account key.
 | `EXPORTS` | `[]` | JSON array of queries to publish. Each: `{"url"}` plus EITHER `query` (one SELECT) OR `database`+`table` (optional `schema`, `limit`); optional `sheet`, `create_sheet`. Leave blank for import-only. |
 | `TARGET_DATABASE` | `google_sheets` | MotherDuck database imported tables land in (created if absent). Also holds the `gsheets_sync_log` audit table. |
 | `TARGET_SCHEMA` | `main` | Schema imported tables land in. |
-| `GSHEETS_SECRET_NAME` | `gsheets` | Name of the `TYPE flights` secret holding `SERVICE_ACCOUNT_JSON`. |
 | `MAX_RETRIES` | `5` | Per-item retry attempts. |
 | `RETRY_BASE_SECONDS` | `2` | Exponential-backoff multiplier (seconds). |
 | `MOTHERDUCK_HOST` | (unset) | Override MotherDuck host (non-prod). Leave unset for default. |
-| `gsheets` **secret** | (required) | `TYPE flights` secret with one param, `SERVICE_ACCOUNT_JSON`, holding the full service-account key JSON. |
+| `gsheets` **secret** | (required) | `TYPE flights` secret (any name) with one param, `SERVICE_ACCOUNT_JSON`, holding the full service-account key JSON. Its params arrive under their bare names. |
 
 Example config values:
 
@@ -138,8 +137,8 @@ For a local run, inject the key the same way the Flights secret would:
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
-# the service-account key JSON, exactly as the `gsheets` Flights secret injects it:
-export gsheets_SERVICE_ACCOUNT_JSON="$(cat path/to/service-account.json)"
+# the service-account key JSON, exactly as a Flights secret injects it:
+export SERVICE_ACCOUNT_JSON="$(cat path/to/service-account.json)"
 # pick a direction (either, or both):
 export SOURCE_SHEETS='[{"url":"https://docs.google.com/spreadsheets/d/<id>/edit","table":"target_accounts"}]'
 export EXPORTS='[{"url":"https://docs.google.com/spreadsheets/d/<id>/edit","sheet":"calls_today","create_sheet":true,"query":"SELECT 1 AS demo"}]'
@@ -173,6 +172,7 @@ checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `google_sheets_sync`
 - `source_code`: [`flight.py`](flight.py) (no edits for the common cases)
 - `requirements_txt`: [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `flight_secret_names`: `["gsheets"]` so the service-account key is injected
 - `config`: your `SOURCE_SHEETS` and/or `EXPORTS` JSON, plus `TARGET_DATABASE`/`TARGET_SCHEMA` if non-default. Credentials stay in the `gsheets` secret, never config.
 
@@ -180,9 +180,10 @@ A MotherDuck token is attached to the Flight automatically and injected at run
 time as `MOTHERDUCK_TOKEN`; no token argument is needed.
 
 Create without a schedule, run once with `MD_RUN_FLIGHT(flight_id := ...)` (the
-id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`), and confirm
-`<TARGET_DATABASE>.main.gsheets_sync_log` has one row per item. Decide with the
-user whether a schedule is desired and what cadence fits the data.
+id is returned by `MD_CREATE_FLIGHT` and listed by `MD_FLIGHTS()`; inspect a
+specific run with `MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`), and
+confirm `<TARGET_DATABASE>.main.gsheets_sync_log` has one row per item. Decide
+with the user whether a schedule is desired and what cadence fits the data.
 
 ## Security
 

@@ -126,6 +126,7 @@ checked in; adapt the arguments to your situation), passing:
 - `name`: a Flight name, for example `provision_user_databases`
 - `source_code`: the contents of [`flight.py`](flight.py)
 - `requirements_txt`: the contents of [`requirements.txt`](requirements.txt)
+- `max_runtime_sec`: optional cap on a run's duration in seconds (`0` = no cap)
 - `config`: the keys from [What you'll adjust](#what-youll-adjust) you want to
   override (omit any you are keeping at default)
 
@@ -135,12 +136,14 @@ databases and shares, so deploy it from an account allowed to do both.
 
 Create the Flight without a schedule, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
-listed by `MD_FLIGHTS()`) while `DRY_RUN` is `true`, and read the ledger and run
-logs to confirm the plan. Then point `USERS_TABLE` at real usernames (or replace
-the seeded demo rows), set `DRY_RUN=false`, and run again to provision. Add a
-schedule by updating the Flight's `schedule_cron` with `MD_UPDATE_FLIGHT` only
-once you trust the control table; schedule updates are metadata-only and do not
-create a new Flight version.
+listed by `MD_FLIGHTS()`; inspect a specific run with
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`) while `DRY_RUN` is
+`true`, and read the ledger and run logs to confirm the plan. Then point
+`USERS_TABLE` at real usernames (or replace the seeded demo rows), set
+`DRY_RUN=false`, and run again to provision. Add a schedule by updating the
+Flight's `schedule_cron` with `MD_UPDATE_FLIGHT` only once you trust the control
+table; schedule updates are metadata-only and do not create a new Flight
+version.
 
 ## Security
 

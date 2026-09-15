@@ -1,0 +1,4 @@
+duckdb==1.5.5
+dlt[motherduck]==1.30.0
+httpx==0.28.1
+dlt-verified-sources @ https://github.com/dlt-hub/verified-sources/archive/3957506893a7da821dbcc6acd51c7ca4475d1f53.tar.gz

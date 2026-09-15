@@ -79,6 +79,7 @@ config knobs to set. The runtime attaches a MotherDuck token automatically and
 injects it as `MOTHERDUCK_TOKEN`.
 
 - [flight-scheduled-s3-ingest](flight-plans/flight-scheduled-s3-ingest) - Refresh a MotherDuck table from Hive-partitioned S3 Parquet on a schedule, reading only the partition that changes.
+- [flight-commoncrawl-web-graph](flight-plans/flight-commoncrawl-web-graph) - Build a fixed Common Crawl host-rank time series and verify each release against its domain-rank counts.
 - [flight-dlt-ingest](flight-plans/flight-dlt-ingest) - Run a dlt pipeline into MotherDuck on a schedule, with Parquet loader files and schema evolution.
 - [flight-provision-user-databases](flight-plans/flight-provision-user-databases) - Admin Flight that provisions a per-user database and restricted share from a users control table, and revokes access for inactive users (`features: shares`).
 

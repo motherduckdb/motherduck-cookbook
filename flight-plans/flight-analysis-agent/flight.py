@@ -69,19 +69,13 @@ def resolve_openrouter_key() -> str:
     """Return the OpenRouter API key.
 
     A local run sets OPENROUTER_API_KEY directly. Deployed as a Flight, the key
-    comes from a `TYPE flights` secret, which MotherDuck injects under the env
-    var `<secret_name>_<PARAM>`, not the bare param name. So a secret named
-    `openrouter` with an OPENROUTER_API_KEY param arrives as
-    `openrouter_OPENROUTER_API_KEY`. Accept the exact name first (local), then
-    any var ending in the suffix (the secret, whatever you named it).
+    comes from a `TYPE flights` secret whose params MotherDuck injects under
+    their bare names (plus a namespaced `<secret_name>_<PARAM>` variant to
+    disambiguate same-named params across secrets), so one lookup covers both.
     """
     key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if key:
         return key
-    for name, value in os.environ.items():
-        if name.endswith("_OPENROUTER_API_KEY") and value.strip():
-            log(f"Using OPENROUTER_API_KEY from secret env var {name!r}")
-            return value.strip()
     raise SystemExit(
         "OPENROUTER_API_KEY is required (set it locally or add a Flights secret)."
     )
