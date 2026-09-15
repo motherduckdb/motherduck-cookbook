@@ -18,7 +18,7 @@ prompt: >-
   Databricks Iceberg on MotherDuck, Write Straight Back to Iceberg" recipe to my own
   data and use case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-iceberg-databricks-direct
-published_date: 2026-07-20
+published_date: 2026-09-15
 ---
 
 # Transform Databricks Iceberg on MotherDuck, Write Straight Back to Iceberg
@@ -45,9 +45,9 @@ you can then point at your own tables and transform.
 
 1. Connect to MotherDuck (`md:`), `INSTALL`/`LOAD iceberg`, and idempotently
    attach the Databricks UC Iceberg REST catalog using a MotherDuck secret.
-2. Recreate the target Iceberg table (`DROP` + `CREATE` with an explicit schema).
-3. `INSERT ... SELECT` the transform, reading the source Iceberg table and writing
-   directly into the target Iceberg table.
+2. Begin a transaction and create the target table if missing.
+3. Replace its rows with `DELETE` and `INSERT ... SELECT`, then commit. A failed
+   transform rolls back to the previous Iceberg snapshot.
 4. Log source and output row counts.
 
 The transform is a plain `SELECT`, so adapt it by replacing the `SELECT` and the
@@ -80,10 +80,21 @@ external engine. They cost hours the first time; get them right before deploying
   IAM role.** Vending keeps working after the 60 minutes; that screen is a one-time
   setup step, not a time limit on the integration.
 - **Pin DuckDB.** Server-side Iceberg needs DuckDB >= 1.5.2, and the Flights runtime
-  otherwise pulls the latest. This template pins `duckdb==1.5.4`.
-- **`DROP`/`CREATE` on each run.** The target is fully replaced every run, which
-  suits an idempotent rollup. For incremental or append semantics, change the write
-  step.
+  otherwise pulls the latest. This template pins `duckdb==1.5.5`.
+- **Use distinct source and target names.** Matching names, including case-only
+  differences, fail before connecting.
+- **The rollup uses UTC days and BIGINT customer IDs.** `event_ts` must be castable
+  to a date and `customer_id` to BIGINT. Null keys are retained as groups.
+- **Targets must support merge-on-read deletes.** Use an unsorted native Iceberg
+  table with a compatible schema. Unsupported delete modes fail the transaction
+  without dropping the previous result. Existing schemas are not migrated.
+- **An existing catalog keeps its saved connection settings.** `ICEBERG_ENDPOINT`,
+  warehouse, secret, and default schema configure initial creation. Use a new
+  catalog name or explicitly update its settings when changing the connection.
+  Reusing a native MotherDuck database name is rejected.
+- **Full refresh with rollback.** Each run replaces the target rows in one
+  transaction. The table identity and existing schema are retained. Adapt the
+  write step for incremental or append semantics.
 - **Keep the token out of config.** The Databricks credential lives in the secret;
   a MotherDuck token is injected as `MOTHERDUCK_TOKEN` at runtime. Never put either
   in `config`.
@@ -99,7 +110,7 @@ external engine. They cost hours the first time; get them right before deploying
 | `ICEBERG_DEFAULT_SCHEMA` | `default` | `default_schema` for the attach. |
 | `ICEBERG_SCHEMA` | `md_iceberg_demo` | Working schema in the catalog. Validated as an identifier. |
 | `SOURCE_TABLE` | `usage_events_raw` | Source Iceberg table. Validated as an identifier. |
-| `TARGET_TABLE` | `usage_daily_rollup` | Target Iceberg table (fully replaced each run). Validated as an identifier. |
+| `TARGET_TABLE` | `usage_daily_rollup` | Target Iceberg table (rows refreshed each run). Validated as an identifier. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Select a token on the Flight; never put it in config. |
 
 ## Run it
@@ -111,7 +122,7 @@ token. To smoke-test before deploying:
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
 ICEBERG_ENDPOINT='https://<host>/api/2.1/unity-catalog/iceberg-rest' \
-  uv run --with duckdb==1.5.4 flight.py
+  uv run --with duckdb==1.5.5 flight.py
 ```
 
 ### Deploy as a Flight
@@ -128,13 +139,24 @@ once manually with `MD_RUN_FLIGHT`, confirm it succeeds, then add a schedule wit
 
 - **Identifier validation.** The catalog, secret name, schema, and table names flow
   into `ATTACH`/`CREATE`/`INSERT` statements that cannot be parameterized, so each is
-  checked against `^[A-Za-z_][A-Za-z0-9_]*$` before any SQL runs. The endpoint,
+  checked against `^[A-Za-z_][A-Za-z0-9_]*$` and double-quoted before SQL runs. The endpoint,
   warehouse, and default schema are inlined as escaped string literals.
 - **Credential in a secret.** The Databricks token never appears in code or config;
   it is referenced by secret name and read by the engine at attach time.
 
+## Validation
+
+The local development test uses a real Iceberg REST catalog and S3-compatible
+storage, with MotherDuck compute and on-demand managed Flights. It covers exact
+rollup rows, repeat runs, large IDs, nulls, UTC boundaries, staging-only mode, and
+rollback after a failed publish. See the [integration test guide](../../tests/iceberg_databricks/README.md).
+Databricks authentication and credential vending require a separate UC workspace
+and are not validated by the local catalog test.
+
 ## Learn more
 
+- [MotherDuck Iceberg integration](https://motherduck.com/docs/integrations/file-formats/apache-iceberg/).
+- [DuckDB Iceberg writes and limitations](https://duckdb.org/docs/current/core_extensions/iceberg/writing_to_iceberg).
 - Flight mechanics (creating, running, scheduling): use the MotherDuck MCP
   `get_flight_guide` tool.
 - Deeper MotherDuck or DuckDB questions (server-side Iceberg, UC credential vending):

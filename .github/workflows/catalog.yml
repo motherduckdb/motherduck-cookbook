@@ -13,6 +13,9 @@ on:
       - "tests/test_catalog_workflow.py"
       - "tests/test_excel_ingest_env.py"
       - "tests/test_dive_export.py"
+      - "tests/test_iceberg_databricks_flights.py"
+      - "tests/iceberg_databricks/**"
+      - "flight-plans/flight-iceberg-databricks-*/**"
       - "flight-plans/flight-dive-export/flight.py"
       - "flight-plans/flight-dive-export/requirements.txt"
       - "tests/test_commoncrawl_web_graph_flight.py"
@@ -29,6 +32,9 @@ on:
       - "tests/test_catalog_workflow.py"
       - "tests/test_excel_ingest_env.py"
       - "tests/test_dive_export.py"
+      - "tests/test_iceberg_databricks_flights.py"
+      - "tests/iceberg_databricks/**"
+      - "flight-plans/flight-iceberg-databricks-*/**"
       - "flight-plans/flight-dive-export/flight.py"
       - "flight-plans/flight-dive-export/requirements.txt"
       - "tests/test_commoncrawl_web_graph_flight.py"
@@ -63,6 +69,9 @@ jobs:
 
       - name: Run Dive export tests
         run: uv run --with pytest --with-requirements flight-plans/flight-dive-export/requirements.txt python -m pytest tests/test_dive_export.py -q
+
+      - name: Run Iceberg transform tests
+        run: uv run --with pytest --with duckdb==1.5.5 python -m pytest tests/test_iceberg_databricks_flights.py -q
 
       - name: Build catalog preview
         run: |

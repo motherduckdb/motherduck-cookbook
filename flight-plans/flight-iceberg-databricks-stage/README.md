@@ -17,7 +17,7 @@ prompt: >-
   Iceberg via a MotherDuck Staging Table" recipe to my own data and use case, using it
   as a guide:
   https://motherduck.com/docs/cookbook/flight-iceberg-databricks-stage
-published_date: 2026-07-20
+published_date: 2026-09-15
 ---
 
 # Transform Databricks Iceberg via a MotherDuck Staging Table
@@ -46,9 +46,9 @@ you can then point at your own tables and transform.
    attach the Databricks UC Iceberg REST catalog using a MotherDuck secret.
 2. **Stage:** `CREATE OR REPLACE TABLE` the transform result into a MotherDuck
    table (reading the source Iceberg table, transforming on MotherDuck's engine).
-3. **Publish:** recreate the target Iceberg table and `INSERT ... SELECT * FROM`
-   the MotherDuck staging table into it. Set `PUBLISH_TO_ICEBERG=false` to stage
-   in MotherDuck only.
+3. **Publish:** replace the Iceberg target rows in one transaction using
+   `DELETE` and `INSERT ... SELECT` from the staging table. A failed publish
+   rolls back the Iceberg snapshot. Set `PUBLISH_TO_ICEBERG=false` to stage only.
 4. Log staged and published row counts.
 
 The transform is a plain `SELECT`, so adapt it by replacing the `SELECT` in the
@@ -82,10 +82,23 @@ external engine. They cost hours the first time; get them right before deploying
   IAM role.** Vending keeps working after the 60 minutes; that screen is a one-time
   setup step, not a time limit on the integration.
 - **Pin DuckDB.** Server-side Iceberg needs DuckDB >= 1.5.2, and the Flights runtime
-  otherwise pulls the latest. This template pins `duckdb==1.5.4`.
-- **The staged MotherDuck table is fully replaced each run** (`CREATE OR REPLACE`),
-  as is the Iceberg target. That suits an idempotent rollup; change both writes for
-  incremental or append semantics.
+  otherwise pulls the latest. This template pins `duckdb==1.5.5`.
+- **Use distinct source and target names.** Matching names, including case-only
+  differences, fail before connecting. The staging database must also differ
+  from the Iceberg catalog.
+- **The rollup uses UTC days and BIGINT customer IDs.** `event_ts` must be castable
+  to a date and `customer_id` to BIGINT. Null keys are retained as groups.
+- **Targets must support merge-on-read deletes.** Use an unsorted native Iceberg
+  table with a compatible schema. Unsupported delete modes fail the transaction
+  without dropping the previous result. Existing schemas are not migrated.
+- **An existing catalog keeps its saved connection settings.** `ICEBERG_ENDPOINT`,
+  warehouse, secret, and default schema configure initial creation. Use a new
+  catalog name or explicitly update its settings when changing the connection.
+  Reusing a native MotherDuck database name is rejected.
+- **The staged MotherDuck table is fully replaced each run** (`CREATE OR REPLACE`).
+  Iceberg rows are refreshed in a separate transaction. A failed publish preserves
+  the old Iceberg output but leaves the new MotherDuck staging table available.
+  The two destinations do not commit atomically together.
 - **Reads only? Staging still needs vending.** Reading data files from UC also needs
   vending, so the same external-location setup applies even if you set
   `PUBLISH_TO_ICEBERG=false`.
@@ -104,11 +117,11 @@ external engine. They cost hours the first time; get them right before deploying
 | `ICEBERG_DEFAULT_SCHEMA` | `default` | `default_schema` for the attach. |
 | `ICEBERG_SCHEMA` | `md_iceberg_demo` | Working schema in the catalog. Validated as an identifier. |
 | `SOURCE_TABLE` | `usage_events_raw` | Source Iceberg table. Validated as an identifier. |
-| `TARGET_TABLE` | `usage_daily_rollup` | Target Iceberg table (fully replaced when publishing). Validated as an identifier. |
+| `TARGET_TABLE` | `usage_daily_rollup` | Target Iceberg table (rows refreshed when publishing). Validated as an identifier. |
 | `MD_DATABASE` | `flights_demo` | MotherDuck database for the staged table. Created if missing. Validated as an identifier. |
 | `MD_SCHEMA` | `main` | MotherDuck schema for the staged table. Validated as an identifier. |
 | `MD_TABLE` | `usage_daily_rollup` | MotherDuck staging table name. Validated as an identifier. |
-| `PUBLISH_TO_ICEBERG` | `true` | Set `false` to stage in MotherDuck only and skip the Iceberg write. |
+| `PUBLISH_TO_ICEBERG` | `true` | Set `false` to stage only. Only `true` and `false` are accepted. |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Auth. Select a token on the Flight; never put it in config. |
 
 ## Run it
@@ -120,8 +133,11 @@ token. To smoke-test before deploying:
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
 ICEBERG_ENDPOINT='https://<host>/api/2.1/unity-catalog/iceberg-rest' \
-  uv run --with duckdb==1.5.4 flight.py
+  uv run --with duckdb==1.5.5 flight.py
 ```
+
+Include `PUBLISH_TO_ICEBERG` in the Flight config at creation if you want to
+override it per run. Run overrides can only change keys already defined in config.
 
 Set `PUBLISH_TO_ICEBERG=false` on the first run to build the MotherDuck staging
 table and inspect it before writing anything to Iceberg.
@@ -140,13 +156,24 @@ once manually with `MD_RUN_FLIGHT`, confirm it succeeds, then add a schedule wit
 
 - **Identifier validation.** The catalog, secret name, schemas, and table names flow
   into `ATTACH`/`CREATE`/`INSERT` statements that cannot be parameterized, so each is
-  checked against `^[A-Za-z_][A-Za-z0-9_]*$` before any SQL runs. The endpoint,
+  checked against `^[A-Za-z_][A-Za-z0-9_]*$` and double-quoted before SQL runs. The endpoint,
   warehouse, and default schema are inlined as escaped string literals.
 - **Credential in a secret.** The Databricks token never appears in code or config;
   it is referenced by secret name and read by the engine at attach time.
 
+## Validation
+
+The local development test uses a real Iceberg REST catalog and S3-compatible
+storage, with MotherDuck compute and on-demand managed Flights. It covers exact
+rollup rows, repeat runs, large IDs, nulls, UTC boundaries, staging-only mode, and
+rollback after a failed publish. See the [integration test guide](../../tests/iceberg_databricks/README.md).
+Databricks authentication and credential vending require a separate UC workspace
+and are not validated by the local catalog test.
+
 ## Learn more
 
+- [MotherDuck Iceberg integration](https://motherduck.com/docs/integrations/file-formats/apache-iceberg/).
+- [DuckDB Iceberg writes and limitations](https://duckdb.org/docs/current/core_extensions/iceberg/writing_to_iceberg).
 - Flight mechanics (creating, running, scheduling): use the MotherDuck MCP
   `get_flight_guide` tool.
 - Deeper MotherDuck or DuckDB questions (server-side Iceberg, UC credential vending):

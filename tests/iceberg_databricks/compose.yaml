@@ -1,0 +1,19 @@
+services:
+  catalog:
+    image: tabulario/iceberg-rest:1.6.0
+    ports: ["127.0.0.1:18181:8181"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${DEV_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${DEV_SECRET_KEY}
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://storage:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+  storage:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    ports: ["127.0.0.1:19000:9000"]
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${DEV_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${DEV_SECRET_KEY}
