@@ -76,6 +76,7 @@ ALLOWED_TAGS = {
     # agent frameworks and gateways
     "pydantic-ai",
     "openrouter",
+    "together-ai",
     # platforms and infrastructure
     "cloudflare",
     "vercel",
