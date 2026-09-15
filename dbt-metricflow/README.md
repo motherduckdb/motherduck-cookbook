@@ -101,7 +101,7 @@ DBT_PROFILES_DIR=.. uv run mf query --metrics cancellation_rate
 - **Time-dimension queries are bounded by the spine.** `metricflow_time_spine.sql` only generates dates from `2024-01-01` to `2025-12-31`. Grouping by `metric_time__*` outside that window returns no rows. Widen the `generate_series` range to query other periods.
 - **Only the `day` grain is declared.** The time spine and `dbt_project.yml` define a `day` granularity; `metric_time__month`, `__week`, and `__year` roll up from it. If you need a coarser native grain you must add it to the spine config.
 - **MotherDuck token env var naming.** dbt-duckdb accepts `MOTHERDUCK_TOKEN` or `motherduck_token`. The token is read from the environment, not from `profiles.yml` (do not paste secrets into the profile). A missing or invalid token fails at connection time, not at parse time.
-- **Create the MotherDuck database first.** `md:ecommerce_test_db` must exist before `dbt run` writes into it; the one-time `CREATE DATABASE` step above handles this. dbt will not create the database for you.
+- **Set `MD_DATABASE` to change the MotherDuck database.** The profile uses `MD_DATABASE` when it is set and otherwise uses `ecommerce_test_db`. The target database must exist before `dbt run` writes into it. dbt does not create the database.
 - **Derived metrics reference metric names, not measures.** `revenue_per_customer` uses `revenue / customers`, both of which are metrics. Referencing a raw measure name in a derived `expr` will not resolve. Metric declaration order in the file does not matter; MetricFlow resolves the whole graph.
 
 ## What you'll adjust
@@ -109,7 +109,7 @@ DBT_PROFILES_DIR=.. uv run mf query --metrics cancellation_rate
 | Setting | Purpose | Options / example |
 | --- | --- | --- |
 | `metricflow-example/profiles.yml` `local.path` | Local DuckDB file the project builds into | `ecommerce_local.duckdb` (default) |
-| `metricflow-example/profiles.yml` `motherduck.path` | MotherDuck database name to build into | `md:ecommerce_test_db`, change to your own `md:<db>` |
+| `MD_DATABASE` env var | MotherDuck database name to build into | unset for `ecommerce_test_db`, or set to your own database name |
 | `MOTHERDUCK_TOKEN` (or `motherduck_token`) env var | Auth for the MotherDuck target | your MotherDuck access token |
 | `DBT_TARGET` env var | Selects which `profiles.yml` output the `mf` CLI uses | unset (uses `local`) or `motherduck` |
 | `DBT_PROFILES_DIR` env var | Where dbt finds `profiles.yml` | `..` when run from `ecommerce_metrics/` |
@@ -156,9 +156,9 @@ export MOTHERDUCK_TOKEN='your_token_here'
 # First time only: create the target database
 uv run python -c "import duckdb; duckdb.connect('md:').execute('CREATE DATABASE ecommerce_test_db')"
 
-DBT_PROFILES_DIR=.. uv run dbt seed --target motherduck
-DBT_PROFILES_DIR=.. uv run dbt run --target motherduck
-DBT_PROFILES_DIR=.. DBT_TARGET=motherduck uv run mf query --metrics revenue,orders,customers --group-by metric_time__month
+MD_DATABASE=ecommerce_test_db DBT_PROFILES_DIR=.. uv run dbt seed --target motherduck
+MD_DATABASE=ecommerce_test_db DBT_PROFILES_DIR=.. uv run dbt run --target motherduck
+MD_DATABASE=ecommerce_test_db DBT_PROFILES_DIR=.. DBT_TARGET=motherduck uv run mf query --metrics revenue,orders,customers --group-by metric_time__month
 ```
 
 The generated SQL is identical for both targets. MotherDuck's hybrid execution decides where the work runs.
@@ -167,7 +167,7 @@ The generated SQL is identical for both targets. MotherDuck's hybrid execution d
 
 - [`requirements.txt`](requirements.txt): Python deps to install (`dbt-core`, `dbt-duckdb`, `dbt-metricflow`), pinned to the 1.8+ line; pulls in `duckdb` and `metricflow` transitively.
 - [`EXAMPLES.md`](EXAMPLES.md): a cookbook of `mf query` patterns (single/multiple metrics, time ranges, status breakdowns, multiple dimensions, weekly reports, derived metrics, `mf list`, `--explain`, exporting results) with expected output for each.
-- [`metricflow-example/profiles.yml`](metricflow-example/profiles.yml): the dbt profile with two outputs, `local` (DuckDB file) and `motherduck` (`md:ecommerce_test_db`); the MotherDuck token is read from the environment, not stored here.
+- [`metricflow-example/profiles.yml`](metricflow-example/profiles.yml): the dbt profile with two outputs, `local` (DuckDB file) and `motherduck` (`md:<MD_DATABASE>`, defaulting to `md:ecommerce_test_db`); the MotherDuck token is read from the environment, not stored here.
 - [`metricflow-example/ecommerce_metrics/`](metricflow-example/ecommerce_metrics/): the dbt project (models, seed, semantic model, config), described below.
 - [`metricflow-example/ecommerce_metrics/dbt_project.yml`](metricflow-example/ecommerce_metrics/dbt_project.yml): dbt project config; materializes models as tables and wires the MetricFlow time spine (`metricflow_time_spine`, `day` granularity).
 - [`metricflow-example/ecommerce_metrics/models/`](metricflow-example/ecommerce_metrics/models/): three files, `fct_orders.sql` (thin orders fact table over the seed), `metricflow_time_spine.sql` (date spine backing time dimensions), and `semantic_models.yml` (the semantic model: entities, dimensions, measures, metrics).

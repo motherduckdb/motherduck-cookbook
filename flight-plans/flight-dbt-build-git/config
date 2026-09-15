@@ -1,0 +1,9 @@
+{
+  "DB_ENV_VAR": "MOTHERDUCK_DATABASE",
+  "DBT_TARGET": "prod",
+  "MODELS_DATABASE": "dbt_build_git_test",
+  "RUN_MODE": "build",
+  "SELECT": "",
+  "SNAPSHOT_DATABASE": "dbt_build_git_test",
+  "SNAPSHOT_TABLE": "dbt_run_results"
+}

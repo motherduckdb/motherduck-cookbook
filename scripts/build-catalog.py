@@ -65,6 +65,7 @@ ALLOWED_TAGS = {
     "sqlmesh",
     "metricflow",
     "connectorx",
+    "adbc",
     # libraries
     "pandas",
     "pyarrow",
