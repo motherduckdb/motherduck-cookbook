@@ -1,0 +1,4 @@
+duckdb==1.5.5
+pydantic-ai-slim[openrouter]==2.2.0
+PyYAML==6.0.2
+pytz==2025.2
