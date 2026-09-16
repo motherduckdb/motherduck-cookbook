@@ -517,6 +517,59 @@ def test_parse_rss_keeps_feed_text_as_data(flight):
     )
 
 
+def test_signal_payload_hash_ignores_unrelated_feed_and_response_changes(flight):
+    item = b"""<item><title>Unchanged story</title>
+      <description>Unchanged description.</description>
+      <link>https://www.bbc.co.uk/news/articles/unchanged</link>
+      <guid isPermaLink="false">bbc-unchanged</guid>
+      <pubDate>Thu, 10 Sep 2026 10:00:00 GMT</pubDate></item>"""
+    later_item = b"""<item><title>A later story</title>
+      <description>Published after the first fetch.</description>
+      <link>https://www.bbc.co.uk/news/articles/later</link>
+      <guid isPermaLink="false">bbc-later</guid>
+      <pubDate>Fri, 11 Sep 2026 10:00:00 GMT</pubDate></item>"""
+    feed = b'<?xml version="1.0"?><rss version="2.0"><channel>%s</channel></rss>'
+    feed_url = "https://feeds.bbci.co.uk/news/england/london/rss.xml"
+    first_fetch = flight.datetime(2026, 9, 10, 11, tzinfo=flight.timezone.utc)
+    second_fetch = flight.datetime(2026, 9, 11, 11, tzinfo=flight.timezone.utc)
+
+    before = flight.parse_rss(feed_url, feed % item, first_fetch)
+    after = flight.parse_rss(feed_url, feed % (item + later_item), second_fetch)
+
+    assert len(before) == 1
+    assert [signal.signal_id for signal in after][0] == before[0].signal_id
+    assert after[0].payload_hash == before[0].payload_hash
+    assert after[1].payload_hash != before[0].payload_hash
+
+    edited = flight.parse_rss(
+        feed_url, feed % item.replace(b"Unchanged story", b"Edited story"), second_fetch
+    )
+    assert edited[0].payload_hash != before[0].payload_hash
+
+    def weather_payload(days, temperatures):
+        return {
+            "daily": {
+                "time": days,
+                "temperature_2m_max": temperatures,
+                "temperature_2m_min": [11.2] * len(days),
+                "precipitation_sum": [0] * len(days),
+                "snowfall_sum": [0] * len(days),
+                "wind_speed_10m_max": [17.8] * len(days),
+                "weather_code": [2] * len(days),
+            }
+        }
+
+    one_day = flight.parse_weather(weather_payload(["2026-09-10"], [18.5]))
+    two_days = flight.parse_weather(
+        weather_payload(["2026-09-10", "2026-09-11"], [18.5, 19])
+    )
+    revised = flight.parse_weather(weather_payload(["2026-09-10"], [21.4]))
+
+    assert two_days[0].payload_hash == one_day[0].payload_hash
+    assert two_days[1].payload_hash != one_day[0].payload_hash
+    assert revised[0].payload_hash != one_day[0].payload_hash
+
+
 def test_parse_rss_rejects_non_http_links_and_limits_text(flight):
     xml = (
         b"""<rss><channel><item><title>"""
@@ -1946,6 +1999,105 @@ def test_store_external_signals_preserves_the_timestamp_for_an_unchanged_payload
     assert stored[0].retrieved_at == original.retrieved_at
 
 
+def test_render_guide_shows_cited_and_undimensioned_metrics_only(flight):
+    """The metrics table is working data, not the analysis. A single day
+    produces over 300 rows; rendering them all buries the findings."""
+    period, cited, signal, definition, annotation, _ = _fingerprint_inputs(flight)
+
+    def evidence(evidence_id, dimensions):
+        return flight.MetricEvidence(
+            evidence_id=evidence_id,
+            period=period,
+            metric="orders",
+            dimensions=dimensions,
+            comparison_label="same_weekday",
+            comparison_period=flight.PeriodKey(
+                "day", flight.date(2026, 9, 3), flight.date(2026, 9, 4)
+            ),
+            current_value=flight.Decimal("10.0000"),
+            comparison_value=flight.Decimal("8.0000"),
+            absolute_change=flight.Decimal("2.0000"),
+            percentage_change=flight.Decimal("25.0000"),
+            sample_size=10,
+        )
+
+    headline = evidence("metric-headline", ())
+    noise = evidence("metric-noise", (("acquisition_channel", "email"),))
+
+    draft = flight.AnalysisDraft(
+        summary="Only the cited rows belong in the table.",
+        findings=[
+            flight.Finding(
+                title="Online orders increased",
+                summary="Cites one dimensioned metric.",
+                evidence_ids=[cited.evidence_id],
+                confidence="high",
+            )
+        ],
+    )
+
+    content, _ = flight.render_guide(
+        period=period,
+        metrics=[cited, headline, noise],
+        signals=[signal],
+        annotations=[annotation],
+        definitions=[definition],
+        prior_context=[],
+        draft=draft,
+        caveats=[],
+        config=flight.parse_config({}),
+    )
+
+    assert f"`{cited.evidence_id}`" in content
+    assert f"`{headline.evidence_id}`" in content
+    assert f"`{noise.evidence_id}`" not in content
+    assert "1 further evidence rows are not shown here." in content
+    # The baseline each row was measured against is part of reading it.
+    assert "| Baseline |" in content
+    assert "same_weekday" in content
+
+
+def test_persisted_metric_evidence_records_its_comparison_baseline(flight):
+    """Without the label, a day's three rows per metric are indistinguishable
+    and the trailing-window rows read as ~-96% collapses."""
+    period, metric, _, _, _, _ = _fingerprint_inputs(flight)
+    con = flight.duckdb.connect()
+    config = _state_config(flight)
+    now = flight.datetime(2026, 9, 11, tzinfo=flight.timezone.utc)
+
+    flight.ensure_state_schema(con, config)
+    run_id = flight.claim_period(con, config, period, now)
+    guide = _guide_record(
+        flight,
+        guide_id="cccccccc-cccc-cccc-cccc-cccccccccccc",
+        topic="persistent-analysis/ecommerce/day",
+        current_version=1,
+        content="guide",
+    )
+    flight.complete_period(
+        con,
+        config,
+        period=period,
+        run_id=run_id,
+        fingerprint="fingerprint-1",
+        guide=guide,
+        metrics=[metric],
+        source_watermark=now,
+        now=now,
+    )
+
+    assert con.execute(
+        """
+        SELECT comparison_label, comparison_start, comparison_end
+        FROM memory.main.metric_evidence
+        """
+    ).fetchone() == (
+        "prior_day",
+        flight.date(2026, 9, 9),
+        flight.date(2026, 9, 10),
+    )
+
+
 def test_render_guide_uses_trusted_metrics_and_rejects_unknown_references(flight):
     period, metric, signal, definition, annotation, _ = _fingerprint_inputs(flight)
     draft = flight.AnalysisDraft(
@@ -1971,12 +2123,16 @@ def test_render_guide_uses_trusted_metrics_and_rejects_unknown_references(flight
         prior_context=[],
         draft=draft,
         caveats=[],
+        config=flight.parse_config({}),
     )
 
     assert "10.0000" in content
     assert "8.0000" in content
     assert "BEGIN UNTRUSTED DATA" in content
     assert "Temporal association does not establish causation." in content
+    assert references[0]["type"] == "catalog"
+    assert references[0]["url"] == "md:persistent_analysis"
+    assert references[0]["schema"] == "main"
     assert references[0]["table"] == "metric_evidence"
 
     with pytest.raises(ValueError, match="unknown evidence IDs"):

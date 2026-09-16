@@ -16,7 +16,7 @@ Guide access, fingerprinting, model calls, rendering, and orchestration. The
 Flight reads one immutable public Parquet file and stores operational state in
 MotherDuck tables. Tests replace network, model, and Guide calls with fakes.
 
-**Tech stack:** Python, DuckDB 1.5.3, MotherDuck Flights, MotherDuck Guides,
+**Tech stack:** Python, DuckDB 1.5.5, MotherDuck Flights, MotherDuck Guides,
 Pydantic AI 2.2.0, OpenRouter, PyYAML 6.0.2, RSS 2.0, Open-Meteo, Parquet,
 pytest, and AWS CLI.
 
@@ -146,7 +146,7 @@ Expected: pytest fails with `FileNotFoundError` for `flight.py`.
 Write `requirements.txt` with these exact pins:
 
 ```text
-duckdb==1.5.3
+duckdb==1.5.5
 pydantic-ai-slim[openrouter]==2.2.0
 PyYAML==6.0.2
 ```

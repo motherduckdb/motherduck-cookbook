@@ -45,6 +45,42 @@ The model receives precomputed evidence and untrusted source text. It must cite
 known IDs. The renderer validates every citation and writes metric values from
 SQL objects, not model prose.
 
+### Reading `metric_evidence`
+
+Each metric appears once per comparison baseline, so a single day writes three
+rows per metric and dimension: `prior_day`, `same_weekday` and
+`trailing_28_days`. They repeat the same `current_value`, so aggregate with
+`MAX`, never `SUM` — summing turns a £2,196 day into £6,589. Filter to one
+`comparison_label` instead:
+
+```sql
+SELECT metric, dimensions, current_value, comparison_value, percentage_change
+FROM persistent_analysis.main.metric_evidence
+WHERE grain = 'day'
+  AND period_start = DATE '2026-09-10'
+  AND comparison_label = 'prior_day';
+```
+
+The trailing baselines behave differently by metric. For `net_revenue`,
+`gross_revenue` and `orders` the comparison value is a window *sum*, so a single
+day against `trailing_28_days` shows roughly -96% — arithmetic, not a collapse.
+Scale it to the period before comparing:
+
+```sql
+comparison_value
+  * (date_diff('day', period_start, period_end)::DOUBLE
+     / date_diff('day', comparison_start, comparison_end))
+```
+
+Rates and averages (`average_order_value`, `refund_rate`, `cancellation_rate`,
+`units_per_order`, `returning_customer_share`) are already computed over the
+whole window, so their trailing comparison value is the average and needs no
+scaling. That makes it the useful stand-in for "normal".
+
+Analysed periods are not necessarily contiguous — a run bounded by
+`RECONCILIATION_DAYS` leaves gaps. Chart them as bars; a line interpolates
+across days that were never processed.
+
 ## Questions to answer
 
 - What source table replaces the synthetic Parquet file?
@@ -61,6 +97,8 @@ SQL objects, not model prose.
 - The default `GUIDE_ACCESS=user` keeps generated Guides private to the Flight identity. Use `organization` only with an admin-authorized identity and an access test.
 - `RETENTION_MODE=archive` moves old daily and weekly Guides. It does not delete Guides.
 - The public fixture is synthetic. Do not treat it as a production benchmark or customer dataset.
+- A weekly Guide has no field in which to cite a daily one. `Finding` carries `evidence_ids`, `signal_ids` and `annotation_ids` only, so parent Guides read their children as prompt context but leave no traceable link. Roll-up lineage is readable from `period_dependencies`, not from the Guide text.
+- A catch-up run costs more than one model call per period. Days drain before weeks before months, so a week regenerates once its dailies land, and the days citing a regenerated month regenerate in turn. Steady-state daily runs are unaffected.
 
 ## What you'll adjust
 
@@ -131,6 +169,10 @@ Create the Flight without a schedule. Run it with `MD_RUN_FLIGHT`, then inspect
 the returned run with `MD_GET_FLIGHT_RUN`. Confirm that the generated Guides
 contain SQL evidence, public context, and the expected period hierarchy. Add a
 schedule only after that run succeeds, using `MD_UPDATE_FLIGHT`.
+
+A run that fails any period exits non-zero, so a scheduled Flight reports the
+failure instead of a green run with no new Guides. The per-period error is in
+the `analysis_periods` state table.
 
 ## Security
 

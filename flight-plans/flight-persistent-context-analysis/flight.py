@@ -666,6 +666,7 @@ def guide_references(
     definitions: Sequence[GuideRecord],
     annotations: Sequence[Annotation],
     prior_context: Sequence[GuideRecord],
+    config: Config,
 ) -> list[dict[str, object]]:
     guides = {
         str(record.id): record.id
@@ -674,8 +675,9 @@ def guide_references(
     guides.update({str(annotation.guide_id): annotation.guide_id for annotation in annotations})
     return [
         {
-            "type": "table",
-            "schema": STATE_SCHEMA,
+            "type": "catalog",
+            "url": f"md:{config.state_database}",
+            "schema": config.state_schema,
             "table": "metric_evidence",
             "description": "Trusted SQL metric evidence",
         },
@@ -696,6 +698,7 @@ def render_guide(
     prior_context: Sequence[GuideRecord],
     draft: AnalysisDraft,
     caveats: Sequence[str],
+    config: Config,
 ) -> tuple[str, list[dict[str, object]]]:
     validate_draft_references(
         draft, metrics=metrics, signals=signals, annotations=annotations
@@ -724,20 +727,52 @@ def render_guide(
                 f"   References: {', '.join(f'`{item}`' for item in cited) or 'none'}.",
             ]
         )
-    lines.extend(["", "## Metrics and comparisons", "", "| Metric | Dimensions | Current | Comparison | Change |", "| --- | --- | ---: | ---: | ---: |"])
-    for metric in sorted(metrics, key=lambda item: item.evidence_id):
+    # Only the rows a reader can act on: everything a finding cites, plus the
+    # undimensioned headline metrics. Rendering all of them (312 on a single
+    # day) buries the analysis under its own working data; the full set stays
+    # queryable in the metric_evidence table named under "Evidence SQL".
+    cited_ids = {
+        evidence_id
+        for finding in draft.findings
+        for evidence_id in finding.evidence_ids
+    }
+    shown = [
+        metric
+        for metric in metrics
+        if metric.evidence_id in cited_ids or not metric.dimensions
+    ]
+    omitted = len(metrics) - len(shown)
+    lines.extend(
+        [
+            "",
+            "## Metrics and comparisons",
+            "",
+            "| Metric | Dimensions | Baseline | Current | Comparison | Change |",
+            "| --- | --- | --- | ---: | ---: | ---: |",
+        ]
+    )
+    for metric in sorted(shown, key=lambda item: item.evidence_id):
         lines.append(
             "| "
             + " | ".join(
                 [
                     f"`{metric.evidence_id}` {_markdown_text(metric.metric)}",
                     _markdown_text(", ".join(f"{key}={value}" for key, value in metric.dimensions) or "all"),
+                    _markdown_text(metric.comparison_label),
                     _display_decimal(metric.current_value),
                     _display_decimal(metric.comparison_value),
                     _display_decimal(metric.absolute_change),
                 ]
             )
             + " |"
+        )
+    if omitted:
+        lines.extend(
+            [
+                "",
+                f"{omitted} further evidence rows are not shown here. "
+                "All of them are queryable from the table named under Evidence SQL.",
+            ]
         )
     lines.extend(["", "## Public signals", "", "BEGIN UNTRUSTED DATA"])
     for signal in sorted(signals, key=lambda item: item.signal_id):
@@ -755,10 +790,12 @@ def render_guide(
     lines.extend(["", "## Caveats", ""])
     lines.extend(f"- {_markdown_text(caveat)}" for caveat in [*caveats, *draft.caveats])
     lines.append("- Temporal association does not establish causation.")
-    lines.extend(["", "## Evidence SQL", "", "Metrics are computed from `demo_sales` and persisted in `persistent_analysis.main.metric_evidence`.", "", "## References", ""])
-    for reference in guide_references(definitions, annotations, prior_context):
+    evidence_table = f"{config.state_database}.{config.state_schema}.metric_evidence"
+    lines.extend(["", "## Evidence SQL", "", f"Metrics are computed from `demo_sales` and persisted in `{evidence_table}`.", "", "## References", ""])
+    references = guide_references(definitions, annotations, prior_context, config)
+    for reference in references:
         lines.append(f"- `{reference['type']}`: {_markdown_text(str(reference.get('description', '')))}")
-    return "\n".join(lines).rstrip() + "\n", guide_references(definitions, annotations, prior_context)
+    return "\n".join(lines).rstrip() + "\n", references
 
 
 def _payload_hash(payload: bytes | Mapping[str, object]) -> str:
@@ -807,7 +844,6 @@ def parse_rss(
     root = ET.fromstring(payload)
     signals: list[ExternalSignal] = []
     seen_identities: set[tuple[str, str]] = set()
-    payload_hash = _payload_hash(payload)
     for item in root.iter():
         if item.tag.rsplit("}", 1)[-1] != "item":
             continue
@@ -846,7 +882,16 @@ def parse_rss(
                 title=title,
                 source_url=link,
                 attributes=attributes,
-                payload_hash=payload_hash,
+                payload_hash=_payload_hash(
+                    {
+                        "feed_id": feed_id,
+                        "guid": guid,
+                        "published_at": published_at.isoformat(),
+                        "title": title,
+                        "source_url": link,
+                        "attributes": list(attributes),
+                    }
+                ),
                 retrieved_at=retrieved_at.astimezone(timezone.utc),
             )
         )
@@ -885,7 +930,6 @@ def parse_weather(payload: Mapping[str, object]) -> list[ExternalSignal]:
     if any(len(values) != len(dates) for values in values_by_name.values()):
         raise ValueError("Open-Meteo daily values have inconsistent lengths")
 
-    payload_hash = _payload_hash(payload)
     retrieved_at = datetime.now(timezone.utc)
     signals: list[ExternalSignal] = []
     seen_days: set[date] = set()
@@ -920,7 +964,9 @@ def parse_weather(payload: Mapping[str, object]) -> list[ExternalSignal]:
                 title=f"London weather for {day.isoformat()}",
                 source_url=WEATHER_URL,
                 attributes=attributes,
-                payload_hash=payload_hash,
+                payload_hash=_payload_hash(
+                    {"provider_id": provider_id, "attributes": list(attributes)}
+                ),
                 retrieved_at=retrieved_at,
             )
         )
@@ -1844,6 +1890,9 @@ def ensure_state_schema(con: duckdb.DuckDBPyConnection, config: Config) -> None:
           evidence_id VARCHAR,
           metric VARCHAR,
           dimensions JSON,
+          comparison_label VARCHAR,
+          comparison_start DATE,
+          comparison_end DATE,
           current_value DECIMAL(20,4),
           comparison_value DECIMAL(20,4),
           absolute_change DECIMAL(20,4),
@@ -1852,6 +1901,21 @@ def ensure_state_schema(con: duckdb.DuckDBPyConnection, config: Config) -> None:
         )
         """
     )
+    # Added after first release: the comparison baseline a row was measured
+    # against. Without it, a day's three rows per metric (prior day, same
+    # weekday, trailing 28 days) are indistinguishable downstream, and the
+    # trailing rows read as ~-96% collapses.
+    for column, column_type in (
+        ("comparison_label", "VARCHAR"),
+        ("comparison_start", "DATE"),
+        ("comparison_end", "DATE"),
+    ):
+        con.execute(
+            f"""
+            ALTER TABLE {_state_table(config, 'metric_evidence')}
+            ADD COLUMN IF NOT EXISTS {column} {column_type}
+            """
+        )
     con.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {_state_table(config, 'external_signals')} (
@@ -1987,7 +2051,14 @@ def complete_period(
         for metric in metrics:
             con.execute(
                 f"""
-                INSERT INTO {evidence} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO {evidence} (
+                  grain, period_start, period_end, scope,
+                  evidence_id, metric, dimensions,
+                  comparison_label, comparison_start, comparison_end,
+                  current_value, comparison_value,
+                  absolute_change, percentage_change, sample_size
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     period.grain,
@@ -1997,6 +2068,9 @@ def complete_period(
                     metric.evidence_id,
                     metric.metric,
                     json.dumps(dict(metric.dimensions), sort_keys=True),
+                    metric.comparison_label,
+                    metric.comparison_period.period_start,
+                    metric.comparison_period.period_end,
                     metric.current_value,
                     metric.comparison_value,
                     metric.absolute_change,
@@ -2644,6 +2718,7 @@ def run_analysis(
                     prior_context=prior_context,
                     draft=draft,
                     caveats=caveats,
+                    config=config,
                 )
                 guide = upsert_analysis_guide(
                     guide_store,
@@ -2732,6 +2807,12 @@ def parse_config(env: Mapping[str, str]) -> Config:
     )
 
 
+def connect_motherduck() -> duckdb.DuckDBPyConnection:
+    con = duckdb.connect("md:")
+    con.execute("SET TimeZone = 'UTC'")
+    return con
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-demo-data", type=Path)
@@ -2742,7 +2823,7 @@ def main() -> int:
         return 0
 
     config = parse_config(os.environ)
-    con = duckdb.connect("md:")
+    con = connect_motherduck()
     try:
         summary = run_analysis(
             config,
@@ -2753,7 +2834,7 @@ def main() -> int:
         print(json.dumps(summary, sort_keys=True), file=sys.stderr)
     finally:
         con.close()
-    return 0
+    return 1 if summary["failed"] else 0
 
 
 if __name__ == "__main__":
