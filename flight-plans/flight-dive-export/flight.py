@@ -371,9 +371,9 @@ def settle(page, wait: "Wait") -> None:
             f"WAIT_FOR_TEXT {wait.for_text!r} never appeared in {wait.ceiling_ms}ms. "
             "The Dive did not finish loading, so nothing was captured."
         )
-    log(
-        f"WARNING: the Dive was still changing after {wait.ceiling_ms}ms; "
-        "capturing anyway. Raise WAIT_MS, or set WAIT_FOR_TEXT."
+    raise RuntimeError(
+        f"The Dive did not settle in {wait.ceiling_ms}ms. Nothing was captured. "
+        "Raise WAIT_MS, or set WAIT_FOR_TEXT to a loaded-content marker."
     )
 
 
@@ -450,56 +450,58 @@ def grow_viewport(page, width: int, height: int) -> int:
 
     remaining = content_height(page)
     if remaining > used:
-        # Either the Dive is taller than MAX_VIEWPORT_HEIGHT or it is still
-        # reflowing. Either way the capture is short, so say so out loud.
-        log(
-            f"WARNING: the Dive is {remaining}px tall but the capture stops at "
-            f"{used}px, so the bottom is cut off."
+        raise RuntimeError(
+            f"The Dive is {remaining}px tall but the capture stops at {used}px. "
+            "The bottom would be cut off, so nothing was captured. "
+            "Reduce the Dive content or adjust its layout."
         )
     return used
 
 
 def store(store_table: str, export: Export) -> None:
     """Append one row per rendition to the export table, creating it if needed."""
-    database, schema, _table = split_table(store_table)
+    database, schema, table = (f'"{part}"' for part in split_table(store_table))
+    qualified_table = f"{database}.{schema}.{table}"
     con = duckdb.connect("md:")
-    con.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
-    con.execute(f"CREATE SCHEMA IF NOT EXISTS {database}.{schema}")
-    con.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {store_table} (
-            captured_at TIMESTAMPTZ,
-            label       VARCHAR,
-            source_url  VARCHAR,
-            kind        VARCHAR,
-            filename    VARCHAR,
-            mime        VARCHAR,
-            byte_count  BIGINT,
-            content     BLOB
+    try:
+        con.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
+        con.execute(f"CREATE SCHEMA IF NOT EXISTS {database}.{schema}")
+        con.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {qualified_table} (
+                captured_at TIMESTAMPTZ,
+                label       VARCHAR,
+                source_url  VARCHAR,
+                kind        VARCHAR,
+                filename    VARCHAR,
+                mime        VARCHAR,
+                byte_count  BIGINT,
+                content     BLOB
+            )
+            """
         )
-        """
-    )
-    row_sql = "(?, ?, ?, ?, ?, ?, ?, ?)"
-    params: list = []
-    for rendition in export.renditions:
-        params.extend(
-            [
-                export.captured_at,
-                export.label,
-                export.source_url,
-                rendition.kind,
-                rendition.filename,
-                rendition.mime,
-                len(rendition.content),
-                rendition.content,
-            ]
+        row_sql = "(?, ?, ?, ?, ?, ?, ?, ?)"
+        params: list = []
+        for rendition in export.renditions:
+            params.extend(
+                [
+                    export.captured_at,
+                    export.label,
+                    export.source_url,
+                    rendition.kind,
+                    rendition.filename,
+                    rendition.mime,
+                    len(rendition.content),
+                    rendition.content,
+                ]
+            )
+        con.execute(
+            f"INSERT INTO {qualified_table} VALUES "
+            + ", ".join([row_sql] * len(export.renditions)),
+            params,
         )
-    con.execute(
-        f"INSERT INTO {store_table} VALUES "
-        + ", ".join([row_sql] * len(export.renditions)),
-        params,
-    )
-    con.close()
+    finally:
+        con.close()
     log(f"stored {len(export.renditions)} row(s) in {store_table}")
 
 
@@ -522,6 +524,8 @@ def check_delivery_config(targets: list[str]) -> None:
             f"DELIVERY={','.join(targets)} needs {missing} in the environment. "
             "Attach them as Flight secret params, or export them for a local run."
         )
+    if "email" in targets:
+        email_config()
 
 
 def deliver_slack(export: Export, dry_run: bool) -> None:
@@ -598,7 +602,9 @@ def deliver_teams(export: Export, dry_run: bool) -> None:
         return
 
     token = graph_token(
-        env("TEAMS_TENANT_ID"), env("TEAMS_CLIENT_ID"), env("TEAMS_CLIENT_SECRET")
+        env("TEAMS_TENANT_ID"),
+        env("TEAMS_CLIENT_ID"),
+        os.environ.get("TEAMS_CLIENT_SECRET", ""),
     )
     drive_id, folder_id = teams_files_folder(token, team_id, channel_id)
     links = [
@@ -657,7 +663,7 @@ def graph_upload(
         f"{GRAPH_API}/drives/{drive_id}/items/{folder_id}:/{quote(rendition.filename)}:"
         "/createUploadSession",
         headers={"Authorization": f"Bearer {token}"},
-        json={"item": {"@microsoft.graph.conflictBehavior": "replace"}},
+        json={"item": {"@microsoft.graph.conflictBehavior": "rename"}},
         timeout=60,
     )
     graph_ok(session, f"create an upload session for {rendition.filename}")
@@ -724,22 +730,39 @@ def post_teams_card(webhook: str, export: Export, links: list[tuple[str, str]]) 
     response.raise_for_status()
 
 
+def email_config() -> tuple[str, int, str, str, str, str, list[str]]:
+    """Validate SMTP settings before rendering or delivering to any target."""
+    host = env("SMTP_HOST")
+    port = env_int("SMTP_PORT", 587)
+    tls = env("SMTP_TLS", "ssl" if port == 465 else "starttls").lower()
+    user = env("SMTP_USER")
+    # Whitespace can be part of a password. Do not normalize secret values.
+    password = os.environ.get("SMTP_PASSWORD", "")
+    sender = env("EMAIL_FROM")
+    recipients = [part.strip() for part in env("EMAIL_TO").split(",") if part.strip()]
+    if not 1 <= port <= 65535:
+        raise ValueError("SMTP_PORT must be between 1 and 65535")
+    if tls not in {"ssl", "starttls", "none"}:
+        raise ValueError("SMTP_TLS must be ssl, starttls, or none")
+    if bool(user) != bool(password):
+        raise ValueError("set both SMTP_USER and SMTP_PASSWORD, or neither for a relay")
+    if not host or not sender or not recipients:
+        raise ValueError("email requires SMTP_HOST, EMAIL_FROM, and nonempty EMAIL_TO")
+    if any(
+        "\r" in value or "\n" in value
+        for value in [host, sender, *recipients, env("EMAIL_SUBJECT"), env("REPORT_NAME")]
+    ):
+        raise ValueError("email headers and SMTP_HOST must not contain newlines")
+    return host, port, tls, user, password, sender, recipients
+
+
 def deliver_email(export: Export, dry_run: bool) -> None:
     """Mail the renditions as attachments over SMTP.
 
     Any provider that speaks SMTP works (SES, Resend, Postmark, Google
     Workspace, a relay of your own), so there is no provider SDK here.
     """
-    host = env("SMTP_HOST")
-    port = env_int("SMTP_PORT", 587)
-    user = env("SMTP_USER")
-    password = env("SMTP_PASSWORD")
-    sender = env("EMAIL_FROM")
-    recipients = [part.strip() for part in env("EMAIL_TO").split(",") if part.strip()]
-    # Implicit TLS on the submission-over-TLS port, STARTTLS everywhere else.
-    tls = env("SMTP_TLS", "ssl" if port == 465 else "starttls").lower()
-    if tls not in {"ssl", "starttls", "none"}:
-        raise ValueError(f"SMTP_TLS must be ssl, starttls, or none; got {tls!r}")
+    host, port, tls, user, password, sender, recipients = email_config()
 
     if dry_run:
         log(
