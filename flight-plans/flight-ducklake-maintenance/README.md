@@ -37,8 +37,8 @@ Just set the parameters to match how you actually write and how long you want to
 
 It works the same on a **MotherDuck-managed DuckLake and a bring-your-own-bucket
 (BYOB) DuckLake**: the operations run through the catalog, so the only thing that
-changes is which database you point it at. BYOB lakes are the common case for this
-template. 
+changes is which database you point it at. Use this template to schedule
+maintenance for either storage option.
 
 ## How it works
 
@@ -48,8 +48,8 @@ thresholds, not the steps:
 
 1. **Apply catalog options** (only the ones you set). `target_file_size` and
    `rewrite_delete_threshold` are written with `CALL "<db>".set_option(...)`. These
-   persist on the catalog, so they keep steering both this Flight and any
-   background maintenance until you change them.
+   persist on the catalog, so they keep steering subsequent maintenance runs
+   until you change them.
 2. **`ducklake_flush_inlined_data`** — write rows that DuckLake inlined into the
    catalog (small inserts) out to Parquet so they can be compacted.
 3. **`ducklake_expire_snapshots`** — mark snapshots older than `EXPIRE_OLDER_THAN`
@@ -93,10 +93,12 @@ on, mirroring what a real checkpoint does.
 - **`set_option` persists on the catalog.** `TARGET_FILE_SIZE` and
   `REWRITE_DELETE_THRESHOLD` are not per-run; once set they stay until changed. Leave
   them unset to keep the lake's existing values.
-- **Managed DuckLakes already self-maintain.** MotherDuck runs background maintenance
-  on managed lakes, so this template is most useful for BYOB lakes, lakes where you
-  have turned background maintenance off, or when you want a specific cadence. Running
-  it against a managed lake is safe but may find little to do.
+- **Schedule maintenance for managed and BYOB DuckLakes.** MotherDuck does not run
+  automatic background maintenance on DuckLake databases. Run the operations manually
+  or use this Flight to schedule them. See [DuckLake maintenance](https://motherduck.com/docs/concepts/ducklake/#maintenance).
+- **Dry run is not read-only.** `DRY_RUN=true` only previews snapshot expiration,
+  old-file cleanup, and orphan deletion. Catalog option changes, flushing, merging,
+  and rewriting still run and can modify the lake.
 - **`expire_snapshots` reads timestamp columns, so the Flight ships `pytz` and pins a
   timezone.** Its result includes `TIMESTAMP WITH TIME ZONE` columns; the DuckDB Python
   client needs `pytz` to read those, and the Flight runtime often has no system zone
@@ -122,15 +124,17 @@ config, not by editing code.
 ## Run it
 
 You need a MotherDuck account, an access token, and a DuckLake database to point at. 
-A safe first pass is a dry run that only reports:
+For a first pass, preview the three deletion steps with `DRY_RUN=true`. The other
+maintenance steps still run:
 
 ```bash
 export MOTHERDUCK_TOKEN=your_token_here
 DUCKLAKE_DATABASE=my_lake DRY_RUN=true uv run --with-requirements requirements.txt flight.py
 ```
 
-That connects, applies any options you set, and prints what each step would do.
-Drop `DRY_RUN` (or set it to `false`) to actually run maintenance, and add the
+That connects, applies any options you set, flushes inlined data, merges small files,
+and rewrites data files. It reports what the three deletion steps would remove.
+Set `DRY_RUN=false` to also perform those deletion steps, and add the
 threshold knobs inline to tune a single run, for example
 `DUCKLAKE_DATABASE=my_lake TARGET_FILE_SIZE=256MB REWRITE_DELETE_THRESHOLD=0.3 uv run --with-requirements requirements.txt flight.py`.
 
@@ -154,9 +158,10 @@ the target lake.
 Create the Flight without a schedule first, trigger one manual run with
 `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by `MD_CREATE_FLIGHT` and
 listed by `MD_FLIGHTS()`; inspect a specific run with
-`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`) — using a `config`
-override of `DRY_RUN := 'true'` for the first run is a safe way to see what it
-will touch — and confirm the log looks right. Once a real run is green, add a
+`MD_GET_FLIGHT_RUN(flight_id := ..., run_number := ...)`). A `config`
+override of `DRY_RUN := 'true'` previews the deletion steps but still runs the
+other maintenance operations. Confirm the log looks right, then run with
+`DRY_RUN := 'false'` to include deletions. Once that run succeeds, add a
 schedule that matches your ingest cadence (a lake written all day might run `0 *
 * * *` hourly; a nightly batch might run `0 7 * * *`) by updating the Flight's
 `schedule_cron` with `MD_UPDATE_FLIGHT`.
