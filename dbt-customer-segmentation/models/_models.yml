@@ -1,0 +1,262 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: "Typed transaction line items with raw POS discount sign conventions preserved."
+    columns:
+      - name: transaction_id
+        description: "Stable source transaction line identifier."
+        data_tests:
+          - not_null
+          - unique
+      - name: household_id
+        description: "Household that purchased the line item."
+        data_tests:
+          - not_null
+      - name: product_id
+        description: "Purchased product identifier."
+        data_tests:
+          - not_null
+
+  - name: stg_products
+    description: "Typed product catalog with a reusable private-label flag."
+    columns:
+      - name: product_id
+        data_tests:
+          - not_null
+          - unique
+      - name: is_private_label
+        description: "One when the product is an owned private label."
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: stg_households
+    description: "Typed household demographics with sort helpers for income and composition profiling."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_campaigns
+    description: "Typed campaign headers."
+    columns:
+      - name: campaign_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_coupons
+    description: "Typed coupon mappings between campaigns and promoted products."
+    columns:
+      - name: coupon_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_coupon_redemptions
+    description: "Typed coupon redemption events for validation and future extensions."
+    columns:
+      - name: redemption_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_campaign_households
+    description: "Typed household campaign targeting membership."
+
+  - name: int_transactions_adjusted
+    description: "Transaction lines with raw discounts converted into positive list, paid, coupon, and in-store discount measures."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - not_null
+          - unique
+      - name: amount_list
+        description: "Estimated pre-discount list amount."
+        data_tests:
+          - not_null
+      - name: amount_paid
+        description: "Observed net paid amount."
+        data_tests:
+          - not_null
+
+  - name: int_promotional_line_items
+    description: "Line items enriched with promotion, private-label, coupon, and campaign-targeting flags."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - not_null
+          - unique
+      - name: campaign_targeted
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: campaign_coupon_redemption
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: manufacturer_coupon_redemption
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: private_label
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: instore_discount_applied
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: fct_household_promotion_metrics
+    description: "One row per household with raw counts and spend totals used to derive promotion-response features."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+      - name: purchase_dates
+        description: "Number of distinct shopping days in the observation window."
+        data_tests:
+          - not_null
+
+  - name: fct_household_features
+    description: "One row per household with normalized promotion, private-label, coupon, discount, and engagement features."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+      - name: has_campaign_targeted_purchase
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: has_campaign_coupon_redemption
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: has_manufacturer_coupon_redemption
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: has_private_label_purchase
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: has_instore_discount
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: fct_household_features_long
+    description: "Long-form household features before standardization. This keeps feature statistics and centroid scoring extensible."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+      - name: feature_name
+        data_tests:
+          - not_null
+
+  - name: fct_household_feature_vectors
+    description: "Standardized household feature vectors with nulls mean-imputed to zero after standardization."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+      - name: feature_name
+        data_tests:
+          - not_null
+      - name: feature_value
+        description: "Standardized feature value used for weighted centroid distance."
+        data_tests:
+          - not_null
+
+  - name: fct_household_segment_distances
+    description: "Weighted distance between every household and every configured segment centroid."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+      - name: segment_id
+        data_tests:
+          - not_null
+      - name: segment_distance
+        data_tests:
+          - not_null
+
+  - name: fct_household_kmeans_segments
+    description: "dbt Python model that fits k-means over standardized household features and aligns learned clusters to configured business segments."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+      - name: kmeans_cluster_id
+        data_tests:
+          - not_null
+      - name: aligned_segment_id
+        description: "Configured business segment whose centroid is nearest to the learned k-means cluster center."
+        data_tests:
+          - not_null
+      - name: kmeans_silhouette_score
+        description: "Per-household silhouette score from the k-means assignment."
+        data_tests:
+          - not_null
+
+  - name: fct_household_segments
+    description: "Nearest-centroid segment assignment with alternative segment and confidence."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+      - name: segment_id
+        data_tests:
+          - not_null
+      - name: segment_confidence
+        description: "Relative gap between the nearest and second-nearest segment distance, bounded between 0 and 1."
+        data_tests:
+          - not_null
+
+  - name: fct_segment_feature_profiles
+    description: "Feature-level segment profiles comparing average household behavior to the configured centroid."
+    columns:
+      - name: segment_id
+        data_tests:
+          - not_null
+      - name: feature_name
+        data_tests:
+          - not_null
+
+  - name: fct_segment_demographic_residuals
+    description: "Pearson residuals for a complete segment-by-demographic-category contingency grid, including zero-observed cells."
+    columns:
+      - name: segment_id
+        data_tests:
+          - not_null
+      - name: demographic_field
+        data_tests:
+          - not_null
+      - name: demographic_value
+        data_tests:
+          - not_null
+      - name: pearson_residual
+        data_tests:
+          - not_null
+
+  - name: mart_customer_segments
+    description: "Business-facing household segmentation mart with assignment, confidence, behavioral features, and recommended activation."
+    columns:
+      - name: household_id
+        data_tests:
+          - not_null
+          - unique
+      - name: segment_name
+        data_tests:
+          - not_null
+      - name: segment_confidence
+        data_tests:
+          - not_null

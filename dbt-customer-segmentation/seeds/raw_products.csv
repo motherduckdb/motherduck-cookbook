@@ -1,0 +1,9 @@
+product_id,manufacturer,department,brand,commodity_desc,sub_commodity_desc
+1001,North Ridge Foods,Grocery,National,Coffee,Ground Coffee
+1002,Store Choice,Grocery,Private,Cereal,Oat Cereal
+1003,SnackCo,Grocery,National,Snacks,Chips
+1004,Store Choice,Dairy,Private,Milk,Half Gallon
+1005,CleanHome,Household,National,Detergent,Liquid Detergent
+1006,Store Choice,Grocery,Private,Pasta,Dry Pasta
+1007,Fresh Farm,Produce,National,Produce,Apples
+1008,Store Choice,Frozen,Private,Frozen Meals,Entrees

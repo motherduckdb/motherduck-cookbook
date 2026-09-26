@@ -42,6 +42,7 @@ curl -fsSL https://get.motherduck.com | bash -s dbt-ingestion-s3
 
 - [dbt-ingestion-s3](dbt-ingestion-s3) - Build Hacker News models from Parquet in S3 with dbt, run locally or on MotherDuck.
 - [dbt-churn-prediction](dbt-churn-prediction) - Build churn feature and label tables with dbt, plus a Python model trained on top.
+- [dbt-customer-segmentation](dbt-customer-segmentation) - Segment retail households with dbt feature models, centroid scoring, and a Python K-Means model.
 - [dbt-ducklake](dbt-ducklake) - Run TPC-DS dbt models on a DuckLake-backed database (`features: ducklake`).
 - [dbt-duckdb-dwh-starter](dbt-duckdb-dwh-starter) - Build a MotherDuck warehouse with dbt-duckdb (Common Crawl + Hacker News) and deploy a Dive (`features: dives`).
 - [dbt-ai-prompt](dbt-ai-prompt) - Extract structured data from review text with dbt and `prompt()`.

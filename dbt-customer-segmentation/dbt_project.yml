@@ -1,0 +1,46 @@
+name: 'dbt_customer_segmentation'
+version: '1.0.0'
+profile: 'dbt_customer_segmentation'
+
+vars:
+  segmentation_reference_day: 730
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  dbt_customer_segmentation:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+      +tags: ['customer_segmentation']
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+      +tags: ['customer_segmentation']
+    marts:
+      +materialized: table
+      +schema: analytics
+      +tags: ['customer_segmentation']
+      fct_household_kmeans_segments:
+        +python_cluster_count: 4
+        +python_cluster_random_state: 42
+
+seeds:
+  dbt_customer_segmentation:
+    +schema: raw
+    +quote_columns: false
+    +persist_docs:
+      relation: true
+      columns: true
