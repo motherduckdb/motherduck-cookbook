@@ -66,7 +66,7 @@ def test_guard_respects_replace_false(flight, fake_motherduck):
 
 
 def test_guard_refuses_to_replace_a_non_assessment(flight, fake_motherduck):
-    with pytest.raises(RuntimeError, match="not an md-assess handoff"):
+    with pytest.raises(RuntimeError, match="not an earlier assessment"):
         flight["guard_existing_database"]("prod_db", True)
 
 

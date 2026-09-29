@@ -32,7 +32,7 @@ def main() -> None:
     os.environ["TZ"] = "UTC"
     time.tzset()
 
-    # Every knob is read from Flight config/env, so you adapt this template by
+    # Every setting is read from Flight config/env, so you adapt this template by
     # setting config values rather than editing code. Credentials are the
     # exception: they come from the Flights secret named by SECRET_NAME.
     profile = env("PROFILE", "standard").lower()
@@ -53,10 +53,10 @@ def main() -> None:
 
     resolve_snowflake_credentials(env("SECRET_NAME", "snowflake_creds"))
 
-    # The private collection (which, unlike the handoff, keeps view and routine
-    # bodies) only ever exists on this run's scratch disk and is deleted in the
-    # finally block. Only the reduced handoff that `md-assess publish` builds
-    # is uploaded to MotherDuck.
+    # The full collection (which, unlike the redacted database, keeps view and
+    # procedure definitions) only ever exists on this run's temporary disk and
+    # is deleted when the run ends. Only the redacted database that
+    # `md-assess publish` builds is uploaded to MotherDuck.
     workdir = Path(tempfile.mkdtemp(prefix="md-assess-", dir="/tmp"))
     try:
         collection = workdir / "assessment.duckdb"
@@ -120,7 +120,7 @@ def guard_existing_database(database: str, replace: bool) -> None:
         ).fetchone()[0]
         if not is_assessment:
             raise RuntimeError(
-                f"MotherDuck database {database!r} exists but is not an md-assess handoff "
+                f"MotherDuck database {database!r} exists but is not an earlier assessment "
                 "(no meta.collections table); refusing to replace it. Pick another TARGET_DB."
             )
         print(f"publish: replacing earlier assessment database {database!r}")
@@ -129,9 +129,10 @@ def guard_existing_database(database: str, replace: bool) -> None:
 
 
 def publish(collection: Path, database: str, dive_title: str, replace: bool) -> None:
-    # `md-assess publish` builds the reduced handoff (no source bodies, no query
-    # text), uploads it with CREATE DATABASE ... FROM, and creates or updates
-    # the dashboard Dive over it. MOTHERDUCK_TOKEN is injected by the Flight.
+    # `md-assess publish` builds the redacted database (no view or procedure
+    # definitions, no query text), uploads it with CREATE DATABASE ... FROM, and
+    # creates or updates the dashboard Dive over it. MOTHERDUCK_TOKEN is
+    # injected by the Flight.
     args = ["md-assess", "publish", "--db", str(collection), "--name", database, "--json"]
     if dive_title:
         args += ["--title", dive_title]
@@ -155,8 +156,8 @@ def publish(collection: Path, database: str, dive_title: str, replace: bool) -> 
     # statuses, so log how many rather than every name.
     if summary["unclassified_included"]:
         print(f"publish: unclassified columns included: {len(summary['unclassified_included'])}")
-    # Columns Snowflake added after this collector release are dropped from the
-    # handoff (fail-closed). Summarize them per table; the list runs long.
+    # Columns Snowflake added after this collector release are left out of the
+    # redacted database, since the collector can't vouch for them. Summarize them per table; the list runs long.
     if summary["dropped_unexpected"]:
         tables = sorted({c.rsplit(".", 1)[0] for c in summary["dropped_unexpected"]})
         print(f"publish: WARNING dropped {len(summary['dropped_unexpected'])} unexpected "
