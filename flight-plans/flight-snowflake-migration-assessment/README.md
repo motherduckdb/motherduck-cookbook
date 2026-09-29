@@ -48,7 +48,7 @@ table data; to copy tables, see
    `unavailable` instead of failing the run, so any grant tier produces a valid,
    partial assessment.
 2. **Guard.** Resolve the target database name (`TARGET_DB`, or the collector's
-   default `md_assessment_<account>`). If that database exists, the Flight
+   default `md_assessment_<account_name>`, built from the account name without the organization prefix). If that database exists, the Flight
    replaces it only when it's an earlier assessment (it has a
    `meta.collections` table), so a mistyped `TARGET_DB` can't drop an unrelated
    database.
@@ -98,6 +98,11 @@ succeeds or fails. Only the handoff is persisted.
   `PROFILE=lite`.
 - **External-browser SSO doesn't work.** A Flight has no browser. Use key-pair
   auth (`SNOWFLAKE_PRIVATE_KEY`) or, if you must, a password.
+- **Prefer key-pair over programmatic access tokens.** A Snowflake programmatic
+  access token works as `SNOWFLAKE_PASSWORD`, but Snowflake only issues one
+  when the account or user has a network policy, and a `TYPE = SERVICE` user
+  can't take the temporary network-policy bypass. Key-pair auth has neither
+  requirement.
 - **Some inventories are role-visibility bound.** `SHOW`-based extracts
   (warehouses, streams, dynamic tables, integrations, and so on) list only what
   the collecting role can see. The report marks these as lower bounds; no grant
@@ -113,6 +118,11 @@ succeeds or fails. Only the handoff is persisted.
   drops and re-uploads the assessment database and updates the Dive in place, so
   the Dive always shows the latest collection. Set `REPLACE=false` to keep an
   earlier snapshot and publish under a new `TARGET_DB` instead.
+- **Expect a `dropped unexpected column(s)` warning.** Snowflake adds columns
+  to `SHOW` output over time. The collector's handoff keeps only the columns it
+  has classified, so newer ones are dropped from the upload (fail-closed) and
+  the run log names the affected tables. The warning is informational; it
+  doesn't fail the run.
 - **Pin the collector.** `requirements.txt` installs a versioned GitHub release
   asset. The collector is in Public Preview and output schemas may change before
   1.0; to upgrade, change the release URL and re-run, which re-collects from
@@ -137,8 +147,8 @@ they come from a MotherDuck Flights secret.
 | `PROFILE` | config | `standard` | `standard` is the complete assessment. `lite` reads only `INFORMATION_SCHEMA` and `SHOW`, needs no `ACCOUNT_USAGE` access, and sees only objects the role has privileges on. |
 | `HISTORY_DAYS` | config | `30` | Lookback window for the workload extracts, 1 to 365. |
 | `SCOPE` | config | (account-wide) | Comma-separated `DB` or `DB.SCHEMA` entries, for example `ANALYTICS,RAW.EVENTS`. |
-| `TARGET_DB` | config | `md_assessment_<account>` | MotherDuck database that receives the handoff. |
-| `DIVE_TITLE` | config | `Snowflake → MotherDuck migration assessment · <account>` | Dive title. Re-running with the same title updates the Dive in place. |
+| `TARGET_DB` | config | `md_assessment_<account_name>` | MotherDuck database that receives the handoff. |
+| `DIVE_TITLE` | config | `Snowflake → MotherDuck migration assessment · <ACCOUNT_NAME>` | Dive title. Re-running with the same title updates the Dive in place. |
 | `REPLACE` | config | `true` | Replace an existing assessment database on re-run. Never replaces a database that isn't an assessment. |
 | `MOTHERDUCK_TOKEN` | Flight-injected | (Flight-injected) | Auth for MotherDuck. Attached to the Flight automatically; never hard-code it. |
 
@@ -152,8 +162,9 @@ database roles.
 
 In Snowflake, grant the recommended tiers to a dedicated role and assign it to
 the collecting user. This is the decision-grade set; drop `GOVERNANCE_VIEWER` to
-skip the workload aggregates, or add `SECURITY_VIEWER` for login and client
-fingerprints:
+skip the workload aggregates, or add `SECURITY_VIEWER` for login history,
+client fingerprints, roles, grants, shares, and listings (without it, those six
+extractors land as `unavailable`):
 
 ```sql
 CREATE ROLE IF NOT EXISTS md_assess;
@@ -211,13 +222,14 @@ Trigger one run with `MD_RUN_FLIGHT(flight_id := ...)` (the id is returned by
 looks like this:
 
 ```text
-publish: database md:md_assessment_myorg_myaccount (81 tables, <row_count> rows)
-publish: Dive 'Snowflake → MotherDuck migration assessment · myorg-myaccount' created: https://app.motherduck.com/dives/<dive_id>
-publish: disclosed comment: 41 column(s)
-publish: disclosed object_name: 173 column(s)
-publish: disclosed user_identity: 32 column(s)
+publish: database md:md_assessment_myaccount (74 tables, <row_count> rows)
+publish: Dive 'Snowflake → MotherDuck migration assessment · MYACCOUNT' created: https://app.motherduck.com/dives/<dive_id>
+publish: disclosed comment: 40 column(s)
+publish: disclosed object_name: 162 column(s)
+publish: disclosed user_identity: 27 column(s)
 publish: excluded columns: action, column_default, condition, definition, function_definition, policy_body, procedure_definition, text, view_definition
-publish: unclassified columns included: 264
+publish: unclassified columns included: 313
+publish: WARNING dropped <n> unexpected column(s) in <n> table(s): raw.alerts, raw.application_packages, ...
 ```
 
 Open the Dive URL, or query the inventory directly:
@@ -225,11 +237,11 @@ Open the Dive URL, or query the inventory directly:
 ```sql
 -- Which extractors ran, and which were blocked by missing grants
 SELECT extractor, status, rows_written, error_detail
-FROM md_assessment_myorg_myaccount.meta.extract_runs
+FROM md_assessment_myaccount.meta.extract_runs
 ORDER BY status, extractor;
 
 -- Catalog and storage sizing
-FROM md_assessment_myorg_myaccount.report.sizing;
+FROM md_assessment_myaccount.report.sizing;
 ```
 
 If extractors show `unavailable` for missing grants, widen the grants and run the
