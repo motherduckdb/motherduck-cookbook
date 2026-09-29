@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import duckdb
@@ -24,6 +25,13 @@ CREDENTIAL_PARAMS = (
 
 
 def main() -> None:
+    # The Flight container has no local time zone, so DuckDB reports its
+    # TimeZone as 'Etc/Unknown' and md-assess fails converting TIMESTAMPTZ
+    # values to Python. Pin UTC (the runtime's clock anyway) before any DuckDB
+    # connection opens here or in the md-assess subprocesses.
+    os.environ["TZ"] = "UTC"
+    time.tzset()
+
     # Every knob is read from Flight config/env, so you adapt this template by
     # setting config values rather than editing code. Credentials are the
     # exception: they come from the Flights secret named by SECRET_NAME.
@@ -147,9 +155,14 @@ def publish(collection: Path, database: str, dive_title: str, replace: bool) -> 
     # statuses, so log how many rather than every name.
     if summary["unclassified_included"]:
         print(f"publish: unclassified columns included: {len(summary['unclassified_included'])}")
-    for key in ("dropped_unexpected", "skipped_raw_tables"):
-        if summary[key]:
-            print(f"publish: WARNING {key}: {', '.join(summary[key])}")
+    # Columns Snowflake added after this collector release are dropped from the
+    # handoff (fail-closed). Summarize them per table; the list runs long.
+    if summary["dropped_unexpected"]:
+        tables = sorted({c.rsplit(".", 1)[0] for c in summary["dropped_unexpected"]})
+        print(f"publish: WARNING dropped {len(summary['dropped_unexpected'])} unexpected "
+              f"column(s) in {len(tables)} table(s): {', '.join(tables)}")
+    if summary["skipped_raw_tables"]:
+        print(f"publish: WARNING skipped raw tables: {', '.join(summary['skipped_raw_tables'])}")
 
 
 def resolve_snowflake_credentials(secret_name: str) -> None:
