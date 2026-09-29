@@ -19,6 +19,8 @@ on:
       - "flight-plans/flight-dive-export/flight.py"
       - "flight-plans/flight-dive-export/requirements.txt"
       - "tests/test_commoncrawl_web_graph_flight.py"
+      - "flight-plans/flight-snowflake-migration-assessment/**"
+      - "tests/test_snowflake_migration_assessment_flight.py"
       - ".github/workflows/catalog.yml"
   push:
     paths:
@@ -38,6 +40,8 @@ on:
       - "flight-plans/flight-dive-export/flight.py"
       - "flight-plans/flight-dive-export/requirements.txt"
       - "tests/test_commoncrawl_web_graph_flight.py"
+      - "flight-plans/flight-snowflake-migration-assessment/**"
+      - "tests/test_snowflake_migration_assessment_flight.py"
       - ".github/workflows/catalog.yml"
   workflow_dispatch:
 
@@ -72,6 +76,9 @@ jobs:
 
       - name: Run Iceberg transform tests
         run: uv run --with pytest --with duckdb==1.5.5 python -m pytest tests/test_iceberg_databricks_flights.py -q
+
+      - name: Run Snowflake migration assessment Flight tests
+        run: uv run --with pytest --with-requirements flight-plans/flight-snowflake-migration-assessment/requirements.txt python -m pytest tests/test_snowflake_migration_assessment_flight.py -q
 
       - name: Build catalog preview
         run: |
