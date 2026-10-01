@@ -3,7 +3,8 @@ title: Monitor MotherDuck in Datadog
 id: motherduck-datadog
 description: >-
   A scheduled Flight that exports MotherDuck query history, running queries,
-  storage, access tokens, Flights, Dives and Guides as Datadog custom metrics,
+  active users, storage, access tokens, Flight runs, Dive usage and Guides as
+  Datadog custom metrics,
   plus an importable Datadog dashboard and a set of monitors. Use when an SRE,
   DevOps or data team wants to observe and alert on a MotherDuck organization
   from Datadog.
@@ -13,10 +14,10 @@ features: [flights]
 tags: [datadog, python]
 prompt: >-
   I want to monitor my MotherDuck organization from Datadog: query throughput,
-  latency, errors, spills, running queries, storage, tokens and Flight runs on a
-  dashboard with alerts. Help me adapt the "Monitor MotherDuck in Datadog"
-  recipe to my own data and use case, using it as a guide:
-  https://motherduck.com/docs/cookbook/motherduck-datadog
+  latency, errors, spills, running queries, active users, storage, tokens,
+  Flight runs, Dive usage and Guides on a dashboard with alerts. Help me adapt
+  the "Monitor MotherDuck in Datadog" recipe to my own data and use case, using
+  it as a guide: https://motherduck.com/docs/cookbook/motherduck-datadog
 published_date: 2026-10-01
 ---
 
