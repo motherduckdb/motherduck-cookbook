@@ -58,6 +58,9 @@ STATE_TABLE = os.environ.get("STATE_TABLE", "datadog_exporter.main.state")
 # Per-user query metrics are capped to the busiest N users per window to keep
 # Datadog custom-metric cardinality predictable. 0 disables per-user metrics.
 TOP_USERS = int(os.environ.get("TOP_USERS", "20"))
+# Per-Dive usage metrics (queries, viewers, errors) for the busiest N Dives per
+# window, identified from the `md-dives/v1(<dive_id>)` tag in user_agent.
+TOP_DIVES = int(os.environ.get("TOP_DIVES", "20"))
 # Per-database storage gauges are emitted only for the N largest databases by
 # active bytes (org totals are always emitted). Each database costs four
 # Datadog custom-metric series; an org with 15k databases would otherwise emit
@@ -79,6 +82,28 @@ RETRY_BUDGET_SEC = 90  # no more retries of a flaky view once the run is this ol
 MAX_POINT_AGE = dt.timedelta(minutes=55)  # Datadog rejects points older than 1h
 BATCH_SIZE = 500  # series per POST; keeps payloads well under the 500 KB cap
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Which client issued a query, derived from query_history.user_agent. MotherDuck
+# appends a tag per surface (md-dives/v1(<id>), md-flights(<id>,run_id=..),
+# mcp-server-motherduck-remote, motherduck-wasm for the UI) after the duckdb
+# version; tools such as dbt, dlt and Airflow add their own. Runtime tags win
+# over tool tags, so a dbt build inside a Flight counts as "flight".
+CLIENT_SQL = """
+    CASE
+        WHEN user_agent LIKE '%md-flights(%' THEN 'flight'
+        WHEN user_agent LIKE '%md-dives/%' THEN 'dive'
+        WHEN user_agent LIKE '%mcp-server-motherduck%' THEN 'mcp'
+        WHEN user_agent LIKE '%motherduck-wasm%' THEN 'ui'
+        WHEN user_agent LIKE '% dbt/%' OR user_agent LIKE '%dbt-duckdb%' THEN 'dbt'
+        WHEN user_agent LIKE '%dlt/%' THEN 'dlt'
+        WHEN user_agent LIKE '%airflow%' THEN 'airflow'
+        WHEN user_agent LIKE '%pgendpoint%' THEN 'pg_endpoint'
+        WHEN user_agent LIKE '%node-neo-api%' OR user_agent LIKE '%nodejs%' THEN 'node'
+        WHEN user_agent LIKE '%jdbc%' THEN 'jdbc'
+        WHEN user_agent LIKE '% python/%' THEN 'python'
+        WHEN user_agent LIKE '% go%' THEN 'go'
+        ELSE 'other'
+    END"""
+DIVE_ID_SQL = "regexp_extract(user_agent, 'md-dives/v[0-9]+\\(([0-9a-f-]{36})\\)', 1)"
 
 
 class Series:
@@ -376,13 +401,69 @@ def collect_query_history(con, series: Series, start: dt.datetime, end: dt.datet
             series.add("queries.by_user.latency.max_ms", GAUGE, ts, max_ms, tags, unit="millisecond")
             series.add("queries.by_user.spilled.bytes", COUNT, ts, spilled, tags, unit="byte")
 
-    # Daily active users is a cheap, useful adoption number.
-    (dau,) = con.execute(
-        "SELECT count(DISTINCT user_name) FROM md_information_schema.query_history "
-        "WHERE start_time >= ? - INTERVAL 24 HOUR",
-        [end],
+    # Which clients drive the load: UI, Dives, Flights, MCP, dbt, Python, ...
+    for minute, client, status, n in con.execute(
+        f"""
+        SELECT date_trunc('minute', end_time), {CLIENT_SQL} AS client,
+               CASE WHEN error_type IS NULL THEN 'ok' ELSE 'error' END AS status, count(*)
+        FROM md_information_schema.query_history
+        WHERE end_time >= ? AND end_time < ? GROUP BY ALL
+        """,
+        [start, end],
+    ).fetchall():
+        series.add("queries.by_client.count", COUNT, as_utc(minute), n, {"client": client, "status": status})
+
+    # Dive usage: every query a Dive runs is tagged with the Dive id, so query
+    # volume, distinct viewers and errors per Dive fall out of query_history.
+    active_dives, dive_viewers = con.execute(
+        f"""
+        SELECT count(DISTINCT {DIVE_ID_SQL}), count(DISTINCT user_name)
+        FROM md_information_schema.query_history
+        WHERE end_time >= ? AND end_time < ? AND user_agent LIKE '%md-dives/%'
+        """,
+        [start, end],
+    ).fetchone()
+    series.add("dives.active", GAUGE, end, active_dives)
+    series.add("dives.viewers", GAUGE, end, dive_viewers)
+    if TOP_DIVES > 0 and active_dives:
+        dive_rows = con.execute(
+            f"""
+            WITH d AS (
+                SELECT date_trunc('minute', end_time) AS minute, {DIVE_ID_SQL} AS dive_id,
+                       user_name, error_type, epoch_ms(total_elapsed_time) AS total_ms
+                FROM md_information_schema.query_history
+                WHERE end_time >= ? AND end_time < ? AND user_agent LIKE '%md-dives/%'
+            ), top AS (SELECT dive_id FROM d GROUP BY 1 ORDER BY count(*) DESC LIMIT ?)
+            SELECT minute, dive_id, count(*), count(DISTINCT user_name),
+                   count(*) FILTER (WHERE error_type IS NOT NULL), max(total_ms)
+            FROM d WHERE dive_id IN (SELECT dive_id FROM top) GROUP BY ALL
+            """,
+            [start, end, TOP_DIVES],
+        ).fetchall()
+        titles = dive_titles(con)
+        for minute, dive_id, n, viewers, errors, max_ms in dive_rows:
+            ts = as_utc(minute)
+            tags = {"dive_id": dive_id, "dive_title": titles.get(dive_id, "unknown")}
+            series.add("dives.queries", COUNT, ts, n, tags)
+            series.add("dives.query_errors", COUNT, ts, errors, tags)
+            series.add("dives.viewers_by_dive", GAUGE, ts, viewers, tags)
+            series.add("dives.latency.max_ms", GAUGE, ts, max_ms, tags, unit="millisecond")
+
+    # Active users over 1/7/30 days. MotherDuck has no SQL or API that lists an
+    # organization's members, so "users who ran a query" is the usable proxy.
+    dau, wau, mau = con.execute(
+        """
+        SELECT count(DISTINCT user_name) FILTER (WHERE start_time >= ? - INTERVAL 24 HOUR),
+               count(DISTINCT user_name) FILTER (WHERE start_time >= ? - INTERVAL 7 DAY),
+               count(DISTINCT user_name)
+        FROM md_information_schema.query_history
+        WHERE start_time >= ? - INTERVAL 30 DAY
+        """,
+        [end, end, end],
     ).fetchone()
     series.add("users.active_24h", GAUGE, end, dau)
+    series.add("users.active_7d", GAUGE, end, wau)
+    series.add("users.active_30d", GAUGE, end, mau)
 
     # Log the slowest queries so a run's logs double as a quick triage view.
     slow = con.execute(
@@ -482,15 +563,44 @@ def collect_inventory(con, series: Series, ts: dt.datetime) -> None:
     ).fetchall():
         series.add("flights.count", GAUGE, ts, n, {"status": status, "schedule_status": sched})
 
+    # Dives: the owner's plus every Dive shared with the organization.
     for status, n in con.execute(
-        "SELECT coalesce(status, 'unknown'), count(*) FROM MD_LIST_DIVES() GROUP BY 1"
+        "SELECT coalesce(status, 'unknown'), count(*) "
+        "FROM MD_LIST_DIVES(include_org_shares := true) GROUP BY 1"
     ).fetchall():
         series.add("dives.count", GAUGE, ts, n, {"status": status})
+    owners, created_7d, updated_7d = con.execute(
+        """
+        SELECT count(DISTINCT owner_name),
+               count(*) FILTER (WHERE created_at > now() - INTERVAL 7 DAY),
+               count(*) FILTER (WHERE updated_at > now() - INTERVAL 7 DAY)
+        FROM MD_LIST_DIVES(include_org_shares := true)
+        """
+    ).fetchone()
+    series.add("dives.owners", GAUGE, ts, owners)
+    series.add("dives.created_7d", GAUGE, ts, created_7d)
+    series.add("dives.updated_7d", GAUGE, ts, updated_7d)
 
+    # Guides: by access level and by top-level topic folder.
     for access, n in con.execute(
         "SELECT coalesce(access, 'unknown'), count(*) FROM MD_LIST_GUIDES() GROUP BY 1"
     ).fetchall():
         series.add("guides.count", GAUGE, ts, n, {"access": access})
+    for topic, n in con.execute(
+        "SELECT coalesce(split_part(topic, '/', 1), 'none'), count(*) FROM MD_LIST_GUIDES() GROUP BY 1"
+    ).fetchall():
+        series.add("guides.by_topic", GAUGE, ts, n, {"topic": topic or "none"})
+    owners, created_7d, updated_7d = con.execute(
+        """
+        SELECT count(DISTINCT owner_name),
+               count(*) FILTER (WHERE created_at > now() - INTERVAL 7 DAY),
+               count(*) FILTER (WHERE updated_at > now() - INTERVAL 7 DAY)
+        FROM MD_LIST_GUIDES()
+        """
+    ).fetchone()
+    series.add("guides.owners", GAUGE, ts, owners)
+    series.add("guides.created_7d", GAUGE, ts, created_7d)
+    series.add("guides.updated_7d", GAUGE, ts, updated_7d)
 
     for role_type, n in con.execute(
         "SELECT coalesce(role_type, 'unknown'), count(*) FROM md_information_schema.roles GROUP BY 1"
@@ -605,6 +715,16 @@ def as_utc(value) -> dt.datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=dt.timezone.utc)
     return value.astimezone(dt.timezone.utc)
+
+
+def dive_titles(con) -> dict[str, str]:
+    """Map Dive id -> title for every Dive the token can see, for tagging usage metrics."""
+    try:
+        rows = con.execute("SELECT id, title FROM MD_LIST_DIVES(include_org_shares := true)").fetchall()
+    except duckdb.Error as exc:
+        print(f"WARNING could not list Dives for titles: {first_line(exc)}", file=sys.stderr)
+        return {}
+    return {str(dive_id).lower(): (title or "untitled") for dive_id, title in rows}
 
 
 def another_run_is_active(con) -> bool:

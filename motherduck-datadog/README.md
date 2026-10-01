@@ -54,14 +54,19 @@ Each run of [`flight.py`](flight.py):
 2. **Aggregates completed queries per minute** from `query_history`, bucketed
    by `end_time`: counts by query type, instance type and status; errors by
    `error_type`; p50/p95/p99 latency and queue wait; spill, upload and download
-   bytes; distinct users and ducklings; and per-user counts for the busiest
-   `TOP_USERS` users. The five slowest queries of the window are printed to the
-   run log for triage.
+   bytes; distinct users and ducklings; per-user counts for the busiest
+   `TOP_USERS` users; a per-client breakdown (UI, Dive, Flight, MCP, dbt, ...)
+   read from `user_agent`; and, because every query a Dive runs carries
+   `md-dives/v1(<dive_id>)` in `user_agent`, queries, viewers and errors per
+   Dive for the busiest `TOP_DIVES` Dives. The five slowest queries of the
+   window are printed to the run log for triage.
 3. **Snapshots point-in-time gauges**: running queries and the age of the
    oldest one (`recent_queries`), org storage totals and the largest databases
    (`storage_info`, admin only), databases, access tokens and tokens expiring
    within 7 days, Flights (and the runs that finished in the window for the
-   Flights in `FLIGHT_RUN_SCOPE`), Dives, Guides and roles.
+   Flights in `FLIGHT_RUN_SCOPE`), Dives by status with owners and 7-day
+   create/update counts, Guides by access and topic, roles, and active users
+   over 24 h, 7 d and 30 d.
 4. **Posts to Datadog** in gzip-compressed batches of 500 series with retries
    on 429/5xx, then advances the watermark. A failed post leaves the watermark
    untouched, so the next run retries the same window.
@@ -91,9 +96,10 @@ All names are prefixed with `METRIC_PREFIX` (default `motherduck`).
 | `queries.spilled.count` / `spilled.bytes` | count | `query_type`, `instance_type` | Queries that spilled to disk and how much |
 | `queries.bytes_uploaded` / `bytes_downloaded` | count | `query_type`, `instance_type` | Bytes moved between client and MotherDuck |
 | `queries.by_user.count` / `errors` / `latency.max_ms` / `spilled.bytes` | count, gauge | `user_name` | Per-user activity for the busiest `TOP_USERS` users of the window |
+| `queries.by_client.count` | count | `client`, `status` | Queries per minute by the client that issued them (`ui`, `dive`, `flight`, `mcp`, `dbt`, `dlt`, `airflow`, `pg_endpoint`, `node`, `python`, `go`, `jdbc`, `other`), derived from `user_agent` |
 | `queries.running` / `running.users` / `running.oldest_age_sec` | gauge | | Queries in flight right now, distinct users, age of the oldest |
 | `queries.running_by_type` | gauge | `query_type`, `instance_type` | Running queries broken down |
-| `users.active` / `users.active_24h` | gauge | | Distinct users in the window and in the last 24 h |
+| `users.active` / `users.active_24h` / `active_7d` / `active_30d` | gauge | | Distinct users who ran a query in the window, last day, week and month (MotherDuck has no API that lists members, so this is the user count) |
 | `ducklings.active` / `ducklings.active_by_type` | gauge | (`instance_type`) | Distinct ducklings that served queries in the window |
 | `storage.bytes` | gauge | `database_name`, `owner`, `kind`, `transient` | Storage of the `STORAGE_TOP_DATABASES` largest databases; `kind` is `active`, `historical`, `retained_for_clone` or `failsafe` |
 | `storage.total_bytes` | gauge | `kind` (incl. `all`) | Org-wide storage by kind |
@@ -105,16 +111,23 @@ All names are prefixed with `METRIC_PREFIX` (default `motherduck`).
 | `flights.run_duration_sec` | gauge | `flight_name` | Duration of each finished run |
 | `flights.runs_in_flight` | gauge | `flight_name` | Pending or running runs right now |
 | `flights.tracked` | gauge | | Flights the run-metrics collector covered this run (compare with `flights.count` to spot a spent budget) |
-| `dives.count` / `guides.count` / `roles.count` | gauge | `status` / `access` / `role_type` | Inventory |
+| `dives.count` | gauge | `status` | Dives visible to the token plus those shared with the org (`draft`, `ready`, `endorsed`, `archived`) |
+| `dives.owners` / `dives.created_7d` / `dives.updated_7d` | gauge | | Distinct Dive owners and Dives created or updated in the last 7 days |
+| `dives.active` / `dives.viewers` | gauge | | Dives that ran queries in the window and distinct users viewing them |
+| `dives.queries` / `dives.query_errors` | count | `dive_id`, `dive_title` | Queries per minute issued by the busiest `TOP_DIVES` Dives, and how many failed |
+| `dives.viewers_by_dive` / `dives.latency.max_ms` | gauge | `dive_id`, `dive_title` | Distinct viewers and slowest query per Dive per minute |
+| `guides.count` / `guides.by_topic` | gauge | `access` / `topic` | Guides by access level and by top-level topic folder |
+| `guides.owners` / `guides.created_7d` / `guides.updated_7d` | gauge | | Distinct Guide owners and Guides created or updated in the last 7 days |
+| `roles.count` | gauge | `role_type` | Roles defined in the organization |
 | `exporter.heartbeat` / `duration_sec` / `series_count` | gauge | | Exporter liveness and cost |
 | `exporter.collector_ok` / `collector_duration_sec` | gauge | `collector` | 1 when that collector succeeded this run, and how long it took |
 
 ### Dashboard and monitors
 
 - [`datadog/dashboard.json`](datadog/dashboard.json) is a Datadog dashboard
-  (ordered layout, `md_org` template variable) with eight groups: Overview,
-  Query throughput and latency, Errors, Users and compute, Storage, Flights,
-  Inventory, Exporter health.
+  (ordered layout, `md_org` template variable) with nine groups: Overview,
+  Query throughput and latency, Errors, Users and compute, Dives, Guides and
+  users, Storage, Flights, Inventory, Exporter health.
 - [`datadog/monitors.json`](datadog/monitors.json) holds nine metric monitors:
   error rate above 5 %, p95 latency above 30 s, a query running longer than
   30 min, heavy spill to disk, a failed Flight run, an access token expiring
@@ -193,6 +206,13 @@ All names are prefixed with `METRIC_PREFIX` (default `motherduck`).
   `flights.count` and `FLIGHT_RUN_SCOPE=all` then cover every Flight in the org
   (hundreds in a busy org, at ~0.5 s per Flight for run metrics), which is why
   the default scope is `own` and the collector has a time budget.
+- **"Users" means active users.** MotherDuck has no SQL view or REST endpoint
+  that lists an organization's members, so `users.active_24h/7d/30d` count
+  distinct `user_name`s in `query_history`. A member who never queries is
+  invisible; service accounts count like people.
+- **Dive titles become tag values.** `dives.*` series are tagged with
+  `dive_title` (lower-cased, non-alphanumerics replaced) and `dive_id`. Renaming
+  a Dive starts a new series; filter on `dive_id` for continuity.
 - **One org per Flight.** The exporter reports on the organization of the token
   it runs with. Deploy one Flight per organization if you have several and let
   the `md_org` tag separate them.
@@ -212,6 +232,7 @@ is a `config` key, except the API key, which is a Flights secret.
 | `DELAY_SECONDS` | `180` | How far behind "now" the window ends, to let `query_history` settle |
 | `STATE_TABLE` | `datadog_exporter.main.state` | Watermark table (`database.schema.table`); `""` disables state |
 | `TOP_USERS` | `20` | Busiest users per window that get `queries.by_user.*` series; `0` disables |
+| `TOP_DIVES` | `20` | Busiest Dives per window that get `dives.queries` / `viewers_by_dive` / `latency.max_ms` series; `0` disables |
 | `STORAGE_TOP_DATABASES` | `25` | Largest databases (by active bytes) that get per-database `storage.bytes` series; `0` disables. Totals are always sent |
 | `FLIGHT_RUN_SCOPE` | `own` | Which Flights get run metrics: `own`, `scheduled` (every scheduled Flight the token can see), `all`, or `none` |
 | `FLIGHT_RUNS_BUDGET_SEC` | `60` | Time budget for the Flight-runs collector (about 0.5 s per Flight); it stops and warns when spent |
