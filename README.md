@@ -68,6 +68,7 @@ curl -fsSL https://get.motherduck.com | bash -s dbt-ingestion-s3
 
 - [postgres-demo](postgres-demo) - Bridge local Postgres and MotherDuck with pg_duckdb (`features: pg_duckdb`).
 - [motherduck-grafana](motherduck-grafana) - Visualize MotherDuck data in Grafana.
+- [motherduck-datadog](motherduck-datadog) - Export MotherDuck query, storage, token and Flight metrics to Datadog from a scheduled Flight, with a dashboard and monitors (`features: flights`).
 - [motherduck-ui](motherduck-ui) - Clean and analyze a CSV in the MotherDuck UI.
 
 ## Flight templates
