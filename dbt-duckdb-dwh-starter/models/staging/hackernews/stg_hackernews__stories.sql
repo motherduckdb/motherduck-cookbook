@@ -1,6 +1,6 @@
 {{ config(
     pre_hook="
-        ATTACH IF NOT EXISTS 'md:_share/hacker_news/de11a0e3-9d68-48d2-ac44-40e07a1d496b' AS hacker_news;
+        ATTACH IF NOT EXISTS 'md:_share/hacker_news/daa0cc99-d20c-4f5c-abd5-f7b22a1a1da9' AS hacker_news;
         "
 ) }}
 
