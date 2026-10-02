@@ -51,7 +51,7 @@ schema suffix (`<DBT_SCHEMA>_stg`, `_int`, `_mart`):
   Hacker News MotherDuck share before reading it:
 
   ```sql
-  ATTACH IF NOT EXISTS 'md:_share/hacker_news/de11a0e3-9d68-48d2-ac44-40e07a1d496b' AS hacker_news;
+  ATTACH IF NOT EXISTS 'md:_share/hacker_news/daa0cc99-d20c-4f5c-abd5-f7b22a1a1da9' AS hacker_news;
   ```
 
 - `models/intermediate`: target-domain joins and edge expansion.
@@ -76,7 +76,7 @@ with the `MD_CREATE_DIVE` / `MD_UPDATE_DIVE_CONTENT` functions.
 
 - The Common Crawl edges file is large (~14GB). `stg_commoncrawl__domain_edges` is materialized incrementally so it is not re-downloaded on every run; avoid a casual `--full-refresh` of that model.
 - `DBT_DUCKDB_PATH` and `DBT_SCHEMA` must match between the dbt build and the Dive deploy. If they differ, the Dive points at a database/`_mart` schema that the build did not populate and renders empty.
-- The Hacker News staging model attaches a MotherDuck share (`md:_share/hacker_news/...`); the run needs access to that share.
+- The Hacker News staging model attaches a MotherDuck share (`md:_share/hacker_news/...`); the run needs access to that share. The attach uses `IF NOT EXISTS`, so if your account already has an older `hacker_news` share attached, run `DETACH hacker_news;` once to pick up the current one, refreshed daily.
 - `scripts/deploy-dive.sh` requires the `duckdb` CLI and `jq` on PATH and `MOTHERDUCK_TOKEN` set; it exits early if any are missing.
 - The deploy expects a unique Dive title: if more than one Dive already shares the title it errors instead of guessing which to update. Use `PREVIEW_BRANCH` for non-production deploys.
 - `threads: 24` in `profiles.yml` is aggressive; lower it for smaller machines or plans.
