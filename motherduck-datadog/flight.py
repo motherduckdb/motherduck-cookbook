@@ -214,13 +214,13 @@ def main() -> None:
     if DRY_RUN:
         sample = series.payload_batches()[0]["series"][:3] if len(series) else []
         print(f"DRY_RUN: would post {len(series)} series; sample: {json.dumps(sample, indent=1)}")
+        print("DRY_RUN: watermark not advanced; the next real run exports this window.")
     else:
         post_to_datadog(api_key, series)
         print(f"Posted {len(series)} series to Datadog ({DD_SITE}).")
-
-    # Advance the watermark only after a successful post so a failed run is
-    # retried over the same window next time.
-    save_window_end(con, window_end)
+        # Advance the watermark only after a successful post, so a failed run
+        # (or a dry run) is retried over the same window next time.
+        save_window_end(con, window_end)
     con.close()
 
 

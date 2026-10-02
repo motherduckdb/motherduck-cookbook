@@ -257,7 +257,8 @@ DRY_RUN=true uv run --with-requirements requirements.txt flight.py
 ```
 
 This prints the window, each collector's outcome, the slowest queries and a
-sample of the series without posting anything. Then post for real:
+sample of the series without posting anything, and leaves the watermark where
+it was, so the first real run still exports this window. Then post for real:
 
 ```bash
 export DD_API_KEY=<datadog-api-key>
