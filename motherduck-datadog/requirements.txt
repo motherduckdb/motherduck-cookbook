@@ -1,0 +1,5 @@
+duckdb==1.5.5
+httpx==0.28.1
+# pytz lets the duckdb client return TIMESTAMPTZ columns (query_history,
+# flight runs, the state table) as tz-aware datetimes; duckdb does not pull it in.
+pytz==2026.2

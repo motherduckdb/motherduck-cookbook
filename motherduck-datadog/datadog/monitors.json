@@ -1,0 +1,134 @@
+[
+  {
+    "name": "[MotherDuck] Query error rate above 5%",
+    "type": "query alert",
+    "query": "sum(last_15m):sum:motherduck.queries.errors{*}.as_count() / sum:motherduck.queries.count{*}.as_count() * 100 > 5",
+    "message": "{{#is_alert}}More than 5% of MotherDuck queries failed in the last 15 minutes.{{/is_alert}}\n{{#is_warning}}More than 2% of MotherDuck queries failed in the last 15 minutes.{{/is_warning}}\n\nCheck the *Errors* group on the MotherDuck dashboard for the error types and the users affected, then `SELECT error_type, error_message, user_name, query_text FROM md_information_schema.query_history WHERE error_type IS NOT NULL ORDER BY start_time DESC LIMIT 50`.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 2,
+    "options": {
+      "thresholds": {"critical": 5, "warning": 2},
+      "notify_no_data": false,
+      "require_full_window": false,
+      "notify_audit": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "[MotherDuck] p95 query latency above 30s",
+    "type": "query alert",
+    "query": "avg(last_15m):avg:motherduck.queries.latency.p95_ms{*} > 30000",
+    "message": "p95 query latency on MotherDuck has been above {{threshold}} ms for 15 minutes (now {{value}} ms).\n\nLook at *Slowest query per minute by instance type* and *Top users by slowest query* on the MotherDuck dashboard; a single Mega/Giga duckling saturated by one user is the usual cause.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 3,
+    "options": {
+      "thresholds": {"critical": 30000, "warning": 10000},
+      "notify_no_data": false,
+      "require_full_window": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "[MotherDuck] Query running longer than 30 minutes",
+    "type": "query alert",
+    "query": "max(last_5m):max:motherduck.queries.running.oldest_age_sec{*} > 1800",
+    "message": "A MotherDuck query has been running for more than {{threshold}} seconds.\n\nFind it with `SELECT user_name, start_time, query_text FROM md_information_schema.recent_queries` (rows with a NULL end_time are still running).\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 3,
+    "options": {
+      "thresholds": {"critical": 1800, "warning": 900},
+      "notify_no_data": false,
+      "include_tags": true,
+      "renotify_interval": 60
+    }
+  },
+  {
+    "name": "[MotherDuck] Heavy spill to disk",
+    "type": "query alert",
+    "query": "sum(last_30m):sum:motherduck.queries.spilled.bytes{*} by {instance_type}.as_count() > 100000000000",
+    "message": "Queries on {{instance_type.name}} ducklings spilled more than 100 GB to disk in the last 30 minutes. Spilling means the working set no longer fits in memory: consider a larger instance size, narrower projections, or splitting the job.\n\nSee *Top users by bytes spilled to disk* on the MotherDuck dashboard.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 4,
+    "options": {
+      "thresholds": {"critical": 100000000000, "warning": 25000000000},
+      "notify_no_data": false,
+      "require_full_window": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "[MotherDuck] Flight run failed",
+    "type": "query alert",
+    "query": "sum(last_30m):sum:motherduck.flights.runs{status:failed} by {flight_name}.as_count() > 0",
+    "message": "MotherDuck Flight **{{flight_name.name}}** had a failed run in the last 30 minutes.\n\nRead its logs in the MotherDuck UI (Flights > {{flight_name.name}}) or with `MD_GET_FLIGHT_LOGS`.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 3,
+    "options": {
+      "thresholds": {"critical": 0},
+      "notify_no_data": false,
+      "require_full_window": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "[MotherDuck] Access token expires within 7 days",
+    "type": "query alert",
+    "query": "max(last_1h):max:motherduck.access_tokens.expiring_7d{*} by {token_type} > 0",
+    "message": "{{value}} MotherDuck {{token_type.name}} access token(s) expire within 7 days. Rotate them before the services using them lose access: `SELECT token_name, expire_at FROM md_access_tokens() WHERE expire_at < now() + INTERVAL 7 DAY`.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 3,
+    "options": {
+      "thresholds": {"critical": 0},
+      "notify_no_data": false,
+      "include_tags": true,
+      "renotify_interval": 1440
+    }
+  },
+  {
+    "name": "[MotherDuck] Active storage grew more than 25% in a day",
+    "type": "query alert",
+    "query": "pct_change(avg(last_1h),last_1d):avg:motherduck.storage.total_bytes{kind:active} > 25",
+    "message": "Active storage across the MotherDuck organization grew {{value}}% over the last day.\n\nSee *Largest databases* and *Active bytes per database* on the MotherDuck dashboard to find the database responsible.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 4,
+    "options": {
+      "thresholds": {"critical": 25, "warning": 10},
+      "notify_no_data": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "[MotherDuck] Exporter is not reporting",
+    "type": "query alert",
+    "query": "max(last_15m):max:motherduck.exporter.heartbeat{*} < 1",
+    "message": "No heartbeat from the MotherDuck Datadog exporter Flight for 15 minutes, so every other MotherDuck monitor is blind.\n\nCheck the `datadog-exporter` Flight in MotherDuck: is its schedule active, did the last run fail, is the Datadog API key still valid?\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 2,
+    "options": {
+      "thresholds": {"critical": 1},
+      "notify_no_data": true,
+      "no_data_timeframe": 20,
+      "include_tags": true,
+      "renotify_interval": 60
+    }
+  },
+  {
+    "name": "[MotherDuck] Exporter collector failing",
+    "type": "query alert",
+    "query": "min(last_15m):min:motherduck.exporter.collector_ok{*} by {collector} < 1",
+    "message": "The MotherDuck exporter's **{{collector.name}}** collector has failed on every run for 15 minutes; the metrics it produces are stale.\n\n`storage_info` failing usually means the Flight's token is not an organization admin. Otherwise read the Flight run logs for the warning line.\n\n@slack-data-platform",
+    "tags": ["service:motherduck", "team:data-platform"],
+    "priority": 4,
+    "options": {
+      "thresholds": {"critical": 1},
+      "notify_no_data": false,
+      "include_tags": true,
+      "renotify_interval": 0
+    }
+  }
+]

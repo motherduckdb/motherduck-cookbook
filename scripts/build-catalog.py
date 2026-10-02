@@ -83,6 +83,7 @@ ALLOWED_TAGS = {
     "durable-objects",
     "docker",
     "grafana",
+    "datadog",
     "s3",
     # messaging and alerting
     "slack",
