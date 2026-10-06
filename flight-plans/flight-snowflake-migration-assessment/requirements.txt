@@ -1,0 +1,6 @@
+# The collector, pinned to a versioned GitHub release asset rather than main.
+# The [snowflake] extra pulls snowflake-connector-python[pandas]; it is pinned
+# explicitly below so the connector is reproducible across builds.
+md-migration-assessment[snowflake] @ https://github.com/motherduckdb/md-migration-assessment/releases/download/v0.1.4/md_migration_assessment-0.1.4-py3-none-any.whl
+duckdb==1.5.5
+snowflake-connector-python[pandas]==4.7.5
