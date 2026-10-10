@@ -59,7 +59,8 @@ later runs on a warm image are much quicker.
 
 `DELIVERY`, `ATTACH`, `STORE_TABLE`, and the delivery credentials are all
 validated before Chromium starts, so a typo or a missing secret fails the run in
-seconds instead of after a 90-second render.
+seconds instead of after a 90-second render. Email preflight also checks the
+TLS mode, port, credential pair, nonempty recipients, and header newlines.
 
 The Dive is rendered *as the service account*, so the export contains exactly
 what that account is allowed to read. Grant it read access on the databases the
@@ -89,8 +90,8 @@ Dive queries and nothing else.
   read-only token fails the API call.
 - **A Dive scrolls inside its own frame**, so `full_page` on its own stops at
   the fold. The Flight measures the Dive's scroll container and grows the
-  viewport to match before capturing, up to 30000px. Past that the capture is
-  short, and the log says so on a `WARNING:` line. See [Sizing](#sizing).
+  viewport to match before capturing, up to 30000px. If the content exceeds
+  that cap or keeps growing after resizing, the run fails before storage or delivery. See [Sizing](#sizing).
 - **The exports table grows.** Each run appends a few MB of BLOBs. Prune it on a
   schedule (`DELETE FROM ... WHERE captured_at < now() - INTERVAL 90 DAY`) or set
   `STORE_TABLE = ""` once delivery is enough.
@@ -116,7 +117,9 @@ Dive queries and nothing else.
   scenarios. So the file goes into the SharePoint folder behind the channel
   through Microsoft Graph (it appears in the channel's **Files** tab) and the
   optional `TEAMS_WEBHOOK_URL` posts a card that links to it. Without the
-  webhook the file still lands, it is just not announced.
+  webhook the file still lands, it is just not announced. If a filename already
+  exists, Teams assigns the new file a different name instead of overwriting
+  the previous export.
 - **A failing target does not block the others.** Every target in `DELIVERY` is
   attempted; each failure is logged on its own line and the run ends FAILED
   naming the targets that broke, so an expired token is visible without hiding
@@ -193,7 +196,7 @@ to be edited in the code.
 | `SCALE` | `2` | PNG device pixel ratio. `1.5` for smaller files. |
 | `MIN_ELEMENTS` | `30` | Refuse to store or deliver a page with fewer elements than this. `0` disables the check. |
 | `MIN_WAIT_MS` | `15000` | Never capture before this many ms have passed, however quiet the page looks. |
-| `WAIT_MS` | `120000` | Ceiling in ms. Past it the Flight captures anyway, or fails if `WAIT_FOR_TEXT` was set. |
+| `WAIT_MS` | `120000` | Ceiling in ms. The Flight fails without capturing if readiness is not reached. |
 | `WAIT_FOR_TEXT` | (unset) | A string only the *loaded* Dive contains. Set it and the wait keys on that instead of on DOM quiet. |
 | `STORE_TABLE` | `flights_demo.main.dive_exports` | Where the BLOBs land, as `database.schema.table`. `""` skips the copy. |
 | `DELIVERY` | (unset) | Comma-separated delivery targets: `slack`, `teams`, `email`. Empty stores the export and stops. |
@@ -230,7 +233,7 @@ Email delivery is plain SMTP, so any provider works:
 | `SMTP_HOST` | (unset) | SMTP server hostname. |
 | `SMTP_PORT` | `587` | SMTP port. |
 | `SMTP_TLS` | `starttls` (`ssl` on port 465) | Transport security: `starttls`, `ssl` (implicit TLS), or `none` for a local relay. |
-| `SMTP_USER` / `SMTP_PASSWORD` | (unset) | Credentials. Leave unset for a relay that does not authenticate. |
+| `SMTP_USER` / `SMTP_PASSWORD` | (unset) | Set both credentials, or leave both unset for an unauthenticated relay. Password whitespace is preserved. |
 | `EMAIL_FROM` | (unset) | Envelope sender. |
 | `EMAIL_TO` | (unset) | Comma-separated recipients. |
 | `EMAIL_SUBJECT` | `REPORT_NAME` | Subject line. |
@@ -422,9 +425,9 @@ and do not create a new Flight version.
 - **The session token stays out of the table.** `source_url` is stored without
   the URL fragment, which is where the embed session lives.
 - **Identifier validation.** `STORE_TABLE` is split and each part checked
-  against `^[A-Za-z_][A-Za-z0-9_]*$` before it is interpolated into the `CREATE`
-  and `INSERT` statements, which cannot be parameterized. Row values are bound
-  parameters.
+  against `^[A-Za-z_][A-Za-z0-9_]*$` and double-quoted before it is interpolated
+  into the `CREATE` and `INSERT` statements, which cannot be parameterized.
+  Row values are bound parameters.
 - **Delivery credentials live in a secret.** `SLACK_BOT_TOKEN`,
   `TEAMS_CLIENT_SECRET`, and `SMTP_PASSWORD` are read from the environment at run
   time and never logged; put them in a Flights secret, not in Flight config,
