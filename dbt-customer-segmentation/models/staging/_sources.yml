@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: retail_raw
+    description: "Raw retail source tables. The sample project creates these with dbt seeds; production deployments usually replace them with landed application, loyalty, POS, or campaign-platform tables in the same schema."
+    schema: "{{ target.schema }}_raw"
+    tables:
+      - name: raw_transactions
+        description: "Line-item transaction records using Complete Journey-style discount sign conventions."
+        loaded_at_field: day
+      - name: raw_products
+        description: "Product catalog with department, commodity, and private-label flags."
+      - name: raw_households
+        description: "Household demographic attributes used only for segment profiling."
+      - name: raw_campaigns
+        description: "Retail campaign header records."
+      - name: raw_coupons
+        description: "Campaign-to-product coupon mappings."
+      - name: raw_coupon_redemptions
+        description: "Observed coupon redemptions by household and campaign."
+      - name: raw_campaign_households
+        description: "Households targeted by each campaign."
