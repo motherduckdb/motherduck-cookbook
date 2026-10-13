@@ -1,0 +1,5 @@
+query_name,query_text
+nyc_taxi_daily_trips,"SELECT date_trunc('day', tpep_pickup_datetime) AS day, count(*) AS trips, avg(total_amount) AS avg_fare FROM sample_data.nyc.taxi GROUP BY 1 ORDER BY 1"
+nyc_taxi_by_payment,"SELECT payment_type, count(*) AS trips, sum(total_amount) AS revenue FROM sample_data.nyc.taxi GROUP BY 1 ORDER BY revenue DESC"
+hn_top_domains,"SELECT regexp_extract(url, 'https?://([^/]+)', 1) AS domain, count(*) AS stories FROM sample_data.hn.hacker_news WHERE type = 'story' AND url IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 50"
+hn_posts_by_year,"SELECT year(timestamp) AS yr, type, count(*) AS n FROM sample_data.hn.hacker_news GROUP BY ALL ORDER BY ALL"
