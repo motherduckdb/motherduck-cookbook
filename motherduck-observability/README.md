@@ -117,7 +117,7 @@ created on the first run.
 | `alert_state` | `check_name`, `group_key` | | current status, value, episode start, last notification (written by `alerts.py`) |
 | `alert_events` | `evaluated_at` | transitions | old and new status, kind, value, thresholds, whether Slack was posted (written by `alerts.py`) |
 
-### Alert rules and Slack
+### Alert rules
 
 - [`alerts.py`](alerts.py) is a second Flight, scheduled two minutes after
   each collection. Each rule in its `CHECKS` list is one SQL query over the
@@ -148,7 +148,7 @@ created on the first run.
   between two runs is still named. The headline counts what the message
   contains and what is still firing; "all clear" means no rule is firing.
 
-### The Dive
+### Dashboard
 
 - [`dive/dive.tsx`](dive/dive.tsx) has eleven tabs: Overview, Queries,
   Errors, Users & compute, Query log, Dives & Guides, Storage, Flights,
@@ -339,7 +339,7 @@ surface directly: `MD_CREATE_FLIGHT` with `source_code` = `flight.py`,
 `schedule_cron := '*/5 * * * *'`; trigger with `MD_RUN_FLIGHT` and read the
 log with `MD_GET_FLIGHT_LOGS`.
 
-### 4. Deploy the Dive
+### 4. Deploy the dashboard
 
 ```bash
 uv run --with-requirements requirements.txt deploy_dive.py --status ready
