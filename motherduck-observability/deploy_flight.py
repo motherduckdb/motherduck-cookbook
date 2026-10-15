@@ -28,6 +28,8 @@ Flags:
     --config KEY=VALUE   non-secret env var for the Flight (repeatable; replaces the stored map)
     --token-name NAME    label of a MotherDuck access token to run as (default: the Flights default token)
     --max-runtime SEC    per-run timeout in seconds (0 = none)
+    --instance-type SIZE runner size: F4 (default here; both Flights do their work inside
+                         MotherDuck), F16 (plan default) or F32
     --run                trigger a run after deploying and stream its status + logs
 """
 
@@ -70,6 +72,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--token-name", default=None)
     parser.add_argument("--max-runtime", type=int, default=None, metavar="SEC")
+    parser.add_argument("--instance-type", default="F4", choices=["F4", "F16", "F32"], metavar="SIZE")
     parser.add_argument("--run", action="store_true")
     args = parser.parse_args(argv)
     if args.name is None:
@@ -130,6 +133,9 @@ def deploy(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> str:
         params.append(args.token_name)
     if args.max_runtime is not None:
         fragments.append(f"max_runtime_sec := {int(args.max_runtime)}")
+    if args.instance_type:
+        fragments.append("instance_type := ?")
+        params.append(args.instance_type)
 
     if existing:
         flight_id = str(existing[0][0])

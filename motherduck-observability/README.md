@@ -273,6 +273,7 @@ alert rules, which are the `CHECKS` list at the top of `alerts.py`.
 | `DRY_RUN` | `false` | Collector: run everything in a transaction and roll it back. Rules: evaluate and print, no Slack, no state |
 | `MOTHERDUCK_TOKEN` | (Flight-injected) | Attached automatically to a Flight; `.env` holds the service account's token for local runs |
 | Schedules | `*/5 * * * *` and `2-59/5 * * * *` | Set with `--schedule` on `deploy_flight.py` or `MD_UPDATE_FLIGHT`; the rules run two minutes after the collector |
+| Instance size | `F4` | `--instance-type` on `deploy_flight.py` (`instance_type` in `MD_CREATE_FLIGHT`). The smallest runner is enough: the aggregation runs inside MotherDuck and the Flights only move small result sets |
 | Share audience | `explorer` | `--grant <role>` on `deploy_dive.py`, repeatable |
 | Dive status | `draft` | `--status ready` (or `endorsed`, admins only) on `deploy_dive.py` |
 
@@ -333,11 +334,14 @@ uv run --with-requirements requirements.txt deploy_flight.py \
 ```
 
 `--run` triggers one run, polls it to completion and prints its log, so the
-first deploy doubles as the end-to-end test. Without the script, call the SQL
-surface directly: `MD_CREATE_FLIGHT` with `source_code` = `flight.py`,
-`requirements_txt` = `requirements.txt`, `config := MAP {...}` and
-`schedule_cron := '*/5 * * * *'`; trigger with `MD_RUN_FLIGHT` and read the
-log with `MD_GET_FLIGHT_LOGS`.
+first deploy doubles as the end-to-end test. Both Flights deploy on the
+smallest runner (`F4`, half a vCPU and 4 GB) because the work happens inside
+MotherDuck; pass `--instance-type F16` if a run ever fails from memory
+pressure. Without the script, call the SQL surface directly: `MD_CREATE_FLIGHT`
+with `source_code` = `flight.py`, `requirements_txt` = `requirements.txt`,
+`config := MAP {...}`, `schedule_cron := '*/5 * * * *'` and
+`instance_type := 'F4'`; trigger with `MD_RUN_FLIGHT` and read the log with
+`MD_GET_FLIGHT_LOGS`.
 
 ### 4. Deploy the dashboard
 
