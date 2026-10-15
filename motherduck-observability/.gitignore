@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+.env.*
+.dive-preview/
+node_modules/

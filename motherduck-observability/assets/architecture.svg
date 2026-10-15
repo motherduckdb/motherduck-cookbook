@@ -1,0 +1,330 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960">
+<style></style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#383838"/></marker></defs>
+<rect width="1600" height="960" fill="#F4EFEA"/>
+<text x="60" y="66" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="30" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="1">MONITOR MOTHERDUCK FROM MOTHERDUCK</text>
+<text x="60" y="96" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="15" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Two Flights, one database, one Dive. Metadata never leaves MotherDuck; the organization reads it through a share.</text>
+<rect x="420" y="150" width="760" height="730" rx="14" fill="none" stroke="#383838" stroke-width="2" stroke-dasharray="10 8"/>
+<rect x="440" y="138" width="516" height="24" rx="999" fill="#16AA98" stroke="#383838" stroke-width="2"/>
+<text x="698.0" y="154" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">OWNED BY SERVICE ACCOUNT MD_OBSERVABILITY_SVC · ADMIN ROLE</text>
+<rect x="52" y="298" width="320" height="290" rx="14" fill="#383838"/>
+<rect x="60" y="290" width="320" height="290" rx="14" fill="#FFFFFF" stroke="#383838" stroke-width="2"/>
+<rect x="78" y="308" width="189" height="24" rx="999" fill="#6FC2FF" stroke="#383838" stroke-width="2"/>
+<text x="172.5" y="324" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">MOTHERDUCK METADATA</text>
+<g fill="none" transform="translate(288 298) scale(0.475)">
+<path d="M132 45L132 51C132 55.4183 128.418 59 124 59L111 59" stroke="#383838" stroke-width="2" stroke-miterlimit="3.99933" stroke-dasharray="4 4"/>
+<path d="M111 102H119C123.418 102 127 105.582 127 110V115" stroke="#383838" stroke-width="2" stroke-miterlimit="3.99933" stroke-dasharray="4 4"/>
+<path d="M104 90C104 95.5228 93.2548 100 80 100C66.7452 100 56 95.5228 56 90C56 84.4772 66.7452 80 80 80C93.2548 80 104 84.4772 104 90Z" fill="#16AA98"/>
+<path d="M104 90C104 95.5228 93.2548 100 80 100C66.7452 100 56 95.5228 56 90V110C56 115.523 66.7452 120 80 120C93.2548 120 104 115.523 104 110V90Z" fill="#16AA98"/>
+<path d="M104 90C104 95.5228 93.2548 100 80 100C66.7452 100 56 95.5228 56 90M104 90C104 84.4772 93.2548 80 80 80C66.7452 80 56 84.4772 56 90M104 90V110C104 115.523 93.2548 120 80 120C66.7452 120 56 115.523 56 110V90" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M104 69.25C104 74.9109 93.2548 79.5 80 79.5C66.7452 79.5 56 74.9109 56 69.25C56 63.5891 66.7452 59 80 59C93.2548 59 104 63.5891 104 69.25Z" fill="#16AA98"/>
+<path d="M104 69.25C104 74.9109 93.2548 79.5 80 79.5C66.7452 79.5 56 74.9109 56 69.25V89.75C56 95.4109 66.7452 100 80 100C93.2548 100 104 95.4109 104 89.75V69.25Z" fill="#16AA98"/>
+<path d="M104 69.25C104 74.9109 93.2548 79.5 80 79.5C66.7452 79.5 56 74.9109 56 69.25M104 69.25C104 63.5891 93.2548 59 80 59C66.7452 59 56 63.5891 56 69.25M104 69.25V89.75C104 95.4109 93.2548 100 80 100C66.7452 100 56 95.4109 56 89.75V69.25" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M104 50C104 55.5228 93.2548 60 80 60C66.7452 60 56 55.5228 56 50C56 44.4772 66.7452 40 80 40C93.2548 40 104 44.4772 104 50Z" fill="#16AA98"/>
+<path d="M104 50C104 55.5228 93.2548 60 80 60C66.7452 60 56 55.5228 56 50V70C56 75.5229 66.7452 80 80 80C93.2548 80 104 75.5229 104 70V50Z" fill="#16AA98"/>
+<path d="M104 50C104 55.5228 93.2548 60 80 60C66.7452 60 56 55.5228 56 50M104 50C104 44.4772 93.2548 40 80 40C66.7452 40 56 44.4772 56 50M104 50V70C104 75.5228 93.2548 80 80 80C66.7452 80 56 75.5228 56 70V50" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<circle cx="112" cy="102" r="3" fill="#383838"/>
+<circle cx="112" cy="59" r="3" fill="#383838"/>
+<path d="M28 70L28 76C28 80.4183 31.5817 84 36 84L49 84" stroke="#383838" stroke-width="2" stroke-miterlimit="3.99933" stroke-dasharray="4 4"/>
+<circle cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 51 81)" fill="#383838"/>
+<g clip-path="url(#Multiple_Users_clip0_20298_28331)">
+<rect x="113" y="12" width="39" height="30" rx="4" fill="#F4EFEA"/>
+<rect x="110" y="13" width="44" height="9" fill="white"/>
+<rect x="110" y="13" width="44" height="9" stroke="#383838" stroke-width="2"/>
+<circle cx="119.5" cy="17.5" r="1.5" fill="#383838"/>
+<circle cx="124.5" cy="17.5" r="1.5" fill="#383838"/>
+<circle cx="129.5" cy="17.5" r="1.5" fill="#383838"/>
+<path d="M119.422 26.7715H131.353" stroke="#383838" stroke-width="2"/>
+<path d="M124.016 31.3047H146.043" stroke="#383838" stroke-width="2"/>
+<path d="M119.422 35.8369H138.696" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="114" y="13" width="37" height="28" rx="3" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Multiple_Users_clip1_20298_28331)">
+<rect x="114" y="118" width="39" height="30" rx="4" fill="#F4EFEA"/>
+<rect x="111" y="119" width="44" height="9" fill="white"/>
+<rect x="111" y="119" width="44" height="9" stroke="#383838" stroke-width="2"/>
+<circle cx="120.5" cy="123.5" r="1.5" fill="#383838"/>
+<circle cx="125.5" cy="123.5" r="1.5" fill="#383838"/>
+<circle cx="130.5" cy="123.5" r="1.5" fill="#383838"/>
+<path d="M120.422 132.771H132.353" stroke="#383838" stroke-width="2"/>
+<path d="M125.016 137.305H147.043" stroke="#383838" stroke-width="2"/>
+<path d="M120.422 141.837H139.696" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="115" y="119" width="37" height="28" rx="3" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Multiple_Users_clip2_20298_28331)">
+<rect x="10" y="36" width="39" height="30" rx="4" fill="#F4EFEA"/>
+<rect x="7" y="37" width="44" height="9" fill="white"/>
+<rect x="7" y="37" width="44" height="9" stroke="#383838" stroke-width="2"/>
+<circle cx="16.5" cy="41.5" r="1.5" fill="#383838"/>
+<circle cx="21.5" cy="41.5" r="1.5" fill="#383838"/>
+<circle cx="26.5" cy="41.5" r="1.5" fill="#383838"/>
+<path d="M16.4219 50.7715H28.3534" stroke="#383838" stroke-width="2"/>
+<path d="M21.0156 55.3047H43.043" stroke="#383838" stroke-width="2"/>
+<path d="M16.4219 59.8369H35.6959" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="11" y="37" width="37" height="28" rx="3" stroke="#383838" stroke-width="2"/>
+<path d="M143.278 71.0608C143.671 70.662 144.329 70.662 144.722 71.0608L146.961 73.3308C147.33 73.705 147.33 74.2946 146.961 74.6689L144.722 76.9388C144.329 77.3376 143.671 77.3376 143.278 76.9388L141.039 74.6689C140.67 74.2946 140.67 73.705 141.039 73.3308L143.278 71.0608Z" fill="#F4EFEA" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M26.5559 120.122C27.3427 119.324 28.6573 119.324 29.4441 120.122L33.9224 124.662C34.6608 125.41 34.6608 126.589 33.9224 127.338L29.4441 131.878C28.6573 132.675 27.3427 132.675 26.5559 131.878L22.0776 127.338C21.3392 126.589 21.3392 125.41 22.0776 124.662L26.5559 120.122Z" fill="#F4EFEA" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<defs>
+<clipPath id="Multiple_Users_clip0_20298_28331">
+<rect x="113" y="12" width="39" height="30" rx="4" fill="white"/>
+</clipPath>
+<clipPath id="Multiple_Users_clip1_20298_28331">
+<rect x="114" y="118" width="39" height="30" rx="4" fill="white"/>
+</clipPath>
+<clipPath id="Multiple_Users_clip2_20298_28331">
+<rect x="10" y="36" width="39" height="30" rx="4" fill="white"/>
+</clipPath>
+</defs>
+
+</g>
+<text x="78" y="394" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">MD_INFORMATION_SCHEMA</text>
+<text x="78" y="420" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Built-in views, org-wide for admins.</text>
+<text x="78" y="440" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Read 3 minutes behind live, because</text>
+<text x="78" y="460" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">query_history lags by a minute or two.</text>
+<text x="78" y="480" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">query_history, recent_queries</text>
+<text x="78" y="498" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">storage_info, access tokens</text>
+<text x="78" y="516" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">flights + runs, dives, guides</text>
+<rect x="452" y="298" width="320" height="290" rx="14" fill="#383838"/>
+<rect x="460" y="290" width="320" height="290" rx="14" fill="#FFFFFF" stroke="#383838" stroke-width="2"/>
+<rect x="478" y="308" width="197" height="24" rx="999" fill="#6FC2FF" stroke="#383838" stroke-width="2"/>
+<text x="576.5" y="324" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">FLIGHT · EVERY 5 MIN</text>
+<g fill="none" transform="translate(688 298) scale(0.475)">
+<g clip-path="url(#Code_+_analytics_clip0_20298_27840)">
+<rect x="19" y="42" width="102" height="79" rx="6" fill="#383838"/>
+<rect x="19" y="42" width="102" height="79" rx="6" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Code_+_analytics_clip1_20298_27840)">
+<rect x="26" y="33" width="104" height="81" rx="7" fill="#16AA98"/>
+<rect x="16" y="34" width="120" height="15" fill="white"/>
+<rect x="16" y="34" width="120" height="15" stroke="#383838" stroke-width="2"/>
+<circle cx="36" cy="42" r="2" fill="#383838"/>
+<circle cx="44" cy="42" r="2" fill="#383838"/>
+<circle cx="52" cy="42" r="2" fill="#383838"/>
+<path d="M42 63H71" stroke="#383838" stroke-width="2"/>
+<path d="M42 95H71" stroke="#383838" stroke-width="2"/>
+<path d="M49 71H103" stroke="#383838" stroke-width="2"/>
+<path d="M49 87H95" stroke="#383838" stroke-width="2"/>
+<path d="M58 79H107" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="27" y="34" width="102" height="79" rx="6" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Code_+_analytics_clip2_20298_27840)">
+<rect x="92" y="95" width="52" height="40" rx="7" fill="white"/>
+<line x1="100.5" y1="94.9707" x2="100.5" y2="142.378" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="144" y1="101.897" x2="92" y2="101.897" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="127.5" y1="94.9707" x2="127.5" y2="142.378" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="144" y1="128.564" x2="92" y2="128.564" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="109.499" y1="94.9707" x2="109.499" y2="142.378" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="144" y1="110.786" x2="92" y2="110.786" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="136.5" y1="94.9707" x2="136.5" y2="142.378" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="118.5" y1="94.9707" x2="118.5" y2="142.378" stroke="#E0E0E0" stroke-width="2"/>
+<line x1="144" y1="119.677" x2="92" y2="119.677" stroke="#E0E0E0" stroke-width="2"/>
+<path d="M99.0866 119.208L91.1175 127.104C90.7384 127.48 90.5251 127.991 90.5251 128.525V135.181C90.5251 136.286 91.4206 137.181 92.5251 137.181H143.844C144.949 137.181 145.844 136.286 145.844 135.181V106.342C145.844 104.565 143.699 103.67 142.437 104.921L128.291 118.937C127.511 119.709 126.255 119.709 125.476 118.937L119.69 113.204C118.911 112.432 117.654 112.432 116.875 113.204L107.766 122.229C106.987 123.002 105.73 123.002 104.951 122.229L101.902 119.208C101.122 118.436 99.8662 118.436 99.0866 119.208Z" fill="white" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="93" y="96" width="50" height="38" rx="6" stroke="#383838" stroke-width="2"/>
+<path d="M138.146 12.9896C138.884 12.2418 140.116 12.2418 140.854 12.9896L145.052 17.2457C145.744 17.9474 145.744 19.0528 145.052 19.7546L140.854 24.0107C140.116 24.7585 138.884 24.7585 138.146 24.0107L133.948 19.7546C133.256 19.0528 133.256 17.9474 133.948 17.2457L138.146 12.9896Z" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M7.27795 29.0608C7.67137 28.662 8.32863 28.662 8.72205 29.0608L10.9612 31.3308C11.3304 31.705 11.3304 32.2946 10.9612 32.6689L8.72205 34.9388C8.32863 35.3376 7.67137 35.3376 7.27795 34.9388L5.03879 32.6689C4.6696 32.2946 4.6696 31.705 5.0388 31.3308L7.27795 29.0608Z" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M53.3036 133.042C54.7175 132.844 56.0774 133.238 57.1303 134.036C57.9239 132.979 59.1231 132.225 60.537 132.027C63.3516 131.631 65.9516 133.586 66.3442 136.393C66.4931 137.458 66.3031 138.492 65.8563 139.387C66.5315 140.125 66.9979 141.067 67.1467 142.131C67.5393 144.938 65.5759 147.533 62.7613 147.929C61.3473 148.127 59.9875 147.733 58.9345 146.935C58.1409 147.992 56.9418 148.746 55.5278 148.944C52.7132 149.339 50.1132 147.384 49.7207 144.578C49.5718 143.513 49.7617 142.479 50.2085 141.584C49.5333 140.846 49.067 139.904 48.9181 138.84C48.5255 136.033 50.489 133.437 53.3036 133.042Z" stroke="#383838" stroke-width="2"/>
+</g>
+<defs>
+<clipPath id="Code_+_analytics_clip0_20298_27840">
+<rect width="160" height="160" fill="white"/>
+</clipPath>
+<clipPath id="Code_+_analytics_clip1_20298_27840">
+<rect x="26" y="33" width="104" height="81" rx="7" fill="white"/>
+</clipPath>
+<clipPath id="Code_+_analytics_clip2_20298_27840">
+<rect x="92" y="95" width="52" height="40" rx="7" fill="white"/>
+</clipPath>
+</defs>
+
+</g>
+<text x="478" y="394" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">FLIGHT.PY</text>
+<text x="478" y="420" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Aggregates each 5-minute window</text>
+<text x="478" y="440" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">server-side with INSERT … SELECT.</text>
+<text x="478" y="460" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Watermark in the state table,</text>
+<text x="478" y="480" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">idempotent re-runs, retention.</text>
+<text x="478" y="500" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Backfills BACKFILL_HOURS on first run.</text>
+<rect x="852" y="198" width="300" height="390" rx="14" fill="#383838"/>
+<rect x="860" y="190" width="300" height="390" rx="14" fill="#FFDE00" stroke="#383838" stroke-width="2"/>
+<rect x="878" y="208" width="97" height="24" rx="999" fill="#FFDE00" stroke="#383838" stroke-width="2"/>
+<text x="926.5" y="224" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">DATABASE</text>
+<g fill="none" transform="translate(1070 202) scale(1.2)">
+<path d="M24.6919 37.1313L24.6919 63.8437L14.007 63.8437" stroke="#383838" stroke-width="2"/>
+<path d="M32.7056 37.1313L32.7056 63.8437L43.3905 63.8437" stroke="#383838" stroke-width="2"/>
+<path d="M1 7.95068H60V39.6754C60 39.6754 51.976 47.2301 30.5 47.2301C9.024 47.2301 1 39.6754 1 39.6754V7.95068Z" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<ellipse cx="30.5" cy="7.86986" rx="29.5" ry="6.86986" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<ellipse cx="30.5" cy="7.86986" rx="29.5" ry="6.86986" fill="#383838" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<ellipse cx="35.9956" cy="7.86986" rx="24.0041" ry="6.86986" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M10.1389 26.307C10.1389 29.6719 8.77053 32.3996 7.08255 32.3996C5.63112 32.3996 4.41599 30.3828 4.10392 27.6784C4.05742 27.2754 4.28512 26.8955 4.65086 26.7201L6.03104 26.0583C6.79547 25.6917 6.78562 24.6 6.0147 24.2473L5.13443 23.8445C4.69272 23.6424 4.45298 23.1488 4.6216 22.6933C5.17816 21.1897 6.07322 20.2144 7.08255 20.2144C8.77053 20.2144 10.1389 22.9421 10.1389 26.307Z" fill="#383838"/>
+<path d="M19.7856 27.8299C19.7856 31.1948 18.4173 33.9226 16.7293 33.9226C15.2778 33.9226 14.0627 31.9058 13.7506 29.2013C13.7042 28.7984 13.9318 28.4184 14.2976 28.2431L15.6778 27.5812C16.4422 27.2147 16.4323 26.1229 15.6614 25.7702L14.7812 25.3675C14.3394 25.1654 14.0997 24.6718 14.2683 24.2162C14.8249 22.7126 15.7199 21.7373 16.7293 21.7373C18.4173 21.7373 19.7856 24.4651 19.7856 27.8299Z" fill="#383838"/>
+
+</g>
+<text x="878" y="294" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">MD_OBSERVABILITY</text>
+<text x="878" y="320" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Typed tables, one per collector:</text>
+<text x="878" y="346" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">query_minutes, query_latency_minutes</text>
+<text x="878" y="364" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">query_detail_minutes, slow_queries</text>
+<text x="878" y="382" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">running_queries, activity_snapshots</text>
+<text x="878" y="400" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">storage_snapshots, storage_totals</text>
+<text x="878" y="418" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">flight_runs, dive_minutes, inventory</text>
+<text x="878" y="436" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">exporter_runs, collector_runs, state</text>
+<text x="878" y="454" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">alert_state, alert_events</text>
+<text x="878" y="490" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Kept RETENTION_DAYS (default 30).</text>
+<rect x="878" y="510" width="263" height="24" rx="999" fill="#16AA98" stroke="#383838" stroke-width="2"/>
+<text x="1009.5" y="526" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="10.5" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">SHARE: MD_OBSERVABILITY_SHARE</text>
+<text x="878" y="560" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">READ granted to the explorer role.</text>
+<rect x="852" y="668" width="300" height="200" rx="14" fill="#383838"/>
+<rect x="860" y="660" width="300" height="200" rx="14" fill="#FFFFFF" stroke="#383838" stroke-width="2"/>
+<rect x="878" y="678" width="197" height="24" rx="999" fill="#6FC2FF" stroke="#383838" stroke-width="2"/>
+<text x="976.5" y="694" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">FLIGHT · EVERY 5 MIN</text>
+<g fill="none" transform="translate(1068 668) scale(0.475)">
+<rect x="12" y="56" width="102" height="79" rx="6" fill="#383838"/>
+<rect x="12" y="56" width="102" height="79" rx="6" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Automatic_Error_Correction_clip0_20298_28416)">
+<rect x="19" y="47" width="104" height="81" rx="7" fill="#FFDE00"/>
+<rect x="9" y="48" width="120" height="15" fill="#F4EFEA"/>
+<rect x="9" y="48" width="120" height="15" stroke="#383838" stroke-width="2"/>
+<circle cx="29" cy="56" r="2" fill="#383838"/>
+<circle cx="37" cy="56" r="2" fill="#383838"/>
+<circle cx="45" cy="56" r="2" fill="#383838"/>
+<path d="M35 77H64" stroke="#383838" stroke-width="2"/>
+<path d="M35 109H64" stroke="#383838" stroke-width="2"/>
+<path d="M42 85H96" stroke="#383838" stroke-width="2"/>
+<path d="M42 101H88" stroke="#383838" stroke-width="2"/>
+<path d="M51 93H100" stroke="#383838" stroke-width="2"/>
+</g>
+<rect x="20" y="48" width="102" height="79" rx="6" stroke="#383838" stroke-width="2"/>
+<path d="M15.9169 10.5913C16.507 9.99302 17.4929 9.99302 18.083 10.5913L21.4418 13.9962C21.9956 14.5576 21.9956 15.4419 21.4418 16.0033L18.083 19.4082C17.4929 20.0064 16.507 20.0064 15.9169 19.4082L12.5582 16.0033C12.0044 15.4419 12.0044 14.5576 12.5582 13.9962L15.9169 10.5913Z" fill="#F4EFEA" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M78.7969 110.173L119.001 110.173C127.285 110.173 134.001 103.457 134.001 95.1729L134.001 44" stroke="#383838" stroke-width="2" stroke-miterlimit="3.99933" stroke-dasharray="4 4"/>
+<circle cx="3" cy="3" r="3" transform="matrix(0.999543 0.0302129 0.0302129 -0.999543 74.2969 112.997)" fill="#383838"/>
+<path d="M132.813 135.289C136.046 133.657 139.284 132.906 141.879 132.97C144.521 133.035 146.225 133.918 146.885 135.226C147.545 136.534 147.243 138.429 145.726 140.593C144.236 142.719 141.709 144.877 138.476 146.509C135.243 148.141 132.004 148.892 129.41 148.828C126.768 148.763 125.063 147.88 124.403 146.572C123.743 145.264 124.045 143.369 125.563 141.205C127.052 139.079 129.58 136.92 132.813 135.289Z" fill="#F4EFEA" stroke="#383838" stroke-width="2"/>
+<path d="M132.402 11.2002L117.402 35.7999L118.602 38.7998H147.402L148.602 36.3999L134.202 11.2002H132.402Z" fill="white"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M132.994 20.8002C133.657 20.8002 134.194 21.3375 134.194 22.0002V28.0001C134.194 28.6629 133.657 29.2001 132.994 29.2001C132.332 29.2001 131.794 28.6629 131.794 28.0001V22.0002C131.794 21.3375 132.332 20.8002 132.994 20.8002Z" fill="#383838"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M131.196 10.4837C131.742 10.1669 132.363 10 132.994 10C133.626 10 134.246 10.1669 134.793 10.4837C135.338 10.8 135.791 11.2546 136.104 11.8015C136.105 11.8025 136.105 11.8034 136.106 11.8043L149.303 34.6001C149.619 35.1464 149.785 35.766 149.786 36.3969C149.786 37.0277 149.621 37.6476 149.307 38.1945C148.992 38.7414 148.54 39.1961 147.994 39.5129C147.449 39.8298 146.829 39.9978 146.199 40L146.194 40H119.795L119.79 40C119.16 39.9978 118.54 39.8298 117.995 39.5129C117.449 39.1961 116.997 38.7414 116.682 38.1945C116.368 37.6476 116.203 37.0277 116.203 36.3969C116.204 35.766 116.37 35.1464 116.685 34.6001L129.883 11.8043C129.884 11.8034 129.884 11.8025 129.885 11.8015C130.198 11.2546 130.651 10.8 131.196 10.4837ZM130.924 12.4003L131.963 13.0016L118.764 35.8001C118.764 35.8002 118.764 35.7999 118.764 35.8001C118.659 35.9821 118.603 36.1889 118.603 36.399C118.603 36.6093 118.658 36.8159 118.763 36.9982C118.868 37.1805 119.019 37.3321 119.2 37.4377C119.382 37.543 119.588 37.599 119.797 37.6H146.192C146.401 37.599 146.607 37.543 146.789 37.4377C146.97 37.3321 147.121 37.1805 147.226 36.9982C147.331 36.8159 147.386 36.6093 147.386 36.399C147.386 36.189 147.33 35.9827 147.225 35.8008C147.225 35.8005 147.226 35.801 147.225 35.8008L134.023 12.9964C133.919 12.8152 133.77 12.6646 133.589 12.5599C133.408 12.4551 133.203 12.4 132.994 12.4C132.786 12.4 132.581 12.4551 132.4 12.5599C132.219 12.6646 132.07 12.8152 131.966 12.9964L130.924 12.4003Z" fill="#383838"/>
+<path d="M132.994 35.2001C133.989 35.2001 134.794 34.3942 134.794 33.4001C134.794 32.406 133.989 31.6001 132.994 31.6001C132 31.6001 131.194 32.406 131.194 33.4001C131.194 34.3942 132 35.2001 132.994 35.2001Z" fill="#383838"/>
+<path d="M133.862 59.4737L134.264 59.9434L134.864 59.7939L135.034 59.751L135.049 59.9267L135.098 60.5427L135.671 60.7742L135.834 60.8398L135.743 60.9906L135.42 61.5176L135.748 62.0424L135.841 62.1903L135.679 62.2585L135.108 62.4958L135.065 63.1132L135.052 63.2881L134.881 63.2479L134.28 63.1035L133.883 63.5782L133.769 63.7125L133.655 63.5793L133.252 63.1087L132.653 63.2592L132.482 63.3011L132.468 63.1263L132.418 62.5094L131.846 62.2779L131.682 62.2113L131.774 62.0624L132.096 61.5344L131.769 61.0107L131.675 60.8608L131.838 60.7935L132.408 60.5563L132.452 59.9398L132.464 59.764L132.635 59.8051L133.236 59.9486L133.634 59.4749L133.747 59.3395L133.862 59.4737Z" fill="#383838" stroke="#383838" stroke-width="2"/>
+<defs>
+<clipPath id="Automatic_Error_Correction_clip0_20298_28416">
+<rect x="19" y="47" width="104" height="81" rx="7" fill="white"/>
+</clipPath>
+</defs>
+
+</g>
+<text x="878" y="764" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">ALERTS.PY</text>
+<text x="878" y="790" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Two minutes after the collector.</text>
+<text x="878" y="810" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Nine rules in CHECKS, SQL over the</text>
+<text x="878" y="830" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">tables; posts transitions with</text>
+<text x="878" y="850" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">example queries and Dive links.</text>
+<rect x="1252" y="668" width="290" height="200" rx="14" fill="#383838"/>
+<rect x="1260" y="660" width="290" height="200" rx="14" fill="#FFFFFF" stroke="#383838" stroke-width="2"/>
+<rect x="1278" y="678" width="164" height="24" rx="999" fill="#FF7169" stroke="#383838" stroke-width="2"/>
+<text x="1360.0" y="694" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">INCOMING WEBHOOK</text>
+<g fill="none" transform="translate(1458 668) scale(0.475)">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M80.6652 34.2481C86.2609 32.3814 99.3445 38.0491 107.906 63.7145C116.468 89.3798 110.278 104.379 104.683 106.245L102.548 105.83C98.5694 104.705 92.7192 101.316 87.1035 93.9998C85.2757 91.6183 83.4726 88.8207 81.7671 85.5495C85.8706 84.1807 91.0053 78.6718 88.2676 70.4649C86.0774 63.8993 78.0089 63.8428 74.4027 64.6312C71.6987 51.2135 74.1894 42.5367 77.289 37.829L80.6652 34.2481Z" fill="white"/>
+<path d="M88.2676 70.4649C86.0774 63.8993 78.0089 63.8428 74.4027 64.6312C74.9895 67.5427 75.8208 70.6774 76.9436 74.0432C78.3998 78.4083 80.033 82.2237 81.7671 85.5495C85.8706 84.1807 91.0053 78.6718 88.2676 70.4649Z" fill="#383838"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M55.4921 92.9998L47.5943 69.3243L77.289 37.829C73.5168 43.5582 70.6464 55.1659 76.9436 74.0432C79.8319 82.7015 83.4172 89.1969 87.1035 93.9998L55.4921 92.9998Z" fill="#F4EFEA"/>
+<path d="M56.803 96.9295L62.123 97.9645L102.548 105.83C98.5694 104.705 92.7192 101.316 87.1035 93.9998L55.4921 92.9998L56.803 96.9295Z" fill="#383838"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M34.9108 73.5553C27.2879 76.0983 23.1697 84.3393 25.7126 91.9623C29.8032 94.7915 41.4858 98.96 55.4921 92.9998L47.5943 69.3243L34.9108 73.5553Z" fill="#F4EFEA"/>
+<path d="M44.8656 100.912L56.803 96.9295L55.4921 92.9998C41.4858 98.96 29.8032 94.7915 25.7126 91.9623C28.2555 99.5852 36.4966 103.703 44.1195 101.16L44.8656 100.912Z" fill="#383838"/>
+<path d="M56.803 96.9295L44.8656 100.912L66.6339 126.4L81.5556 121.422L62.123 97.9645L56.803 96.9295Z" fill="#F4EFEA"/>
+<path d="M47.5943 69.3243L34.9108 73.5553C27.2879 76.0983 23.1697 84.3393 25.7126 91.9623M47.5943 69.3243L77.289 37.829M47.5943 69.3243L55.4921 92.9998M56.803 96.9295L44.8656 100.912M56.803 96.9295L62.123 97.9645M56.803 96.9295L55.4921 92.9998M80.6652 34.2481C86.2609 32.3814 99.3445 38.0491 107.906 63.7145C116.468 89.3798 110.278 104.379 104.683 106.245M80.6652 34.2481L77.289 37.829M80.6652 34.2481C79.604 34.9496 78.4069 36.1311 77.289 37.829M104.683 106.245L102.548 105.83M104.683 106.245C104.056 106.188 103.339 106.054 102.548 105.83M76.9436 74.0432C70.6464 55.1659 73.5168 43.5582 77.289 37.829M76.9436 74.0432C75.8208 70.6774 74.9895 67.5427 74.4027 64.6312M76.9436 74.0432C78.3998 78.4083 80.033 82.2237 81.7671 85.5495M76.9436 74.0432C79.8319 82.7015 83.4172 89.1969 87.1035 93.9998M74.4027 64.6312C78.0089 63.8428 86.0774 63.8993 88.2676 70.4649C91.0053 78.6718 85.8706 84.1807 81.7671 85.5495M74.4027 64.6312C71.6986 51.2135 74.1894 42.5367 77.289 37.829M81.7671 85.5495C83.4726 88.8207 85.2757 91.6183 87.1035 93.9998M44.8656 100.912L44.1195 101.16C36.4966 103.703 28.2555 99.5852 25.7126 91.9623M44.8656 100.912L66.6339 126.4L81.5556 121.422L62.123 97.9645M62.123 97.9645L102.548 105.83M102.548 105.83C98.5694 104.705 92.7192 101.316 87.1035 93.9998M55.4921 92.9998L87.1035 93.9998M55.4921 92.9998C41.4858 98.96 29.8032 94.7915 25.7126 91.9623" stroke="#383838" stroke-width="2"/>
+<path d="M30.9885 21.8461C31.6367 20.9001 32.9609 20.6621 33.898 21.3232L39.2312 25.086C40.1105 25.7064 40.3239 26.8942 39.7156 27.7819L36.026 33.1659C35.3778 34.1119 34.0535 34.3499 33.1165 33.6888L27.7833 29.926C26.904 29.3056 26.6905 28.1178 27.2989 27.2301L30.9885 21.8461Z" fill="#F4EFEA" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M109.431 44.5606L122.317 32.2439" stroke="#383838" stroke-width="2"/>
+<path d="M119.665 80.5282L137.397 82.3525" stroke="#383838" stroke-width="2"/>
+<path d="M120.542 61.4913L144.001 55.2581" stroke="#383838" stroke-width="2"/>
+<path d="M22.3643 132.365C24.0611 132.135 25.6928 132.592 26.9564 133.516C27.9087 132.292 29.3477 131.419 31.0444 131.189C34.422 130.731 37.5419 132.995 38.013 136.245C38.1917 137.477 37.9637 138.675 37.4276 139.711C38.2378 140.565 38.7974 141.656 38.9761 142.889C39.4472 146.139 37.0911 149.144 33.7135 149.602C32.0168 149.832 30.385 149.375 29.1214 148.451C28.1691 149.675 26.7301 150.548 25.0334 150.778C21.6558 151.235 18.5359 148.972 18.0648 145.722C17.8861 144.489 18.1141 143.292 18.6502 142.255C17.84 141.401 17.2804 140.31 17.1017 139.078C16.6306 135.828 18.9867 132.822 22.3643 132.365Z" fill="#F4EFEA" stroke="#383838" stroke-width="2"/>
+<path d="M138.303 122.711C137.911 124.349 136.037 125.131 134.597 124.257L128.433 120.518C126.694 119.464 126.888 116.882 128.764 116.099L136.608 112.826C138.484 112.043 140.455 113.722 139.982 115.699L138.303 122.711Z" fill="#F4EFEA" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+
+</g>
+<text x="1278" y="764" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">SLACK</text>
+<text x="1278" y="790" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Webhook URL in the Flights secret</text>
+<text x="1278" y="810" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">named slack. One message per run:</text>
+<text x="1278" y="830" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">firing, resolved, renotify.</text>
+<rect x="1252" y="198" width="290" height="390" rx="14" fill="#383838"/>
+<rect x="1260" y="190" width="290" height="390" rx="14" fill="#FFFFFF" stroke="#383838" stroke-width="2"/>
+<rect x="1278" y="208" width="197" height="24" rx="999" fill="#6FC2FF" stroke="#383838" stroke-width="2"/>
+<text x="1376.5" y="224" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">DIVE · DIVE/DIVE.TSX</text>
+<g fill="none" transform="translate(1458 198) scale(0.475)">
+<rect x="24" y="50" width="102" height="79" rx="6" fill="#383838"/>
+<rect x="24" y="50" width="102" height="79" rx="6" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Visual_Insights_at_a_Glance_clip0_20298_28386)">
+<rect x="31.957" y="45" width="98.8642" height="77" rx="6.65432" fill="#F4EFEA"/>
+<rect x="22.4506" y="45.9506" width="114.074" height="14.2593" fill="#F4EFEA"/>
+<rect x="22.4506" y="45.9506" width="114.074" height="14.2593" stroke="#383838" stroke-width="1.90123"/>
+<circle cx="41.4637" cy="53.5555" r="1.90123" fill="#383838"/>
+<circle cx="49.0672" cy="53.5555" r="1.90123" fill="#383838"/>
+<circle cx="56.6727" cy="53.5555" r="1.90123" fill="#383838"/>
+<rect x="115.612" y="74.4692" width="26.6173" height="19.0123" rx="0.950617" transform="rotate(90 115.612 74.4692)" fill="#F4EFEA" stroke="#383838" stroke-width="1.90123"/>
+<rect x="90.8951" y="80.1733" width="20.9136" height="19.0123" rx="0.950617" transform="rotate(90 90.8951 80.1733)" fill="white" stroke="#383838" stroke-width="1.90123"/>
+<rect x="66.1783" y="69.7162" width="31.3704" height="19.0123" rx="0.950617" transform="rotate(90 66.1783 69.7162)" fill="#F4EFEA" stroke="#383838" stroke-width="1.90123"/>
+</g>
+<rect x="32.9076" y="45.9506" width="96.963" height="75.0988" rx="5.7037" stroke="#383838" stroke-width="1.90123"/>
+<path d="M141.278 143.061C141.671 142.662 142.329 142.662 142.722 143.061L144.961 145.331C145.33 145.705 145.33 146.295 144.961 146.669L142.722 148.939C142.329 149.338 141.671 149.338 141.278 148.939L139.039 146.669C138.67 146.295 138.67 145.705 139.039 145.331L141.278 143.061Z" fill="white" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M48 121.344C48 125.147 38.598 128.229 27 128.229C15.402 128.229 6 125.147 6 121.344C6 117.542 15.402 114.459 27 114.459C38.598 114.459 48 117.542 48 121.344Z" fill="#FFDE00"/>
+<path d="M48 121.344C48 125.147 38.598 128.229 27 128.229C15.402 128.229 6 125.147 6 121.344V135.115C6 138.917 15.402 142 27 142C38.598 142 48 138.917 48 135.115V121.344Z" fill="#FFDE00"/>
+<path d="M48 121.344C48 125.147 38.598 128.229 27 128.229C15.402 128.229 6 125.147 6 121.344M48 121.344C48 117.542 38.598 114.459 27 114.459C15.402 114.459 6 117.542 6 121.344M48 121.344V135.115C48 138.917 38.598 142 27 142C15.402 142 6 138.917 6 135.115V121.344" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M48 107.057C48 110.955 38.598 114.115 27 114.115C15.402 114.115 6 110.955 6 107.057C6 103.16 15.402 100 27 100C38.598 100 48 103.16 48 107.057Z" fill="#FFDE00"/>
+<path d="M48 107.057C48 110.955 38.598 114.115 27 114.115C15.402 114.115 6 110.955 6 107.057V121.172C6 125.07 15.402 128.23 27 128.23C38.598 128.23 48 125.07 48 121.172V107.057Z" fill="#FFDE00"/>
+<path d="M48 107.057C48 110.955 38.598 114.115 27 114.115C15.402 114.115 6 110.955 6 107.057M48 107.057C48 103.16 38.598 100 27 100C15.402 100 6 103.16 6 107.057M48 107.057V121.172C48 125.07 38.598 128.23 27 128.23C15.402 128.23 6 125.07 6 121.172V107.057" stroke="#383838" stroke-width="2" stroke-miterlimit="10"/>
+<path d="M21.2516 15.4677C22.5069 16.0597 23.4056 17.1011 23.8422 18.3044C25.045 17.8742 26.4182 17.9042 27.6735 18.4962C30.1723 19.6746 31.2581 22.6337 30.0986 25.1055C29.6588 26.0429 28.9593 26.7756 28.124 27.2597C28.2847 28.2136 28.1679 29.2211 27.7282 30.1585C26.5687 32.6303 23.603 33.6788 21.1042 32.5004C19.8488 31.9084 18.9501 30.867 18.5136 29.6637C17.3108 30.0939 15.9376 30.0639 14.6823 29.4719C12.1834 28.2935 11.0977 25.3344 12.2572 22.8626C12.6969 21.9252 13.3965 21.1925 14.2318 20.7083C14.071 19.7545 14.1878 18.747 14.6276 17.8096C15.7871 15.3378 18.7528 14.2893 21.2516 15.4677Z" fill="#F4EFEA" stroke="#383838" stroke-width="2"/>
+<g clip-path="url(#Visual_Insights_at_a_Glance_clip1_20298_28386)">
+<rect x="114" y="35.2305" width="41" height="31.5385" rx="5.51923" fill="white"/>
+<line x1="120.703" y1="35.208" x2="120.703" y2="72.5869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="155" y1="40.6683" x2="114" y2="40.6683" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="141.99" y1="35.208" x2="141.99" y2="72.5869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="155" y1="61.6947" x2="114" y2="61.6947" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="127.798" y1="35.208" x2="127.798" y2="72.5869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="155" y1="47.6771" x2="114" y2="47.6771" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="149.087" y1="35.208" x2="149.087" y2="72.5869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="134.894" y1="35.208" x2="134.894" y2="72.5869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<line x1="155" y1="54.6869" x2="114" y2="54.6869" stroke="#E0E0E0" stroke-width="1.57692"/>
+<path d="M119.588 54.3176L113.305 60.5432C113.006 60.8393 112.838 61.2426 112.838 61.6634V66.9116C112.838 67.7825 113.544 68.4885 114.415 68.4885H154.878C155.749 68.4885 156.455 67.7825 156.455 66.9116V44.1729C156.455 42.7715 154.764 42.0664 153.768 43.0527L142.615 54.1034C142 54.7124 141.01 54.7124 140.395 54.1034L135.833 49.5837C135.219 48.9747 134.228 48.9748 133.614 49.5837L126.432 56.6994C125.817 57.3084 124.827 57.3084 124.212 56.6994L121.808 54.3176C121.193 53.7086 120.203 53.7086 119.588 54.3176Z" fill="#FFDE00" stroke="#383838" stroke-width="1.57692"/>
+</g>
+<rect x="114.788" y="36.0189" width="39.4231" height="29.9615" rx="4.73077" stroke="#383838" stroke-width="1.57692"/>
+<path d="M133.5 111.23L138.419 111.23C143.384 111.23 147.419 107.224 147.456 102.259L147.708 68.3098" stroke="#383838" stroke-width="2.245" stroke-miterlimit="3.99933" stroke-dasharray="2.41 2.41"/>
+<circle cx="1.96727" cy="1.96727" r="1.96727" transform="matrix(0.999543 0.0302129 0.0302129 -0.999543 131.645 113.208)" fill="#383838"/>
+<defs>
+<clipPath id="Visual_Insights_at_a_Glance_clip0_20298_28386">
+<rect x="31.957" y="45" width="98.8642" height="77" rx="6.65432" fill="white"/>
+</clipPath>
+<clipPath id="Visual_Insights_at_a_Glance_clip1_20298_28386">
+<rect x="114" y="35.2305" width="41" height="31.5385" rx="5.51923" fill="white"/>
+</clipPath>
+</defs>
+
+</g>
+<text x="1278" y="294" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="19" font-weight="700" fill="#383838" text-anchor="start" letter-spacing="0.5">OBSERVABILITY DIVE</text>
+<text x="1278" y="320" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Eleven tabs mirroring the Datadog</text>
+<text x="1278" y="340" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">dashboard: queries, errors, users,</text>
+<text x="1278" y="360" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">storage, Flights, Dives, alerts.</text>
+<text x="1278" y="380" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">filters: time, user, client,</text>
+<text x="1278" y="398" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">instance, type, status, error,</text>
+<text x="1278" y="416" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">version, search, query id</text>
+<text x="1278" y="434" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="12" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">URL state: #state=&lt;base64url JSON&gt;</text>
+<rect x="1278" y="540" width="247" height="24" rx="999" fill="#16AA98" stroke="#383838" stroke-width="2"/>
+<text x="1401.5" y="556" font-family="'Aeonik Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="10.5" font-weight="700" fill="#383838" text-anchor="middle" letter-spacing="0.8">READ BY EVERYONE IN THE ORG</text>
+<path d="M 380 435 L 452 435" fill="none" stroke="#383838" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="386.4" y="414.0" width="59.2" height="20" rx="2" fill="#F4EFEA" stroke="#383838" stroke-width="1.5"/>
+<text x="416.0" y="428.0" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="middle" letter-spacing="0">SELECT</text>
+<path d="M 780 400 L 852 400" fill="none" stroke="#383838" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="786.4" y="379.0" width="59.2" height="20" rx="2" fill="#F4EFEA" stroke="#383838" stroke-width="1.5"/>
+<text x="816.0" y="393.0" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="middle" letter-spacing="0">INSERT</text>
+<path d="M 1010 586 L 1010 652" fill="none" stroke="#383838" stroke-width="2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="1024" y="612" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">SELECT the metrics</text>
+<text x="1024" y="630" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">INSERT alert_state, alert_events</text>
+<path d="M 1160 760 L 1252 760" fill="none" stroke="#383838" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="1183.6" y="739.0" width="44.8" height="20" rx="2" fill="#F4EFEA" stroke="#383838" stroke-width="1.5"/>
+<text x="1206.0" y="753.0" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="middle" letter-spacing="0">POST</text>
+<path d="M 1160 385 L 1252 385" fill="none" stroke="#383838" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="1165.6" y="362.0" width="80.8" height="20" rx="2" fill="#F4EFEA" stroke="#383838" stroke-width="1.5"/>
+<text x="1206.0" y="376.0" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="middle" letter-spacing="0">via share</text>
+<path d="M 1500 652 L 1500 586" fill="none" stroke="#383838" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#arrow)"/>
+<text x="1488" y="612" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="end" letter-spacing="0">deep links per alert and</text>
+<text x="1488" y="630" font-family="'JetBrains Mono', 'Cousine', ui-monospace, Menlo, monospace" font-size="11.5" font-weight="400" fill="#383838" text-anchor="end" letter-spacing="0">per query (tab, window, id)</text>
+<line x1="60" y1="905" x2="1540" y2="905" stroke="#D6CDBE" stroke-width="2"/>
+<text x="60" y="934" font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12.5" font-weight="400" fill="#383838" text-anchor="start" letter-spacing="0">Deploy with setup_service_account.py, deploy_flight.py and deploy_dive.py. Settings live in Flight config and the slack secret; no credentials in source.</text>
+<g fill="none" transform="translate(1490 912) scale(0.32)">
+<path d="M4.29998 86.3001C4.29998 86.3001 52 120.4 54.9 122.1C57.7 123.8 61.8 124.2 65.4 122.8C69 121.4 71.7 118.2 72.5 115C73.4 111.8 84.3 54.2001 84.3 54.2001C84.4 53.4001 84.7 51.1001 83.5 48.9001C81.8 45.9001 78 44.3001 74.6 45.3001C71.9 46.1001 70.5 48.1001 70.1 48.8001C69.5 49.9001 68.4 51.7001 66.4 53.3001C64.9 54.5001 63.4 55.2001 62.7 55.5001C56.6 58.0001 49.8 55.9001 45.9 50.9001C43.5 47.8001 39.2 46.6001 35.4 48.1001C31.6 49.6001 29.4 53.5001 29.7 57.4001C30.4 63.6001 26.9 69.8001 20.7 72.3001C17.4 73.6001 13.9 73.6001 10.8 72.6001C10.1 72.4001 7.59998 71.8001 5.09998 73.2001C1.99998 74.8001 0.399981 78.6001 1.19998 82.0001C1.79998 84.3001 3.59998 85.8001 4.29998 86.3001Z" fill="#FF9538"/>
+<path d="M83.7999 11.6002C83.7999 11.6002 100.8 67.8002 102 70.8002C103.2 73.9002 106.2 76.7002 109.9 77.8002C113.6 78.9002 117.7 78.0002 120.3 76.0002C122.9 74.0002 166.8 35.1002 166.8 35.1002C167.4 34.6002 169 32.9002 169.4 30.4002C169.9 27.0002 167.8 23.4002 164.6 22.1002C162 21.1002 159.6 21.8002 158.9 22.1002C157.8 22.6002 155.8 23.3002 153.3 23.4002C151.3 23.5002 149.8 23.1002 149 22.9002C142.7 21.1002 138.5 15.3002 138.5 9.00024C138.4 5.10024 135.8 1.50024 131.9 0.400236C127.9 -0.699764 123.8 1.00024 121.7 4.30024C118.4 9.70024 111.9 12.4002 105.5 10.6002C102.1 9.60024 99.2999 7.50024 97.4999 4.80024C96.9999 4.20024 95.3999 2.20024 92.5999 1.70024C89.1999 1.10024 85.4999 3.10024 84.0999 6.20024C82.9999 8.60024 83.5999 10.8002 83.7999 11.6002Z" fill="#FF9538"/>
+
+</g>
+</svg>

@@ -1,0 +1,6 @@
+{
+  "title": "MotherDuck Observability",
+  "description": "Query throughput, latency, errors, users, ducklings, Dives, Guides, storage, Flights, inventory, alert status and collector health for a MotherDuck organization, read from the tables the md-observability-collector Flight writes every five minutes. Mirrors the Datadog dashboard of the motherduck-datadog recipe.",
+  "source": "dive.tsx",
+  "alias": "md_observability"
+}
