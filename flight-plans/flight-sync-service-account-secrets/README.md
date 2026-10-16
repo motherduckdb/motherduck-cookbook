@@ -22,8 +22,9 @@ published_date: 2026-10-16
 # Sync Secrets to Service Accounts
 
 MotherDuck secrets belong to the account that created them, so a service
-account can't use an admin's S3 secret. This Flight runs as an admin and writes
-the same secrets into every service account. It needs only the admin token.
+account can't use an admin's S3 secret, even to read a shared DuckLake or view
+on that bucket. This Flight runs as an admin and writes the same secrets into
+every service account. It needs only the admin token.
 
 ## How it works
 
@@ -40,6 +41,8 @@ secrets: each parameter is a `CREATE SECRET` option.
 ## Caveats
 
 - Human users are not covered: admins can only mint tokens for service accounts.
+- Sync long-lived keys. A session token expires, and every copy stops working
+  with it.
 - Every run replaces every secret. Removing a name from `SECRETS` does not drop
   the secret from the service accounts.
 - Parameters arrive as `<secret name>_<KEY>`, so one secret name can't be a
@@ -73,7 +76,7 @@ CREATE SECRET shared_s3 IN MOTHERDUCK (
 
 As an admin, call `MD_CREATE_FLIGHT` with the contents of
 [`flight.py`](flight.py) and [`requirements.txt`](requirements.txt),
-`flight_secret_names := ['shared_s3']`, `config := {'SECRETS': 'shared_s3'}`
+`flight_secret_names := ['shared_s3']`, `config := MAP {'SECRETS': 'shared_s3'}`
 and `schedule_cron := '0 * * * *'`. The run logs list each service account it
 synced.
 
