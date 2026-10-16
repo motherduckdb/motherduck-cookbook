@@ -83,6 +83,7 @@ injects it as `MOTHERDUCK_TOKEN`.
 - [flight-commoncrawl-web-graph](flight-plans/flight-commoncrawl-web-graph) - Build a fixed Common Crawl host-rank time series and verify each release against its domain-rank counts.
 - [flight-dlt-ingest](flight-plans/flight-dlt-ingest) - Run a dlt pipeline into MotherDuck on a schedule, with Parquet loader files and schema evolution.
 - [flight-provision-user-databases](flight-plans/flight-provision-user-databases) - Admin Flight that provisions a per-user database and restricted share from a users control table, and revokes access for inactive users (`features: shares`).
+- [flight-sync-service-account-secrets](flight-plans/flight-sync-service-account-secrets) - Admin Flight that copies DuckDB secrets such as S3 credentials into every service account on a schedule (`features: admin_api`).
 
 ## Anatomy of an example
 
