@@ -70,6 +70,25 @@ def test_guard_refuses_to_replace_a_non_assessment(flight, fake_motherduck):
         flight["guard_existing_database"]("prod_db", True)
 
 
+def test_guard_matches_database_names_case_insensitively(flight, fake_motherduck, capsys):
+    with pytest.raises(RuntimeError, match="not an earlier assessment"):
+        flight["guard_existing_database"]("PROD_DB", True)
+    flight["guard_existing_database"]("Old_Assessment", True)
+    assert "replacing earlier assessment" in capsys.readouterr().out
+
+
+def test_explicit_target_db_is_checked_before_the_scan(flight, fake_motherduck, clean_env):
+    clean_env.setenv("TARGET_DB", "prod_db")
+    collected = []
+    flight_globals = flight["main"].__globals__
+    clean_env.setitem(flight_globals, "resolve_snowflake_credentials", lambda _: None)
+    clean_env.setitem(flight_globals, "collect", lambda *args: collected.append(args))
+
+    with pytest.raises(RuntimeError, match="not an earlier assessment"):
+        flight["main"]()
+    assert not collected
+
+
 def test_namespaced_secret_wins_and_key_is_written_0600(flight, clean_env):
     clean_env.setenv("SNOWFLAKE_ACCOUNT", "myorg-myaccount")
     clean_env.setenv("SNOWFLAKE_WAREHOUSE", "XSMALL_WH")

@@ -56,7 +56,9 @@ text. This Flight doesn't copy table data; to do that, see
    Snowflake account name without the organization prefix. If that database
    already exists, the Flight replaces it only when it holds an earlier
    assessment (it has a `meta.collections` table), so a mistyped `TARGET_DB`
-   can't drop an unrelated database.
+   can't drop an unrelated database. When `TARGET_DB` is set, this check runs
+   before the collect step, so a conflict fails the run right away instead of
+   after the full scan.
 3. **Publish.** Run `md-assess publish`. It builds a redacted version of the
    database, which leaves out the SQL definitions of views, functions, and
    procedures and contains no query text. It uploads that with

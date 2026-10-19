@@ -53,6 +53,11 @@ def main() -> None:
 
     resolve_snowflake_credentials(env("SECRET_NAME", "snowflake_creds"))
 
+    # Check an explicit TARGET_DB before the scan, so a conflict fails in
+    # seconds instead of after the whole collection has run.
+    if target_db:
+        guard_existing_database(target_db, replace)
+
     # The full collection (which, unlike the redacted database, keeps view and
     # procedure definitions) only ever exists on this run's temporary disk and
     # is deleted when the run ends. Only the redacted database that
@@ -62,8 +67,11 @@ def main() -> None:
         collection = workdir / "assessment.duckdb"
         collect(collection, profile, history_days, scope)
 
-        database = target_db or database_name_for(collection_deployment(collection))
-        guard_existing_database(database, replace)
+        if target_db:
+            database = target_db
+        else:
+            database = database_name_for(collection_deployment(collection))
+            guard_existing_database(database, replace)
         publish(collection, database, dive_title, replace)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -101,10 +109,12 @@ def guard_existing_database(database: str, replace: bool) -> None:
     # REPLACE drops and re-uploads the target database, which is what a re-run
     # wants for a database this Flight created. Refuse to drop anything that is
     # not an earlier assessment, so a typo in TARGET_DB cannot destroy real data.
+    # Database names are case-insensitive in DuckDB, so compare them lowercased.
     con = duckdb.connect("md:")
     try:
         exists = con.execute(
-            "SELECT count(*) FROM duckdb_databases() WHERE database_name = ?", [database]
+            "SELECT count(*) FROM duckdb_databases() WHERE lower(database_name) = lower(?)",
+            [database],
         ).fetchone()[0]
         if not exists:
             return
@@ -115,7 +125,8 @@ def guard_existing_database(database: str, replace: bool) -> None:
             )
         is_assessment = con.execute(
             "SELECT count(*) FROM duckdb_tables() "
-            "WHERE database_name = ? AND schema_name = 'meta' AND table_name = 'collections'",
+            "WHERE lower(database_name) = lower(?) "
+            "AND schema_name = 'meta' AND table_name = 'collections'",
             [database],
         ).fetchone()[0]
         if not is_assessment:
