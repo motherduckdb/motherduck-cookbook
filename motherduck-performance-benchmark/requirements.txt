@@ -1,0 +1,2 @@
+psycopg2-binary==2.9.13
+certifi==2026.7.22
