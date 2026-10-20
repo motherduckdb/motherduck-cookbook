@@ -14,8 +14,10 @@ export const REQUIRED_DATABASES = [
 ];
 
 const T = '"md_observability"."main"';
-// The Query log tab reads MotherDuck's live query history (org-wide for every
-// member) with the same filters, for exact percentiles and error messages.
+// The Query log tab reads MotherDuck's live query history with the same
+// filters, for exact percentiles and error messages. It runs as the viewer,
+// who needs the "view query history" permission (Admin and Builder preset
+// roles); Explorers get a note instead of a failed query.
 const QH = "md_information_schema.query_history";
 
 // ---- Time scope: a preset range or a custom UTC window ---------------------------
@@ -574,8 +576,20 @@ function Users({ s, f }: P) {
 
 function QueryLog({ s, f }: P) {
   const [sort, setSort] = useDiveState<"newest" | "slowest" | "spilled" | "waited">("logsort", "newest");
+  const access = useSQLQuery(`SELECT 1 FROM ${QH} LIMIT 1`);
   const w = andWhere(within(s, "end_time"), liveWhere(f));
   const order = { newest: "end_time DESC", slowest: "total_elapsed_time DESC", spilled: "bytes_spilled_to_disk DESC NULLS LAST", waited: "wait_time DESC" }[sort];
+  if (access.isLoading) return <div className="animate-pulse rounded bg-gray-200" style={{ height: 120 }} />;
+  if (access.isError) {
+    return (
+      <p className="text-xs" role="alert" style={{ color: MUTED }}>
+        The Query log reads <code>md_information_schema.query_history</code> live as you, which needs the &quot;view query history&quot;
+        permission (the Admin and Builder preset roles). Every other tab reads the collected tables through the share.
+        <br />
+        <span style={{ color: "#bc1200" }}>{String(access.error)}</span>
+      </p>
+    );
+  }
   return (
     <>
       <p className="text-xs mb-3" style={{ color: MUTED }}>

@@ -42,6 +42,13 @@ Both Flights, the database, its share and the Dive are owned by one service
 account, so nothing depends on a person's credentials; the only external
 credential is a Slack webhook stored as a Flights secret.
 
+It needs a **Business or Enterprise plan**: `md_information_schema.query_history`
+and `recent_queries`, which almost every collector reads, are Business-plan
+views, and scheduled (cron) Flights are not available on Lite without a card
+on file. The service account that runs it needs the **Builder** preset role
+at least (query history) or **Admin** (adds storage metrics and org-wide
+Flight counts); see [Security](#security).
+
 ![The observability Dive](assets/dive.png)
 
 ## How it works
@@ -161,7 +168,10 @@ created on the first run.
 - The **Query log** tab is the diagnostic view: it reads MotherDuck's live
   `query_history` with the same filters, so it shows exact percentiles for the
   filtered set, error messages grouped by type, and the 50 most recent,
-  slowest, most spilled or longest-queued queries with their text.
+  slowest, most spilled or longest-queued queries with their text. It runs as
+  the person viewing the Dive, so it needs the "view query history" permission
+  (Admin and Builder preset roles); Explorers see a note instead. Every other
+  tab reads the share and works for anyone the share is granted to.
 - Tab, scope and filters travel with the Dive's URL (`#state=<base64url
   JSON>`, one key per `useDiveState` call), which is what the Slack links use.
 - [`deploy_dive.py`](deploy_dive.py) creates a share of the metrics database,
@@ -170,13 +180,15 @@ created on the first run.
 
 ## Questions to answer
 
-- Which service account owns the deployment, and does it hold the RBAC preset
-  **Admin** role? Only admins can read `storage_info`; without it the Storage
-  tab stays empty and the `storage_info` collector reports as failed.
-  `query_history` is org-wide for every user.
+- Which service account owns the deployment, and which RBAC preset role does
+  it hold? **Builder** is the minimum: `query_history` and `recent_queries`
+  need the "view query history" permission, which Explorer lacks. **Admin**
+  additionally unlocks `storage_info`; without it the Storage tab stays empty
+  and the `storage_info` collector reports as failed.
 - Where should the tables live (`TARGET_DATABASE`), and who may read them? The
   deploy script grants the share to the `explorer` role (everyone); pass
-  `--grant <role>` to narrow it.
+  `--grant <role>` to narrow it. The Dive's Query log tab is the exception: it
+  reads live `query_history` as the viewer, so only Builders and Admins see it.
 - How much history should the first run backfill (`BACKFILL_HOURS`) and how
   long should rows be kept (`RETENTION_DAYS`)? Per-minute tables for a busy org
   grow by roughly 5,000 rows an hour, most of them in `query_detail_minutes`.
@@ -193,8 +205,10 @@ created on the first run.
 
 ## Caveats
 
-- **`storage_info` needs the RBAC preset `Admin` role.** Other identities get
-  `User not authorized`; the collector is skipped, not fatal, and the
+- **`query_history` and `recent_queries` need Builder; `storage_info` needs
+  Admin.** An Explorer-only service account gets `User not authorized` from
+  every query collector, so the deployment is useless; a Builder gets it only
+  from `storage_info`, where the collector is skipped, not fatal, and the
   `collector_failing` rule says so. A newly granted role took a few minutes to
   apply to Flight runs in testing. `md_access_tokens()` and
   `MD_LIST_FLIGHTS()` only see the service account's own tokens and Flights
@@ -206,7 +220,7 @@ created on the first run.
   raise its thresholds or window if it is noisy.
 - **"Users" means active users.** MotherDuck has no SQL view or REST endpoint
   that lists an organization's members, so `users_24h/7d/30d` count distinct
-  `user_name`s in `query_history`. A member who never queries is invisible;
+  `user_name`s in `query_history`. A user who never queries is invisible;
   service accounts count like people.
 - **Timezones.** The Flight runtime has no timezone configured, so both
   Flights pin `SET TimeZone = 'UTC'` before reading any `TIMESTAMPTZ` column;
@@ -279,8 +293,9 @@ alert rules, which are the `CHECKS` list at the top of `alerts.py`.
 
 ## Run it
 
-Prerequisites: a MotherDuck organization where you can create a service
-account, and a Slack workspace where you can create an Incoming Webhook.
+Prerequisites: a MotherDuck organization on a Business or Enterprise plan
+where you can create a service account and assign it a role (the Admin preset
+role), and a Slack workspace where you can create an Incoming Webhook.
 [`uv`](https://docs.astral.sh/uv/) runs the scripts with pinned dependencies.
 
 ### 1. Create the service account
@@ -298,7 +313,10 @@ uv run --with-requirements requirements.txt setup_service_account.py
 
 By default the account is `md_observability_svc` with the **Admin** role,
 which storage metrics and org-wide Flight counts need; pass `--role builder`
-(or `''`) for a narrower account that skips those. The same steps in the UI:
+for a narrower account that skips those. Builder is the minimum: a new
+service account is an Explorer, and Explorers cannot read `query_history` or
+`recent_queries`, so the script refuses to skip the grant unless you pass
+`--role none` and arrange the role yourself. The same steps in the UI:
 **Settings > Service accounts > Create service account**, then **Create
 token** (Read/Write), then grant the role; see
 [Service accounts](https://motherduck.com/docs/key-tasks/service-accounts-guide/).
@@ -350,7 +368,7 @@ uv run --with-requirements requirements.txt deploy_dive.py --status ready
 ```
 
 The script creates a restricted share of the metrics database, grants READ to
-the `explorer` role (every member of the organization; pass `--grant <role>`
+the `explorer` role (everyone in the organization; pass `--grant <role>`
 for a narrower audience), substitutes the share URL into `dive/dive.tsx`,
 creates the Dive (or updates it in place when a Dive with the same title
 exists) and prints its URL. Open it: the Overview tab shows the backfilled
@@ -409,9 +427,10 @@ recovery.
 ## Security
 
 - **One identity, scoped by role.** Deploy with the service account's token
-  and it owns the database, the share, both Flights and the Dive. Grant it the
-  Admin role only if you want storage metrics; everything else works as a
-  member.
+  and it owns the database, the share, both Flights and the Dive. It needs the
+  **Builder** preset role for `query_history` and `recent_queries` (the "view
+  query history" permission, which Explorer does not have) and **Admin** only
+  if you also want storage metrics and org-wide Flight counts.
 - **Secrets never touch code or config.** The webhook is read from the
   environment (`SLACK_WEBHOOK_URL` or the namespaced `slack_SLACK_WEBHOOK_URL`
   injected by the Flights secret). The MotherDuck token is injected by the
