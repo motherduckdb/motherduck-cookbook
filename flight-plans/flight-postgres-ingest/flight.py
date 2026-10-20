@@ -17,8 +17,11 @@ Inputs
 ------
 Note that inputs are case sensitive (use uppercase).
 
-Secret (TYPE flights, any name) -> Postgres connection params, named as the
-libpq env vars so the injected bare params are libpq-ready as-is:
+Secret (TYPE flights) -> Postgres connection, EITHER as one URL:
+    `DATABASE_URL` = postgres://user:password@host:5432/dbname?sslmode=require
+    (the form Render, Heroku, Neon, Supabase and most hosts hand out; a
+    `sslmode` in the query string is honoured)
+OR as params named as the libpq env vars:
     Required: `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
     Optional: `PGPORT`, `PGSSLMODE`
     Example:
@@ -34,12 +37,15 @@ libpq env vars so the injected bare params are libpq-ready as-is:
             }
         );
     (A legacy secret named `pg` with HOST/PORT/... params still works.)
-Config (non-secret env vars):
+Config (non-secret env vars; an empty value means the default):
     MOTHERDUCK_HOST  - staging host; exported as `motherduck_host` before connect.
     TARGET_DATABASE  - MotherDuck database to write into (default: postgres_ingest).
+    TARGET_SCHEMA    - rename the target schema (only with a single source schema).
     INCLUDED_SCHEMAS / EXCLUDED_SCHEMAS  - comma-separated schema names.
-    INCLUDED_TABLES  / EXCLUDED_TABLES   - comma-separated, fully qualified schema.table.
-    MAX_RETRIES (5) 
+    INCLUDED_TABLES  / EXCLUDED_TABLES   - comma-separated `schema.table` or bare `table`.
+    SECRET_NAME      - name of the flights secret, to prefer its namespaced params.
+    URL_KEY          - secret param holding the URL (default: DATABASE_URL).
+    MAX_RETRIES (5)
     RETRY_BASE_SECONDS (2)
 """
 
@@ -50,6 +56,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, unquote, urlparse
 
 import duckdb
 from tenacity import (
@@ -96,6 +103,12 @@ def quote_ident(ident: str) -> str:
     return '"' + ident.replace('"', '""') + '"'
 
 
+def env(name: str, default: str = "") -> str:
+    """Read a config value, treating unset and empty the same, so a key stored on the
+    Flight as "" (to allow per-run overrides) still means the default."""
+    return (os.environ.get(name) or "").strip() or default
+
+
 def csv_set(name: str) -> frozenset[str]:
     """Turn a comma-separated env var into a clean set for membership filtering, which
     the schema/table selection gates rely on. Pass the env var name and receive a set
@@ -124,11 +137,24 @@ def is_selected(
         return False
     if schema in excluded_schemas:
         return False
-    if included_tables and fqtn not in included_tables:
+    if included_tables and fqtn not in included_tables and table not in included_tables:
         return False
-    if fqtn in excluded_tables:
+    if fqtn in excluded_tables or table in excluded_tables:
         return False
     return True
+
+
+def unknown_includes(
+    tables: list[tuple[str, str]],
+    included_schemas: frozenset[str],
+    included_tables: frozenset[str],
+) -> list[str]:
+    """Names in INCLUDED_SCHEMAS / INCLUDED_TABLES that match no discovered base table.
+    A typo (or a view, which is never copied) should stop the run, not silently copy
+    less than intended."""
+    schemas = {s for s, _ in tables}
+    names = {f"{s}.{t}" for s, t in tables} | {t for _, t in tables}
+    return sorted(included_schemas - schemas) + sorted(included_tables - names)
 
 
 # --------------------------------------------------------------------------- #
@@ -146,18 +172,72 @@ def connect_motherduck() -> duckdb.DuckDBPyConnection:
     return duckdb.connect("md:")
 
 
+def resolve_pg_env() -> None:
+    """Put the Postgres connection into libpq env vars, so the password never appears in
+    SQL or logs.
+
+    A flights secret injects each param as `<secret>_<PARAM>` and, when no other secret
+    uses the same name, also as the bare `<PARAM>`. With SECRET_NAME set the namespaced
+    form wins; otherwise the bare form is used, then the legacy `pg_*` form. A URL in
+    `URL_KEY` (default DATABASE_URL) takes precedence over individual params."""
+    secret = env("SECRET_NAME")
+
+    def get(param: str) -> str | None:
+        return (secret and os.environ.get(f"{secret}_{param}")) or os.environ.get(param)
+
+    url = (get(env("URL_KEY", "DATABASE_URL")) or "").strip()
+    if url:
+        u = urlparse(url)
+        if u.scheme not in ("postgres", "postgresql"):
+            raise RuntimeError("The connection URL in the secret is not a postgres:// URL (value not printed)")
+        os.environ.update({
+            "PGHOST": u.hostname or "",
+            "PGPORT": str(u.port or 5432),
+            "PGDATABASE": u.path.lstrip("/"),
+            "PGUSER": unquote(u.username or ""),
+            "PGPASSWORD": unquote(u.password or ""),
+        })
+        sslmode = parse_qs(u.query).get("sslmode", [None])[0]
+        if sslmode:
+            os.environ["PGSSLMODE"] = sslmode
+
+    missing = []
+    for libpq_var, legacy_var, default, required in PG_PARAMS:
+        value = os.environ.get(libpq_var) if url else None
+        value = value or get(libpq_var) or os.environ.get(legacy_var) or default
+        if not value:
+            if required:
+                missing.append(libpq_var)
+            continue
+        os.environ[libpq_var] = str(value)
+    if missing:
+        # Name the keys that *are* there (never their values) so a mismatch is obvious.
+        found = sorted(k for k in os.environ if k.endswith(
+            ("_DATABASE_URL", "_PGHOST", "_PGUSER", "_PGPASSWORD", "_PGDATABASE", "_HOST")))
+        raise RuntimeError(
+            f"Missing Postgres connection params {missing}: set DATABASE_URL or PGHOST/"
+            f"PGDATABASE/PGUSER/PGPASSWORD in the flights secret. Secret keys found: {found}"
+        )
+    check_host(os.environ["PGHOST"])
+
+
+def check_host(host: str) -> None:
+    """Catch two common wrong-URL mistakes from managed Postgres hosts before connecting."""
+    if host.startswith("dpg-") and "." not in host:
+        raise RuntimeError(
+            "PGHOST has no domain; this looks like Render's Internal Database URL, which only "
+            "works inside Render. Store the External Database URL instead."
+        )
+    if "-pooler" in host:
+        log.warning("PGHOST is a pooled (PgBouncer) endpoint; a direct endpoint is more "
+                    "reliable for long bulk reads.")
+
+
 def attach_postgres(con: duckdb.DuckDBPyConnection) -> None:
     """Wire up the read-only Postgres source so tables can be streamed out, keeping the
     password out of SQL by passing credentials through libpq env vars.
     ATTACHes READ_ONLY as `pg`."""
-    for libpq_var, legacy_var, default, required in PG_PARAMS:
-        value = os.environ.get(libpq_var) or os.environ.get(legacy_var) or default
-        if value is None:
-            if required:
-                raise RuntimeError(f"Required Postgres secret param {libpq_var!r} is not set")
-            continue
-        os.environ[libpq_var] = str(value)
-
+    resolve_pg_env()
     con.execute("INSTALL postgres")
     con.execute("LOAD postgres")
     con.execute(f"ATTACH '' AS {PG_ALIAS} (TYPE postgres, READ_ONLY)")
@@ -204,24 +284,26 @@ def discover_base_tables(con: duckdb.DuckDBPyConnection) -> list[tuple[str, str]
     return [(r[0], r[1]) for r in rows]
 
 
-def load_table(con: duckdb.DuckDBPyConnection, target_db: str, schema: str, table: str) -> int:
+def load_table(
+    con: duckdb.DuckDBPyConnection, target_db: str, schema: str, table: str, tgt_schema: str
+) -> int:
     """Perform the entire data movement for one table as a single atomic, idempotent,
     streaming CTAS. returns the row count the CTAS reports as inserted."""
-    tgt_table = f"{quote_ident(target_db)}.{quote_ident(schema)}.{quote_ident(table)}"
+    tgt_table = f"{quote_ident(target_db)}.{quote_ident(tgt_schema)}.{quote_ident(table)}"
     src_table = f"{PG_ALIAS}.{quote_ident(schema)}.{quote_ident(table)}"
     return con.execute(f"CREATE OR REPLACE TABLE {tgt_table} AS SELECT * FROM {src_table}").fetchone()[0]
 
 
 def record_success(
     con: duckdb.DuckDBPyConnection, target_db: str, run_id: str,
-    schema: str, table: str, rows_loaded: int, attempts: int,
+    schema: str, table: str, tgt_schema: str, rows_loaded: int, attempts: int,
     started_at: datetime, finished_at: datetime, update_ts: datetime,
 ) -> None:
     """After success, append a row to the audit table"""
     con.execute(
         f"INSERT INTO {quote_ident(target_db)}.main.flight_tracker "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [run_id, os.environ.get("PGHOST", ""), schema, table, target_db, schema, table,
+        [run_id, os.environ.get("PGHOST", ""), schema, table, target_db, tgt_schema, table,
          rows_loaded, attempts, started_at, finished_at, update_ts],
     )
 
@@ -234,9 +316,10 @@ def main() -> None:
     table sequentially with per-table retries/isolation and record results."""
     # Run config, read once from the environment and referenced as needed below.
     RUN_ID = str(uuid.uuid4())
-    TARGET_DB = os.environ.get("TARGET_DATABASE", "postgres_ingest")
-    MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "5"))
-    RETRY_BASE_SECONDS = float(os.environ.get("RETRY_BASE_SECONDS", "2"))
+    TARGET_DB = env("TARGET_DATABASE", "postgres_ingest")
+    TARGET_SCHEMA = env("TARGET_SCHEMA")
+    MAX_RETRIES = max(1, int(env("MAX_RETRIES", "5")))
+    RETRY_BASE_SECONDS = float(env("RETRY_BASE_SECONDS", "2"))
     INCLUDED_SCHEMAS = csv_set("INCLUDED_SCHEMAS")
     EXCLUDED_SCHEMAS = csv_set("EXCLUDED_SCHEMAS")
     INCLUDED_TABLES = csv_set("INCLUDED_TABLES")
@@ -246,30 +329,41 @@ def main() -> None:
 
     con = connect_motherduck()
     attach_postgres(con)
-    ensure_target(con, TARGET_DB)
 
-    all_tables = discover_base_tables(con)
+    all_tables = [
+        (s, t) for (s, t) in discover_base_tables(con)
+        if is_selected(s, t, frozenset(), frozenset(), frozenset(), frozenset())
+    ]
+    unknown = unknown_includes(all_tables, INCLUDED_SCHEMAS, INCLUDED_TABLES)
+    if unknown:
+        raise RuntimeError(f"Not found among Postgres base tables (views are never copied): {unknown}")
     selected = [
         (s, t) for (s, t) in all_tables
         if is_selected(s, t, INCLUDED_SCHEMAS, EXCLUDED_SCHEMAS, INCLUDED_TABLES, EXCLUDED_TABLES)
     ]
     log.info("Discovered %d base table(s); %d selected after filters", len(all_tables), len(selected))
 
+    # A scheduled run that silently copies nothing hides a misconfiguration; fail instead.
     if not selected:
-        log.warning("No tables selected - nothing to do.")
-        return
+        raise RuntimeError("No tables to copy after applying the INCLUDED_* / EXCLUDED_* filters")
+    if TARGET_SCHEMA and len({s for (s, _) in selected}) > 1:
+        raise RuntimeError("TARGET_SCHEMA can only be used when copying a single source schema")
+
+    ensure_target(con, TARGET_DB)
 
     # Pre-create the target schemas (mirroring source schema names) once.
-    for sch in sorted({s for (s, _) in selected}):
+    for sch in sorted({TARGET_SCHEMA or s for (s, _) in selected}):
         con.execute(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(TARGET_DB)}.{quote_ident(sch)}")
 
     started_all = datetime.now(timezone.utc)
     failed: list[str] = []
+    drifted: list[str] = []
     succeeded = 0
     rows_total = 0
 
     for schema, table in selected:
         fqtn = f"{schema}.{table}"
+        tgt_schema = TARGET_SCHEMA or schema
         started = datetime.now(timezone.utc)
         retryer = Retrying(
             stop=stop_after_attempt(MAX_RETRIES),
@@ -277,14 +371,26 @@ def main() -> None:
             reraise=True,
         )
         try:
-            rows = retryer(load_table, con, TARGET_DB, schema, table)
+            rows = retryer(load_table, con, TARGET_DB, schema, table, tgt_schema)
             attempts = retryer.statistics.get("attempt_number", 1)
             finished = datetime.now(timezone.utc)
-            record_success(con, TARGET_DB, RUN_ID, schema, table, rows,
+            record_success(con, TARGET_DB, RUN_ID, schema, table, tgt_schema, rows,
                            attempts, started, finished, datetime.now(timezone.utc))
             succeeded += 1
             rows_total += rows
             log.info("OK   %-50s %12d rows (attempts=%d)", fqtn, rows, attempts)
+            # Recount in Postgres: a live source can change mid-copy. Warn, don't fail.
+            try:
+                src_rows = con.execute(
+                    f"SELECT count(*) FROM {PG_ALIAS}.{quote_ident(schema)}.{quote_ident(table)}"
+                ).fetchone()[0]
+            except Exception as exc:  # noqa: BLE001 - the copy itself succeeded
+                log.warning("     could not recount %s in Postgres: %s", fqtn, exc)
+                src_rows = rows
+            if src_rows != rows:
+                drifted.append(fqtn)
+                log.warning("     %s now has %d rows in Postgres (changed during the copy?)",
+                            fqtn, src_rows)
         except Exception as exc:  # noqa: BLE001 - per-table isolation is intentional
             attempts = retryer.statistics.get("attempt_number", 1)
             failed.append(fqtn)
@@ -294,6 +400,8 @@ def main() -> None:
     log.info("Summary: %d succeeded, %d failed, %d rows in %.1fs (run %s)",
              succeeded, len(failed), rows_total, total_seconds, RUN_ID)
 
+    if drifted:
+        log.warning("Row-count drift (re-run when the source is quiet): %s", ", ".join(drifted))
     if failed:
         log.error("Failed tables: %s", ", ".join(failed))
         sys.exit(1)

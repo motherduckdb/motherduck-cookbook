@@ -43,14 +43,14 @@ and use a different Flight template or modify this one heavily.
 `flight.py` runs a fixed sequence:
 
 1. **Connect.** Set `motherduck_host` if `MOTHERDUCK_HOST` given, `duckdb.connect("md:")`.
-2. **Attach Postgres read-only.** Export `pg_*` to libpq env vars, `INSTALL`/`LOAD postgres`, `ATTACH '' AS pg (TYPE postgres, READ_ONLY)`. `READ_ONLY` lets the extension parallelize reads; the empty connection string keeps the password in env, never in SQL.
-3. **Ensure target.** `CREATE DATABASE IF NOT EXISTS` plus creating the `main.flight_tracker` audit table.
-4. **Discover base tables** List base tables (`information_schema.tables WHERE table_type = 'BASE TABLE'` via `postgres_query`), keep those passing the gates.
-5. **Load each table.** Pre-create schemas, then per table run `CREATE OR REPLACE ... AS SELECT *` under a tenacity retry (jittered exponential backoff, transient errors). Log a `flight_tracker` row on success; on failure after retries, log and continue (per-table isolation). Exit non-zero if anything failed.
+2. **Attach Postgres read-only.** Read the connection from the secret (a `DATABASE_URL`, or `PG*` params; an `sslmode` in the URL is honoured), catch two common wrong-URL mistakes (a Render Internal URL fails fast; a `-pooler` host logs a warning), export it to libpq env vars, `INSTALL`/`LOAD postgres`, `ATTACH '' AS pg (TYPE postgres, READ_ONLY)`. `READ_ONLY` lets the extension parallelize reads; the empty connection string keeps the password in env, never in SQL.
+3. **Discover base tables** List base tables (`information_schema.tables WHERE table_type = 'BASE TABLE'` via `postgres_query`), keep those passing the gates. A name in `INCLUDED_SCHEMAS`/`INCLUDED_TABLES` that matches no base table stops the run before anything is copied, and so does a filter set that selects nothing.
+4. **Ensure target.** `CREATE DATABASE IF NOT EXISTS` plus creating the `main.flight_tracker` audit table.
+5. **Load each table.** Pre-create schemas, then per table run `CREATE OR REPLACE ... AS SELECT *` under a tenacity retry (jittered exponential backoff, transient errors). Log a `flight_tracker` row on success; on failure after retries, log and continue (per-table isolation). After each copy, recount the rows in Postgres and log a warning (not a failure) if they changed during the copy. Exit non-zero if anything failed.
 
 ## Questions to answer
 
-- Postgres source: host, port, database, user, SSL mode — and which password? Enter as a MotherDuck secret.
+- Postgres source: a connection URL (`DATABASE_URL`, the form Render, Heroku, Neon and most hosts hand out) or host, port, database, user, SSL mode and password? Enter it as a MotherDuck secret, never in chat, config or code. For Render, use the **External** Database URL; for Neon, the direct (non-pooled) connection string. Provider-specific versions: [Render](../flight-render-postgres-ingest), [Heroku](../flight-heroku-postgres-ingest), [Neon](../flight-neon-postgres-ingest).
 - Which schemas/tables to mirror: everything non-system, one schema, or an explicit allow/deny list?
 - Which `TARGET_DATABASE` should receive the mirror?
 - Is a full refresh per run acceptable given table sizes? (See [Caveats](#caveats).)
@@ -92,14 +92,19 @@ information, which includes a password, so it must be in a secret.
 | Knob | Default | Purpose |
 |---|---|---|
 | `TARGET_DATABASE` | `postgres_ingest` | MotherDuck database for the mirror (created if absent). Tables land at `<target>.<schema>.<table>`, preserving source schema names. |
+| `TARGET_SCHEMA` | (source schema) | Rename the target schema. Only with a single source schema. |
 | `INCLUDED_SCHEMAS` | (all non-system) | Comma-separated source schemas to include. Empty = all. |
 | `EXCLUDED_SCHEMAS` | (none) | Comma-separated schemas to drop. Exclude wins. |
-| `INCLUDED_TABLES` | (all) | Comma-separated `schema.table` to include. Empty = all in selected schemas. |
-| `EXCLUDED_TABLES` | (none) | Comma-separated `schema.table` to drop. Exclude wins. |
+| `INCLUDED_TABLES` | (all) | Comma-separated `schema.table` or bare `table` to include. Empty = all in selected schemas. Unknown names stop the run. |
+| `EXCLUDED_TABLES` | (none) | Comma-separated `schema.table` or bare `table` to drop. Exclude wins. |
 | `MAX_RETRIES` | `5` | Per-table retry attempts on transient errors. |
 | `RETRY_BASE_SECONDS` | `2` | Exponential-backoff multiplier (seconds). |
 | `MOTHERDUCK_HOST` | (unset) | Override MotherDuck host (e.g. non-prod). Leave unset for default. |
-| `pg` **secret** | (required) | Postgres connection. `TYPE flights` secret (any name) with params `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`. |
+| `SECRET_NAME` | (unset) | The flights secret's name. When set, its namespaced params (`<name>_DATABASE_URL`, `<name>_PGHOST`, ...) win over bare ones, which matters when a Flight has several secrets. |
+| `URL_KEY` | `DATABASE_URL` | Secret param that holds the connection URL. |
+| `pg` **secret** | (required) | Postgres connection. `TYPE flights` secret (any name) with `DATABASE_URL`, or params `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`. |
+
+An empty config value means the default, so you can store every key on the Flight (as `""`) and override it per run. `MD_RUN_FLIGHT` can only override keys already stored on the Flight.
 
 Selection precedence: a table is mirrored only if its schema passes the schema
 gate **and** its `schema.table` passes the table gate; excludes are `AND NOT` at
@@ -161,6 +166,15 @@ CREATE SECRET pg IN motherduck (
     'PGPASSWORD': 'your_password',
     'PGSSLMODE': 'require'
   }
+);
+```
+
+Or, with a single connection URL (what most managed hosts show):
+
+```sql
+CREATE SECRET pg IN motherduck (
+  TYPE flights,
+  PARAMS MAP {'DATABASE_URL': 'postgresql://readonly_user:your_password@your-postgres-host:5432/your_database?sslmode=require'}
 );
 ```
 
