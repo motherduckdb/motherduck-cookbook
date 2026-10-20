@@ -49,7 +49,6 @@ except ImportError:  # pragma: no cover
     sys.exit("Missing dependencies. Run: pip install -r requirements.txt")
 
 APP_NAME = "md_bench"
-DEFAULT_HOST = "pg.us-east-1-aws.motherduck.com"
 DIVE_TITLE = "MotherDuck query benchmarking"
 DIVE_SOURCE = Path(__file__).parent / "dive" / "benchmark_dive.tsx"
 DIVE_ID_FILE = Path(__file__).parent / ".md_bench_dive_id"   # remembers the Dive this folder created
@@ -73,16 +72,55 @@ def load_env_file(path: Path = ENV_FILE) -> None:
         if key and value and key not in os.environ:
             os.environ[key] = value
 
-# $/hour per read-scaling duckling, by instance type.
-PRICE_CASE_SQL = """
-    CASE instance_type
-        WHEN 'Standard' THEN 2.40
-        WHEN 'Jumbo'    THEN 4.80
-        WHEN 'Mega'     THEN 12.00
-        WHEN 'Giga'     THEN 24.00
-        ELSE NULL
-    END
-"""
+# Pricing tier per AWS region: https://motherduck.com/docs/about-motherduck/cloud-regions/
+REGION_TIERS = {
+    "us-east-1": 1, "us-west-2": 1,
+    "eu-central-1": 2, "eu-west-1": 2,
+    "ap-northeast-1": 3, "ap-southeast-2": 3,
+}
+DEFAULT_REGION = "us-east-1"
+
+# Business plan $/hour per read scaling Duckling, by tier and instance type.
+# https://motherduck.com/docs/about-motherduck/billing/pricing/#compute-pricing
+HOURLY_RATES = {
+    1: {"Standard": 2.40, "Jumbo": 4.80, "Mega": 12.00, "Giga": 24.00},
+    2: {"Standard": 2.93, "Jumbo": 5.86, "Mega": 14.65, "Giga": 29.30},
+    3: {"Standard": 3.10, "Jumbo": 6.19, "Mega": 15.48, "Giga": 30.96},
+}
+
+
+def pg_host(region: str) -> str:
+    return f"pg.{region}-aws.motherduck.com"
+
+
+def rates_for(region: str | None) -> dict[str, float]:
+    """Hourly rates for the region; empty for a region this script doesn't know, so prices stay NULL."""
+    tier = REGION_TIERS.get(region or DEFAULT_REGION)
+    return HOURLY_RATES[tier] if tier else {}
+
+
+def price_case_sql(region: str | None, column: str) -> str:
+    rates = rates_for(region)
+    if not rates:
+        return "NULL::DOUBLE"
+    whens = " ".join(f"WHEN '{size}' THEN {rate:.2f}" for size, rate in rates.items())
+    return f"CASE {column} {whens} ELSE NULL END"
+
+
+def org_region(cur) -> str | None:
+    """The organization's AWS region, from md_user_info(). None if this client doesn't return it."""
+    try:
+        cur.execute("SELECT region FROM md_user_info()")
+        return cur.fetchone()[0]
+    except psycopg2.Error:
+        return None
+
+
+def warn_if_out_of_region(host: str, region: str | None) -> None:
+    # The endpoint accepts connections from any region's hostname, but crossing regions adds network latency.
+    if region and host != pg_host(region):
+        print(f"  ⚠ the organization is in {region}, but this run connects through {host}. "
+              f"Use --region {region} to connect through {pg_host(region)}.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -393,7 +431,9 @@ def ddl(db: str) -> list[str]:
             run_id VARCHAR, run_label VARCHAR, started_at_utc TIMESTAMP, finished_at_utc TIMESTAMP,
             database_name VARCHAR, user_name VARCHAR, host VARCHAR, rounds INTEGER,
             concurrency_levels VARCHAR, csv_file VARCHAR, query_count INTEGER,
-            session_mode VARCHAR, is_read_scaling BOOLEAN)""",
+            session_mode VARCHAR, is_read_scaling BOOLEAN, region VARCHAR)""",
+        # Results databases created before the region column existed.
+        f"ALTER TABLE {db}.main.runs ADD COLUMN IF NOT EXISTS region VARCHAR",
         f"""CREATE TABLE IF NOT EXISTS {db}.main.tests (
             run_id VARCHAR, test_name VARCHAR, concurrency INTEGER, client_wall_ms DOUBLE,
             server_first_start_utc TIMESTAMP, server_last_end_utc TIMESTAMP, e2e_ms DOUBLE,
@@ -437,7 +477,7 @@ def wait_for_history(cur, run_id, params, expected, timeout_s) -> int:
         time.sleep(15)
 
 
-def persist(cur, db, run_id, params, tests: list[TestResult]):
+def persist(cur, db, run_id, params, tests: list[TestResult], region: str | None):
     cur.execute(f"DELETE FROM {db}.main.queries WHERE run_id = %(run_id)s", {"run_id": run_id})
     cur.execute(f"DELETE FROM {db}.main.tests WHERE run_id = %(run_id)s", {"run_id": run_id})
     cur.execute(f"""
@@ -478,8 +518,8 @@ def persist(cur, db, run_id, params, tests: list[TestResult]):
             a.first_start, a.last_end,
             (epoch_us(a.last_end) - epoch_us(a.first_start)) / 1000.0 AS e2e_ms,
             a.query_count, a.error_count, a.replicas_used, a.instance_type,
-            {PRICE_CASE_SQL.replace('instance_type', 'a.instance_type')} AS hourly_rate_usd,
-            {PRICE_CASE_SQL.replace('instance_type', 'a.instance_type')}
+            {price_case_sql(region, 'a.instance_type')} AS hourly_rate_usd,
+            {price_case_sql(region, 'a.instance_type')}
                 * ((epoch_us(a.last_end) - epoch_us(a.first_start)) / 1e6 / 3600.0)
                 * a.replicas_used AS price_usd
         FROM (
@@ -500,7 +540,7 @@ def persist(cur, db, run_id, params, tests: list[TestResult]):
     """, {"run_id": run_id})
 
 
-def print_summary(cur, db, run_id):
+def print_summary(cur, db, run_id, region: str | None):
     cur.execute(f"""
         SELECT test_name, concurrency, e2e_ms, client_wall_ms, query_count, error_count,
                replicas_used, instance_type, price_usd
@@ -514,8 +554,10 @@ def print_summary(cur, db, run_id):
         print(f"{name:<18}{(e2e or 0) / 1000:>10.2f}{(wall or 0) / 1000:>12.2f}{n:>9}{errs:>8}"
               f"{reps:>10}{(inst or '-'):>11}{('%.4f' % price) if price is not None else 'n/a':>12}")
     print("─" * 90)
+    rates = ", ".join(f"{size} ${rate:.2f}" for size, rate in rates_for(region).items()) or "no rates for this region"
     print("Price = E2E hours × read-scaling ducklings used × hourly rate "
-          "(Standard $2.40, Jumbo $4.80, Mega $12.00, Giga $24.00)")
+          f"({region or DEFAULT_REGION + ' assumed'}, Business plan: {rates})")
+    print("Rates: https://motherduck.com/docs/about-motherduck/billing/pricing/#compute-pricing")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -561,6 +603,15 @@ def run_check(host: str, database: str, rs_token: str, rw_token: str) -> bool:
     except psycopg2.Error as e:
         line(False, f"read/write connection failed: {str(e).strip().splitlines()[-1]}")
         return False
+    region = org_region(cur)
+    if region is None:
+        print(f"  ? couldn't read the organization's region; prices assume {DEFAULT_REGION} rates")
+    else:
+        line(host == pg_host(region),
+             f"organization region {region} matches the endpoint" if host == pg_host(region)
+             else f"organization region is {region}; rerun with --region {region} to connect through {pg_host(region)}")
+        if region not in REGION_TIERS:
+            print(f"  ? no rates for {region} in this script; prices will show n/a")
     try:
         cur.execute("SELECT count(*) FROM md_information_schema.main.query_history "
                     "WHERE start_time >= now() - INTERVAL 1 DAY")
@@ -726,7 +777,9 @@ def main():
     p.add_argument("--user-name", help="Optional: MotherDuck user_name to narrow the query_history lookup")
     p.add_argument("--concurrency", help="Queries in flight: 1 runs the serial test, N keeps N queries running")
     p.add_argument("--rounds", type=int, default=1, help="Times the test works through the CSV (default 1)")
-    p.add_argument("--host", default=DEFAULT_HOST, help=f"PG endpoint host (default {DEFAULT_HOST})")
+    p.add_argument("--region", choices=sorted(REGION_TIERS), default=DEFAULT_REGION,
+                   help=f"Organization's AWS region; sets the Postgres endpoint host (default {DEFAULT_REGION})")
+    p.add_argument("--host", help="Postgres endpoint host; overrides --region (default pg.<region>-aws.motherduck.com)")
     p.add_argument("--session-mode", choices=["none", "csv", "per-worker"], default=None,
                    help="none (default) = let MotherDuck spread connections round robin; "
                         "csv = run each query with the session_name from the CSV (user-to-Duckling affinity); "
@@ -752,6 +805,7 @@ def main():
                    help="How --suggest-queries ranks queries (default frequency)")
     p.add_argument("--out", default="queries.csv", help="Output path for --suggest-queries (default queries.csv)")
     args = p.parse_args()
+    args.host = args.host or pg_host(args.region)
     load_env_file()
 
     if not args.results_db.replace("_", "").isalnum():
@@ -840,6 +894,7 @@ def main():
     rw_cur = rw.cursor()
     rw_cur.execute("SELECT 1 AS connected")
     print("  read scaling + read/write connections OK")
+    warn_if_out_of_region(args.host, org_region(rw_cur))
 
     started = datetime.now(timezone.utc)
     test_label = "serial" if concurrency == 1 else f"concurrency {concurrency}"
@@ -934,9 +989,10 @@ def collect_and_save(m: dict, rw_token: str, timeout_s: int) -> None:
                     f"WHERE {history_filter(run_id)}", params)
         user_name = cur.fetchone()[0]
 
+    region = org_region(cur)
     for stmt in ddl(db):
         cur.execute(stmt)
-    persist(cur, db, run_id, params, results)
+    persist(cur, db, run_id, params, results, region)
 
     cur.execute(f"""SELECT count(*) FILTER (WHERE replica_num IS NOT NULL), count(*)
                     FROM {db}.main.queries WHERE run_id = %(run_id)s""", params)
@@ -952,15 +1008,15 @@ def collect_and_save(m: dict, rw_token: str, timeout_s: int) -> None:
     cur.execute(f"""
         INSERT INTO {db}.main.runs VALUES
         (%(run_id)s, %(label)s, %(started)s, %(finished)s, %(db)s, %(user)s, %(host)s, %(rounds)s,
-         %(levels)s, %(csv)s, %(nq)s, %(mode)s, %(is_rs)s)
+         %(levels)s, %(csv)s, %(nq)s, %(mode)s, %(is_rs)s, %(region)s)
     """, {
         "run_id": run_id, "label": m["label"],
         "started": started.replace(tzinfo=None), "finished": finished.replace(tzinfo=None),
         "db": m["database"], "user": user_name, "host": m["host"], "rounds": m["rounds"],
         "levels": str(m["concurrency"]), "csv": m["csv"], "nq": m["query_count"], "mode": m["session_mode"],
-        "is_rs": is_rs,
+        "is_rs": is_rs, "region": region,
     })
-    print_summary(cur, db, run_id)
+    print_summary(cur, db, run_id, region)
     print(f"\nResults saved to {db} (run_id {run_id}).")
     rw.close()
 

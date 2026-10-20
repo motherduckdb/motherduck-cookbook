@@ -55,16 +55,20 @@ installed.
 ## Step 3: Region and database
 
 1. Find the organization's region with `SELECT region FROM md_user_info();` (through the MotherDuck MCP server if
-   it's connected, or ask the user to run it in the MotherDuck UI). If neither works, ask whether the organization is
-   in **US East** (the default) or **EU**. For EU, add `--host pg.eu-central-1-aws.motherduck.com` to every command
-   from here on.
+   it's connected, or ask the user to run it in the MotherDuck UI). If neither works, ask which region they picked
+   when they created the organization. MotherDuck runs in `us-east-1`, `us-west-2`, `eu-central-1`, `eu-west-1`,
+   `ap-northeast-1`, and `ap-southeast-2`; see https://motherduck.com/docs/about-motherduck/cloud-regions/. Unless
+   it's `us-east-1`, add `--region <region>` to every command from here on. The region sets the Postgres endpoint
+   host, `pg.<region>-aws.motherduck.com`.
 2. Run the setup check. `my_db` is a placeholder; any database they can read works for the check:
 
    ```bash
-   .venv/bin/python md_bench.py --check --database my_db
+   .venv/bin/python md_bench.py --check --database my_db --region <region>
    ```
 
-   Every line should show ✓. If not, see Troubleshooting. The output ends with the databases they can query.
+   Every line should show ✓. The check reads the region with `md_user_info()` and marks ✗ if `--region` doesn't
+   match; rerun with the region it names. If anything else fails, see Troubleshooting. The output ends with the
+   databases they can query.
 3. Ask which database the benchmark queries run against. Table names without a database prefix resolve against it.
    Pass it as `--database` from here on.
 
@@ -155,7 +159,8 @@ Run the chosen runs one at a time, in the order of the plan, in the background. 
 
 Create `runs/` first with `mkdir -p runs`. Each run ends with a summary table and `Results saved to md_benchmarks`.
 After each run, report only these values from its summary: the run (concurrency, rounds, session mode), E2E time,
-queries, errors, Ducklings used, Duckling size, and price.
+queries, errors, Ducklings used, Duckling size, and price. Prices use the Business plan rates for the organization's
+region, which the summary names. If the summary says `us-east-1 assumed`, tell the user the region couldn't be read.
 
 If the output says the run's queries aren't in `query_history` yet, run
 `.venv/bin/python md_bench.py --collect <run id>` later; the run ID is in the message. Nothing is lost, because the
@@ -207,3 +212,5 @@ explanations unless the user asks.
 | A run times out waiting for `query_history` | Run `--collect <run id>` later. |
 | Stakeholders see an empty Dive | They need access to `md_benchmarks_share`. Check its access in the MotherDuck UI. New runs reach the share automatically. |
 | A syntax error on every query | The CSV probably has literal `\n` characters. Rewrite it with real newlines. |
+| `organization region is <region>; rerun with --region <region>` | The endpoint host doesn't match the organization's region. Add `--region <region>` to every command. |
+| Price shows `n/a` with a known Duckling size | The region isn't in the script's rate table. Check https://motherduck.com/docs/about-motherduck/billing/pricing/#compute-pricing. |

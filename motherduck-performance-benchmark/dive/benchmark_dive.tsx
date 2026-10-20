@@ -514,21 +514,41 @@ const DUCKLING_ICONS: Record<string, ReactNode> = {
   ),
 };
 
-// Business plan compute prices from motherduck.com/product/pricing (checked 2026-10-09).
-const PRICING_URL = "https://motherduck.com/product/pricing/";
-const BUSINESS_PRICES = [
-  { size: "Pulse", price: 0.6, unit: "per CU-hour", billing: "Metered per query", hourly: null as number | null },
-  { size: "Standard", price: 2.4, unit: "per hour", billing: "Billed per second", hourly: 2.4 },
-  { size: "Jumbo", price: 4.8, unit: "per hour", billing: "Billed per second", hourly: 4.8 },
-  { size: "Mega", price: 12, unit: "per hour", billing: "Billed per second", hourly: 12 },
-  { size: "Giga", price: 24, unit: "per hour", billing: "Billed per second", hourly: 24 },
-];
+// Business plan compute prices per region tier. Keep in sync with HOURLY_RATES in md_bench.py.
+const PRICING_URL = "https://motherduck.com/docs/about-motherduck/billing/pricing/#compute-pricing";
+const REGIONS_URL = "https://motherduck.com/docs/about-motherduck/cloud-regions/";
+const DUCKLING_SIZES_URL = "https://motherduck.com/docs/about-motherduck/billing/duckling-sizes/";
+const REGION_TIERS: Record<string, number> = {
+  "us-east-1": 1, "us-west-2": 1, "eu-central-1": 2, "eu-west-1": 2, "ap-northeast-1": 3, "ap-southeast-2": 3,
+};
+const TIER_RATES: Record<number, { Pulse: number; Standard: number; Jumbo: number; Mega: number; Giga: number }> = {
+  1: { Pulse: 0.6, Standard: 2.4, Jumbo: 4.8, Mega: 12, Giga: 24 },
+  2: { Pulse: 0.73, Standard: 2.93, Jumbo: 5.86, Mega: 14.65, Giga: 29.3 },
+  3: { Pulse: 0.77, Standard: 3.1, Jumbo: 6.19, Mega: 15.48, Giga: 30.96 },
+};
 
-function DucklingPrices({ current }: { current: string }) {
-  const max = Math.max(...BUSINESS_PRICES.map((p) => p.hourly ?? 0));
+// Runs saved without a region assume us-east-1, as md_bench.py does.
+function regionTier(region: string) {
+  return REGION_TIERS[region || "us-east-1"] ?? null;
+}
+
+function businessPrices(tier: number) {
+  const r = TIER_RATES[tier];
+  return [
+    { size: "Pulse", price: r.Pulse, unit: "per CU-hour", billing: "Metered per query", hourly: null as number | null },
+    { size: "Standard", price: r.Standard, unit: "per hour", billing: "Billed per second", hourly: r.Standard },
+    { size: "Jumbo", price: r.Jumbo, unit: "per hour", billing: "Billed per second", hourly: r.Jumbo },
+    { size: "Mega", price: r.Mega, unit: "per hour", billing: "Billed per second", hourly: r.Mega },
+    { size: "Giga", price: r.Giga, unit: "per hour", billing: "Billed per second", hourly: r.Giga },
+  ];
+}
+
+function DucklingPrices({ current, tier }: { current: string; tier: number }) {
+  const prices = businessPrices(tier);
+  const max = Math.max(...prices.map((p) => p.hourly ?? 0));
   return (
     <div className="sizes" role="list" aria-label="Business plan Duckling prices">
-      {BUSINESS_PRICES.map((p) => (
+      {prices.map((p) => (
         <div key={p.size} role="listitem" className={`size ${p.size === current ? "current" : ""}`}>
           <span className="size-icon">{DUCKLING_ICONS[p.size]}</span>
           <span className="label">{p.size}{p.size === current ? " · this run" : ""}</span>
@@ -675,7 +695,7 @@ export default function ReadScalingBenchmark() {
     SELECT t.run_id, t.test_name, t.concurrency, r.run_label,
            strftime(t.server_first_start_utc, '%Y-%m-%d %H:%M UTC') AS started,
            strftime(t.server_first_start_utc, '%m-%d %H:%M') AS started_short,
-           r.database_name, r.user_name, r.csv_file, r.query_count AS csv_queries, r.rounds, r.session_mode, r.is_read_scaling,
+           r.database_name, r.user_name, r.csv_file, r.query_count AS csv_queries, r.rounds, r.session_mode, r.is_read_scaling, r.region,
            t.e2e_ms, t.client_wall_ms, t.query_count, t.error_count, t.replicas_used, t.instance_type,
            t.hourly_rate_usd, t.price_usd,
            strftime(t.server_first_start_utc, '%H:%M:%S') AS first_start,
@@ -693,6 +713,7 @@ export default function ReadScalingBenchmark() {
     key: entryKey(S(r.run_id), S(r.test_name)), runId: S(r.run_id), name: S(r.test_name), c: N(r.concurrency),
     label: S(r.run_label), started: S(r.started), startedShort: S(r.started_short), db: S(r.database_name), user: S(r.user_name),
     csv: S(r.csv_file), csvQueries: N(r.csv_queries), rounds: N(r.rounds), session: S(r.session_mode), isRs: r.is_read_scaling,
+    region: S(r.region),
     e2e: N(r.e2e_ms), wall: N(r.client_wall_ms), n: N(r.query_count), errs: N(r.error_count), reps: N(r.replicas_used),
     inst: S(r.instance_type), rate: r.hourly_rate_usd == null ? null : N(r.hourly_rate_usd),
     price: r.price_usd == null ? null : N(r.price_usd), first: S(r.first_start), last: S(r.last_end),
@@ -700,6 +721,8 @@ export default function ReadScalingBenchmark() {
   }));
   const entry = entries.find((e) => e.key === entryState) ?? entries[0];
   const ready = entry != null;
+  const region = entry?.region || "us-east-1";
+  const tier = regionTier(entry?.region ?? "");
   const rid = esc(entry?.runId ?? "");
   const tname = esc(entry?.name ?? "");
   const scope = `run_id = '${rid}' AND test_name = '${tname}'`;
@@ -1426,6 +1449,7 @@ SELECT ...`}</TerminalChrome>
                   <table className="tbl">
                     <tbody>
                       <tr><td>Run</td><td className="r">{entryTitle(entry)}</td></tr>
+                      <tr><td>Region</td><td className="r">{entry.region || "us-east-1 (assumed)"}{tier ? ` · tier ${tier}` : ""}</td></tr>
                       <tr><td>Duckling size</td><td className="r">{entry.inst || "n/a"}</td></tr>
                       <tr><td>E2E time</td><td className="r">{fmtSec(entry.e2e)} ({(entry.e2e / 3_600_000).toFixed(4)} h)</td></tr>
                       <tr><td>Ducklings used</td><td className="r">{entry.reps}</td></tr>
@@ -1442,30 +1466,33 @@ SELECT ...`}</TerminalChrome>
             <TerminalChrome title="price.sql">{`price_usd =
   epoch(max(end_time) - min(start_time)) / 3600
   * count(DISTINCT duckling_id)   -- Ducklings used
-  * CASE instance_type
-      WHEN 'Standard' THEN  2.40
-      WHEN 'Jumbo'    THEN  4.80
-      WHEN 'Mega'     THEN 12.00
-      WHEN 'Giga'     THEN 24.00
+  * CASE instance_type          -- ${tier ? `tier ${tier} rates, ${region}` : `no rates for ${region}`}
+${tier ? (["Standard", "Jumbo", "Mega", "Giga"] as const).map((k) => `      WHEN '${k}'${" ".repeat(9 - k.length)}THEN ${TIER_RATES[tier][k].toFixed(2).padStart(5)}`).join("\n") : "      -- see the pricing page"}
     END`}</TerminalChrome>
             <p className="secondary">
-              Each run is priced over its own window, from the first query's start to the last query's end. Compare runs
-              above lists the price of every run. Duckling sizes without a rate here, such as Pulse, show n/a.
+              Each run is priced over its own window, from the first query's start to the last query's end, at the rates
+              for the organization's{" "}
+              <a href={REGIONS_URL} target="_blank" rel="noopener noreferrer">cloud region</a>. Compare runs above lists the
+              price of every run. Duckling sizes without a rate here, such as Pulse, show n/a.
             </p>
           </div>
         </div>
         <div className="card">
           <div className="card-head">
-            <h3 className="card-title">Business plan Duckling prices</h3>
+            <h3 className="card-title">Business plan Duckling prices{tier ? ` · ${region}` : ""}</h3>
             <span className="secondary">Bar length shows the hourly price relative to Giga</span>
           </div>
           <div className="card-body stack-4">
-            <DucklingPrices current={entry?.inst ?? ""} />
+            {tier ? <DucklingPrices current={entry?.inst ?? ""} tier={tier} /> : (
+              <p>No rates for {region} in this Dive. See the pricing page for that region's rates.</p>
+            )}
             <p className="secondary">
-              Standard, Jumbo, Mega, and Giga are billed per second while they run. Pulse is metered per query in compute units,
-              so it doesn't fit the hourly formula above. The Business plan includes read scaling, with up to 16 replicas, each
-              backed by its own Duckling. Prices come from the{" "}
-              <a href={PRICING_URL} target="_blank" rel="noopener noreferrer">MotherDuck pricing page</a>; check it for current
+              Rates differ per region: US regions are tier 1, Europe tier 2, and Asia Pacific tier 3. Standard, Jumbo, Mega,
+              and Giga are billed per second while they run; see{" "}
+              <a href={DUCKLING_SIZES_URL} target="_blank" rel="noopener noreferrer">Duckling sizes</a>. Pulse is metered per
+              query in compute units, so it doesn't fit the hourly formula above. The Business plan includes read scaling, with
+              up to 16 replicas, each backed by its own Duckling. Prices come from the{" "}
+              <a href={PRICING_URL} target="_blank" rel="noopener noreferrer">compute pricing docs</a>; check them for current
               rates and for the Lite and Enterprise plans.
             </p>
           </div>
