@@ -114,8 +114,10 @@ published_date: 2024-12-11      # publish date (YYYY-MM-DD); downstream orders b
 - `type` is `example` (a concrete, worked instance) or `template` (a generic plan
   an agent parameterizes).
 - `category` is one primary navigation bucket: `getting-started`, `ingestion`,
-  `analytics`, `integrations`, `end-to-end`, or `automation`. Pick by primary
-  intent: Flights are categorized by what they do, not by being Flights.
+  `analytics`, `integrations`, `end-to-end`, `automation`, or `observability`.
+  Pick by primary intent: Flights are categorized by what they do, not by being
+  Flights. `observability` is for recipes whose point is monitoring MotherDuck
+  itself (dashboards, metrics, alerts on the organization).
 - `features` names the MotherDuck capabilities the code actually uses, from:
   `admin_api`, `dives`, `ducklake`, `flights`, `mcp`, `pg_duckdb`, `pg_endpoint`,
   `shares`, `wasm`. Note `pg_endpoint` (MotherDuck's Postgres wire endpoint) and
