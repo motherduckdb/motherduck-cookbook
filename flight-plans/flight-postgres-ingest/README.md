@@ -59,6 +59,9 @@ and use a different Flight template or modify this one heavily.
 
 ## Caveats
 
+- **Ask before setting up.** Agents following this recipe should work through
+  [Questions to answer](#questions-to-answer) with the user first, and only then open the
+  secret form (the MCP `create_secret` tool) or create the Flight.
 - **Full refresh re-reads the whole table every run.** Cost scales with table
   size, not change volume. Updates and deletes are reflected, but a table
   **dropped** from the source is NOT dropped from the target — remove it yourself
