@@ -68,6 +68,9 @@ updating changed ones by id") and get a go-ahead before building it.
 
 ## Caveats
 
+- **Ask before setting up.** Agents following this recipe should work through
+  [Questions to answer](#questions-to-answer) with the user first, and only then open the
+  secret form (the MCP `create_secret` tool) or create the Flight.
 - **Try the API before writing the Flight.** Fetch one page (a tiny test Flight,
   or `read_json_auto('https://...')` for a public endpoint) to learn where the
   records sit, the id field and how pagination works.
