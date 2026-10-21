@@ -13,7 +13,7 @@ description: >-
 type: example
 category: automation
 features: [flights, dives, shares]
-tags: [slack, python]
+tags: [observability, alerting, slack, python]
 prompt: >-
   I want to monitor my MotherDuck organization from inside MotherDuck: query
   throughput, latency, errors, spills, running queries, active users, storage,

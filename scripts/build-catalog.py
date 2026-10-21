@@ -104,6 +104,9 @@ ALLOWED_TAGS = {
     "ingest",
     "export",
     "migrate",
+    # monitoring patterns
+    "observability",
+    "alerting",
 }
 ALLOWED_KEYS = {
     "title",
