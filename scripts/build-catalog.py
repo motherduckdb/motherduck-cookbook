@@ -35,6 +35,7 @@ ALLOWED_CATEGORIES = {
     "integrations",
     "end-to-end",
     "automation",
+    "observability",
 }
 ALLOWED_FEATURES = {
     "admin_api",
@@ -105,7 +106,6 @@ ALLOWED_TAGS = {
     "export",
     "migrate",
     # monitoring patterns
-    "observability",
     "alerting",
 }
 ALLOWED_KEYS = {

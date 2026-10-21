@@ -11,9 +11,9 @@ description: >-
   platform or SRE team wants dashboards and alerts for MotherDuck with the
   history kept in MotherDuck and read by anyone in the organization.
 type: example
-category: automation
+category: observability
 features: [flights, dives, shares]
-tags: [observability, alerting, slack, python]
+tags: [alerting, slack, python]
 prompt: >-
   I want to monitor my MotherDuck organization from inside MotherDuck: query
   throughput, latency, errors, spills, running queries, active users, storage,

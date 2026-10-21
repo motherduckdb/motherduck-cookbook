@@ -9,9 +9,9 @@ description: >-
   DevOps or data team wants to observe and alert on a MotherDuck organization
   from Datadog.
 type: example
-category: integrations
+category: observability
 features: [flights]
-tags: [observability, alerting, datadog, python]
+tags: [alerting, datadog, python]
 prompt: >-
   I want to monitor my MotherDuck organization from Datadog: query throughput,
   latency, errors, spills, running queries, active users, storage, tokens,
