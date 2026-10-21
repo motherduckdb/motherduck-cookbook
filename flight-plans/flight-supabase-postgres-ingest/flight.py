@@ -133,6 +133,12 @@ def get_pg_credentials(secret: str, url_key: str) -> dict:
                 f"Secret '{secret}' key '{url_key}' still contains Supabase's [YOUR-PASSWORD] "
                 "placeholder. Replace it, square brackets included, with the database password."
             )
+        userinfo = url.split("://", 1)[-1].split("/", 1)[0].rpartition("@")[0]
+        if userinfo.partition(":")[2].startswith("["):
+            raise RuntimeError(
+                f"Secret '{secret}' key '{url_key}': the password is wrapped in square brackets. "
+                "Supabase's [YOUR-PASSWORD] brackets are part of the placeholder; remove them."
+            )
         try:
             u = urlparse(url)
             port = str(u.port or 5432)
