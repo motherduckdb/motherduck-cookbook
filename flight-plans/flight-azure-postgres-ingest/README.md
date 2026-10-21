@@ -106,6 +106,9 @@ connection details and common mistakes built in.
 
 ## Caveats
 
+- **Ask before setting up.** Agents following this recipe should work through
+  [Questions to answer](#questions-to-answer) with the user first, and only then open the
+  secret form (the MCP `create_secret` tool) or create the Flight.
 - **Full refresh re-reads the whole table on every run.** Cost scales with
   table size, not change volume. Use `INCREMENTAL` for large tables that have a
   reliable watermark column.
