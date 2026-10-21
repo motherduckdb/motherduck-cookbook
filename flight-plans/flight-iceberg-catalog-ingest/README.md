@@ -280,12 +280,18 @@ Not yet tested against a live Iceberg catalog. Tested so far (Oct 20, 2026):
   for every catalog, the generated `CREATE DATABASE` for every preset (quoting,
   no credentials), include/exclude logic, namespace auto-pick, empty-config
   defaults, and the copy loop and load log against a fake connection.
-- MotherDuck staging Flight runs with deliberately bad settings: a missing
-  secret, a bogus endpoint, and an S3 Tables preset with a non-ARN warehouse
-  each failed early with the catalog-specific message.
+- MotherDuck staging Flight runs (DuckDB 1.5.6) with deliberately bad settings,
+  each failing within seconds with the catalog-specific message: a missing
+  secret (REST and Polaris presets), an S3 secret used for R2, an S3 Tables
+  warehouse that isn't an ARN, a Glue warehouse that isn't an account ID, and
+  an endpoint without `https://`. An S3 Tables attach to a nonexistent bucket
+  with a real S3 secret came up as an error catalog (`Forbidden_403`), was
+  reported with the S3 Tables hint, and the catalog database it created was
+  dropped again.
 
-Not tested: a successful attach and copy for any catalog, discovery against a
-real catalog, Lake Formation, Unity Catalog external tables, and Snowflake Horizon.
+Not tested: a successful attach, discovery and copy for any catalog, the
+retry path against a real catalog, an attach error from a non-AWS catalog,
+Lake Formation, Unity Catalog external tables, and Snowflake Horizon.
 
 ## Learn more
 
