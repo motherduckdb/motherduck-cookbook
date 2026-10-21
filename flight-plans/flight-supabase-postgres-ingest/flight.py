@@ -126,15 +126,32 @@ def get_pg_credentials(secret: str, url_key: str) -> dict:
 
     url = (get(url_key) or "").strip()
     if url:
-        u = urlparse(url)
+        # Supabase shows the URI with a [YOUR-PASSWORD] placeholder; a common slip is to
+        # save it unchanged, or to keep the square brackets around the real password.
+        if "[YOUR-PASSWORD]" in url.upper():
+            raise RuntimeError(
+                f"Secret '{secret}' key '{url_key}' still contains Supabase's [YOUR-PASSWORD] "
+                "placeholder. Replace it, square brackets included, with the database password."
+            )
+        try:
+            u = urlparse(url)
+            port = str(u.port or 5432)
+        except ValueError:
+            raise RuntimeError(
+                f"Secret '{secret}' key '{url_key}' is not a valid connection URL (value not "
+                "printed). Remove any square brackets around the password, and URL-encode "
+                "special characters in it (for example @ as %40), or store PGHOST/PGPORT/"
+                "PGDATABASE/PGUSER/PGPASSWORD as separate keys instead."
+            ) from None
         if u.scheme not in ("postgres", "postgresql"):
             raise RuntimeError(
                 f"Secret '{secret}' key '{url_key}' is not a postgresql:// URL (value not printed)"
             )
-        try:
-            port = str(u.port or 5432)
-        except ValueError:
-            raise RuntimeError(f"Secret '{secret}' key '{url_key}' has an invalid port") from None
+        if (u.password or "").startswith("[") and (u.password or "").endswith("]"):
+            raise RuntimeError(
+                f"Secret '{secret}' key '{url_key}': the password is wrapped in square brackets. "
+                "Supabase's [YOUR-PASSWORD] brackets are part of the placeholder; remove them."
+            )
         creds = {
             "PGHOST": u.hostname,
             "PGPORT": port,
