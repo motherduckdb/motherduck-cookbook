@@ -11,7 +11,7 @@ description: >-
 type: example
 category: integrations
 features: [flights]
-tags: [datadog, python]
+tags: [observability, alerting, datadog, python]
 prompt: >-
   I want to monitor my MotherDuck organization from Datadog: query throughput,
   latency, errors, spills, running queries, active users, storage, tokens,
