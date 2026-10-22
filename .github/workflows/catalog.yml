@@ -69,7 +69,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Run catalog tests
-        run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py tests/test_excel_ingest_env.py tests/test_commoncrawl_web_graph_flight.py -q
+        run: uv run --with pytest --with pyyaml --with jsonschema python -m pytest tests/test_build_catalog.py tests/test_catalog_workflow.py tests/test_excel_ingest_env.py tests/test_commoncrawl_web_graph_flight.py tests/test_postgres_ingest_flight.py -q
 
       - name: Run Dive export tests
         run: uv run --with pytest --with-requirements flight-plans/flight-dive-export/requirements.txt python -m pytest tests/test_dive_export.py -q
