@@ -311,7 +311,7 @@ def main() -> None:
         env["HOME"] = str(root)
 
         subdir, git_sha = fetch_project(root, env)
-        project_dir, profiles_dir = subdir
+        project_dir, profiles_dir = discover(subdir)
         log.info("project=%s profiles=%s", project_dir, profiles_dir)
         env["DBT_PROFILES_DIR"] = str(profiles_dir)
 

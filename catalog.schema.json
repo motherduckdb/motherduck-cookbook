@@ -101,7 +101,8 @@
             "analytics",
             "integrations",
             "end-to-end",
-            "automation"
+            "automation",
+            "observability"
           ]
         },
         "features": {
