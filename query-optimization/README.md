@@ -21,179 +21,108 @@ published_date: 2026-10-23
 
 # Optimize SQL Queries and dbt Projects on MotherDuck
 
-Point an agent at this recipe with a SQL query, query group, or dbt project.
-It uses MotherDuck's public SQL and REST interfaces to find bottlenecks, test
-rewrites, and validate their outputs. Profiles are generated from the supplied
-queries; no existing profiles or internal tooling are needed.
-
-Always deliver reports, candidate diffs, and experiment artifacts. Keep the
-original source unchanged and make no commits unless explicitly instructed.
+Optimize a query, query group, or dbt project using public interfaces.
+Always deliver reports, diffs, and resumable artifacts; leave original sources
+unchanged and make no commits unless explicitly authorized.
 
 ## How it works
 
-Start with the [methodology](methodology.md). It governs the optimization loop,
-isolation, warm-up, validation, experiment records, and cleanup. Consult the
-[DuckDB patterns](duckdb-patterns.md) after identifying a bottleneck, and use
-[measuring on MotherDuck](motherduck-measurement.md) to collect the evidence.
+Read the [methodology](methodology.md) first. Use [measurement](motherduck-measurement.md)
+to generate profiles and collect query history; consult [DuckDB patterns](duckdb-patterns.md)
+only for observed bottlenecks. No existing profiles or internal tooling required.
 
-| Guide | Purpose |
-| --- | --- |
-| [Methodology](methodology.md) | Resolve the workload, propose experiments, compare results, and resume interrupted work. |
-| [DuckDB patterns](duckdb-patterns.md) | Understand common opportunities in migrated SQL, model materializations, dependency graphs, and JSON handling. |
-| [Measuring on MotherDuck](motherduck-measurement.md) | Generate profiles with `EXPLAIN ANALYZE` or client profiling and collect server metrics from `query_history`. |
-
-The [helpers](scripts/) capture individual SQL profiles and paired timings. They
-do not provision accounts, schedule a campaign, optimize SQL automatically, or
-accept a candidate based on timing alone. For a dbt project, adapt an isolated
-workspace and runner using the methodology; the [small dbt demo](demo/dbt/)
-shows typed staging, dependencies, and output tests.
+The [helpers](scripts/) capture SQL profiles and paired timings, not resource
+provisioning or campaign orchestration. Adapt an isolated runner for dbt jobs.
 
 ## Questions to answer
 
-Only these inputs are needed; discover details from the project where possible:
+Discover what the project provides; clarify only missing inputs:
 
-1. **Goal:** optimize this query, query group, or dbt project.
-2. **Workload:** SQL and parameters, or a project path and exact dbt invocation,
-   including selectors, exclusions, variables, and full-refresh/incremental mode.
-   For dbt, clarify whether the focus is recurring incremental runs, full
-   refreshes, initial builds/backfills, or multiple modes, and which jobs or
-   models are in scope. Do not assume full refresh is the optimization target.
-3. **Credentials:** an environment-variable or secret-store reference for a
-   principal with permission to manage service accounts and their Ducklings,
-   plus access to the relevant source data. Admin and Builder preset roles
-   include these platform permissions; verify the actual API capabilities.
-4. **Source data:** databases or shares, supplied directly or resolved from
-   project configuration. Pin the same input snapshot for both variants.
-5. **Compute envelope:** maximum concurrent service accounts and permitted
-   sizes for query experiments and workload benchmarks. Include starting dbt
-   threads if known. Both threads and size can be optimized within these limits.
+1. Goal: query, query group, or dbt project.
+2. Workload: SQL and parameters, or project and exact dbt invocation, selectors,
+   exclusions, variables, and target. Confirm dbt focus: incremental runs, full
+   refreshes, initial builds/backfills, or multiple modes. Never assume full refresh.
+3. Credentials: secret references with service-account/Duckling management
+   capability and source-data access. Admin/Builder include platform permissions;
+   verify actual capabilities and data grants.
+4. Sources: databases/shares; use the same pinned snapshot for both variants.
+5. Compute envelope: maximum service accounts, per-size limits, allowed query/job
+   Duckling sizes, and starting dbt threads. Size and threads remain tunable.
 
-Suggest smaller Ducklings for single-query exploration and representative sizes
-for workload measurements. A query that spills heavily on the smaller size may
-need a larger development slot. Use the same size for each baseline/candidate
-pair unless size is the deliberate experiment variable.
+Suggest smaller query-exploration slots and representative job-sized slots;
+increase within the envelope if memory pressure makes exploration unrepresentative.
 
 ## Caveats
 
-- `EXPLAIN ANALYZE` executes its statement. Profile writes and run dbt only in
-  disposable experiment databases with dedicated experiment credentials.
-- Warm all relevant inputs before measurement when their last verified read
-  was at least 24 hours ago or is unknown. Warm-up is unmeasured; repeat sampling
-  is performed only when requested. Compare batches with similar conditions.
-- The SQL helpers accept one `SELECT`, optionally measured as a disposable
-  CTAS. Profile actual incremental writes and full dbt commands through an
-  adapted isolated runner; a `SELECT` alone does not measure their write cost.
-- `--setup` executes before each helper process. Use it for the in-memory demo;
-  for persistent experiment databases, prepare inputs separately and omit it.
-- Client profiling and `EXPLAIN ANALYZE` produce evidence for diagnosis. Use
-  separate, unprofiled runs for clean timing observations.
-- `query_history` requires the Business plan and permission to view query
-  history, included in Admin and Builder. It also requires a read/write
-  connection. When unavailable, keep using profiles and clearly label client
-  timings; leave missing server metrics unavailable.
-- Single-query gains can disappear or reverse inside a dbt job. A whole-job
-  improvement requires a comparable job-level measurement.
+- `EXPLAIN ANALYZE` executes writes. Use dedicated credentials and disposable targets.
+- Helpers accept one `SELECT`, optionally as CTAS; these do not measure a full
+  dbt job or its actual incremental writes.
+- Profile for diagnosis; measure timing without profiling. Follow methodology
+  for warm-up, comparable batches, validation, and opt-in repetitions.
+- Use `--setup` only for the in-memory demo: it reruns in every helper process.
+  Prepare persistent experiment inputs separately.
 
 ## What you'll adjust
 
-| Setting | Purpose | Example |
-| --- | --- | --- |
-| `--database` | Isolated database for the SQL helpers. | `:memory:` for the demo; `md:opt_candidate` for an experiment clone. |
-| `--sql`, `--baseline`, `--candidate` | Single-query inputs or compiled dbt `SELECT`s. | `optimization/experiment-001/candidate.sql` |
-| `--mode` | Profile format or unprofiled timing. | `explain` (default), `profiling`, `timing` |
-| `--materialize` | Include CTAS writes into a unique disposable `main.__mdopt_*` table. | Use for table-model diagnosis. |
-| `--keep-result` / `--keep-results` | Retain measured CTAS outputs for correctness validation. | Persistent experiment databases only; record and clean retained relations. |
-| `--conditions` | Actual batch conditions saved alongside measurements. | Adapt [conditions.json](templates/conditions.json); required for MotherDuck. |
-| `--inputs-read-at` | Timestamp of a verified read of all relevant inputs. | Omit when unknown; the helper warms inputs automatically. |
-| `--output` | New artifact directory; existing runs are never overwritten. | `optimization/experiment-001/baseline-profile` |
-| `--token-env` | Experiment token environment-variable name. | `MOTHERDUCK_EXPERIMENT_TOKEN` (default) |
-| Compute envelope | Account slots and allowed sizes for experiments and jobs. | Record in [experiment.json](templates/experiment.json). |
+| Helper option | Meaning |
+| --- | --- |
+| `--database` | `:memory:` for demos; `md:<experiment_clone>` for MotherDuck. |
+| `--sql` / `--baseline` / `--candidate` | SQL files, including compiled model SELECTs. |
+| `--mode` | `explain` (default), `profiling`, or `timing`. |
+| `--materialize` | Include CTAS into a unique disposable `main.__mdopt_*` table. |
+| `--keep-result` / `--keep-results` | Retain CTAS outputs for validation; persistent databases only; track cleanup. |
+| `--conditions` | Adapt [conditions.json](templates/conditions.json); required for MotherDuck. |
+| `--inputs-read-at` | Verified full-input read timestamp; omit if unknown to trigger warm-up. |
+| `--output` | New artifact directory; existing runs are never overwritten. |
+| `--token-env` | Experiment token variable; default `MOTHERDUCK_EXPERIMENT_TOKEN`. |
 
 ## Run it
 
-Let the agent inspect the customer's Python, DuckDB client, dbt, and adapter
-versions, then reuse that environment or recreate it in an isolated experiment
-workspace. Configure missing dependencies there using `uv` and record resolved
-versions. This recipe supplies no dependency manifest or version pins. Do not
-upgrade clients or edit the original project's dependency files just to run it.
+Use `uv` to reuse/recreate the customer's Python, DuckDB, dbt, and adapter
+environment; record versions. No recipe dependency pins or original dependency
+edits/upgrades. Helpers require Python 3.10+; adapt them for older runtimes.
+Commands assume the prepared environment and this recipe's working directory.
 
-Commands below assume that environment is ready and run from this recipe's
-directory; adapt the `uv` invocation to select the prepared environment. The
-helpers require Python 3.10+; adapt them if the customer's runtime is older.
-
-Generate a JSON operator profile using only synthetic local data:
+Local profile and one unprofiled baseline/candidate pair:
 
 ```bash
 uv run python scripts/profile.py \
   --database :memory: --setup demo/setup.sql --sql demo/baseline.sql \
-  --materialize --output optimization/demo/baseline-profile
-```
+  --materialize --output optimization/demo/profile
 
-Try connection-level profiling with a different artifact directory:
-
-```bash
-uv run python scripts/profile.py \
-  --database :memory: --setup demo/setup.sql --sql demo/candidate.sql \
-  --mode profiling --materialize --output optimization/demo/candidate-profile
-```
-
-Capture one unprofiled pair after warm-up:
-
-```bash
 uv run python scripts/benchmark.py \
   --database :memory: --setup demo/setup.sql \
   --baseline demo/baseline.sql --candidate demo/candidate.sql \
   --output optimization/demo/pair
 ```
 
-This demo compares recurring consumers of JSON text and typed staging columns.
-Its setup creates the typed staging table before measurement. Include the cost
-of that staging table when measuring a full pipeline; the consumer comparison
-alone does not establish a whole-project improvement. The small dataset teaches
-the mechanics rather than predicting a production speedup.
-
-Build the synthetic dbt project locally, including its output-equivalence test:
+Use `--mode profiling` for connection-level profiling. The JSON-versus-typed-column
+demo excludes staging setup from consumer timings; include that cost for pipeline
+claims. Build the [dbt demo](demo/dbt/) and its equivalence test with:
 
 ```bash
 mkdir -p optimization
 uv run dbt build --project-dir demo/dbt --profiles-dir demo/dbt --target local
 ```
 
-For MotherDuck, prepare an experiment slot and clone using the methodology,
-adapt the conditions file, and supply its token through the environment. For
-example, profile an already compiled model against that clone:
+For MotherDuck, provision the isolated slot/clone, prepare conditions, and expose
+its token through the environment:
 
 ```bash
 uv run python scripts/profile.py \
   --database md:opt_baseline --sql optimization/experiment-001/compiled.sql \
   --conditions optimization/conditions.json --materialize \
-  --output optimization/experiment-001/baseline-profile
+  --output optimization/experiment-001/profile
 ```
-
-Use [compare_results.sql](scripts/compare_results.sql) for stored outputs and
-[collect_history.sql](scripts/collect_history.sql) for measured query records.
-Both files explain their connection variables. Finish the
-[report template](templates/report.md) with correctness, decisions, and cleanup.
 
 ## Security
 
-Keep the provisioning credential separate from experiment tokens. Use it for
-resource administration and the necessary source-share lifecycle; execute model
-work with the slot's scoped token. Keep secret values outside the artifact
-directory and never place them in SQL, profiles committed to git, diffs, or logs.
-
-Only clone approved sources. Use restricted snapshot shares and verify access
-as each experiment account. Track and remove only resources created by this
-campaign. SQL text and profiles can contain sensitive names and literal values;
-review artifacts before distributing them.
+Separate provisioning, experiment, and observer credentials. Keep secrets out of
+SQL, artifacts, logs, and diffs. Clone only approved sources through restricted
+shares; clean only campaign-owned resources. Review SQL/profile artifacts for
+sensitive names and literals before sharing.
 
 ## Learn more
 
-- [Experiment checkpoint](templates/experiment.json) and [report template](templates/report.md).
-- [MotherDuck query-performance guide](https://motherduck.com/docs/key-tasks/query-performance/).
-- [MotherDuck query history](https://motherduck.com/docs/sql-reference/motherduck-sql-reference/md_information_schema/query_history/).
-- [DuckDB profiling](https://duckdb.org/docs/stable/dev/profiling.html).
-- [Public service-account lifecycle](https://motherduck.com/docs/key-tasks/service-accounts-guide/create-and-configure-service-accounts/).
-- [Benchmark read scaling](../motherduck-performance-benchmark/) for a separate read-scaling load test.
-- For client-specific questions, the MotherDuck MCP server's `ask_docs_question`
-  tool can retrieve documentation. This workflow does not depend on MCP.
+- [Experiment checkpoint](templates/experiment.json) and [report](templates/report.md).
+- [Read-scaling benchmark](../motherduck-performance-benchmark/) for read-only load tests.
