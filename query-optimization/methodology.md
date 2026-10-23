@@ -22,7 +22,15 @@ For SQL, save the exact statements, parameter values, required session settings,
 and the original file's revision or hash. For a query group, preserve its order,
 dependencies, parameter sets, and intended query concurrency.
 
-For dbt, record the exact target command, selectors, exclusions, variables,
+For dbt, clarify the optimization scope with the user unless already explicit:
+are recurring incremental runs, full refreshes, initial builds/backfills, or
+multiple modes the focus? Which jobs or models are in scope? Do not infer this
+from model materializations or default to full-refresh benchmarking. Record the
+confirmed run scope and focus in the experiment checkpoint and report. If
+multiple modes are in scope, evaluate and report each separately; a gain in one
+does not establish a gain in the others.
+
+Record the exact target command, selectors, exclusions, variables,
 target, and full-refresh/incremental behavior. Run `dbt ls` with matching
 selection arguments and save node IDs, dependencies, materializations, and
 selected tests. Include incremental models when investigating their full-refresh
@@ -148,6 +156,35 @@ The account cap covers the whole campaign. Count a slot until its resources
 are accounted for, and count its account until final deletion is verified.
 Respect per-size limits as well as the total. Choose smaller sizes for model
 exploration when representative; use job-sized Ducklings for workload tests.
+
+### Read-scaling checklist: read-only SQL only
+
+Apply this checklist only to standalone read-only queries or query groups using
+read scaling. It does not apply to dbt optimization campaigns, even when
+profiling a compiled model's `SELECT`, or to write-query optimizations. Do not
+enable read scaling or increase its pool unless the compute envelope explicitly
+permits it. See the public [read-scaling guide](https://motherduck.com/docs/key-tasks/authenticating-and-connecting-to-motherduck/read-scaling/).
+
+- Record the account's configured pool size and replica sizes, and the actual
+  query concurrency. Account for all permitted replicas, not just service
+  accounts; do not treat extra replicas as free slots outside the compute
+  envelope. Keep these settings fixed for a SQL rewrite comparison unless one
+  is the deliberate experiment variable.
+- Prepare and attach approved experiment inputs with the scoped read/write
+  setup credential before opening read-scaling connections. Execute the
+  measured read workload with a separate read-scaling token. Do not use CTAS,
+  `--materialize`, or other writes through that token, including during warm-up.
+- Record the intended `session_name` mapping or absence of affinity. Preserve
+  it between baseline and candidate unless affinity is the experiment. Verify
+  observed placement using `session_name` and `duckling_id` in query history
+  when available; otherwise label placement unverified.
+- Verify that readers see the same pinned input snapshot before comparing
+  results. Replicas are eventually consistent, so do not compare recently
+  changed writer data with an unverified reader state. Use the guide's freshness
+  procedure on experiment resources when needed.
+- Apply the warm-up policy below to the readers actually serving the workload,
+  using unmeasured, fully consumed read-only queries. Reassess warm-up and batch
+  comparability if the serving replicas or pool configuration change.
 
 ## 4. Warm the input data
 

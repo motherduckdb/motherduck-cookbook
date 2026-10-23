@@ -6,6 +6,9 @@ Record the goal, original project revision, exact SQL or dbt invocation,
 parameters, selected nodes, source snapshot, client versions, and starting
 Duckling sizes and dbt threads. Link the experiment checkpoint and resource
 ledger. Include the experiment batch concurrency and warm-up evidence.
+For dbt, record the confirmed run scope and focus: recurring incremental runs,
+full refreshes, initial builds/backfills, or multiple modes. Report each scoped
+mode separately rather than generalizing results from one mode to another.
 
 ## Findings and proposed changes
 

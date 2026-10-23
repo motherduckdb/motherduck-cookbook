@@ -55,6 +55,9 @@ Only these inputs are needed; discover details from the project where possible:
 1. **Goal:** optimize this query, query group, or dbt project.
 2. **Workload:** SQL and parameters, or a project path and exact dbt invocation,
    including selectors, exclusions, variables, and full-refresh/incremental mode.
+   For dbt, clarify whether the focus is recurring incremental runs, full
+   refreshes, initial builds/backfills, or multiple modes, and which jobs or
+   models are in scope. Do not assume full refresh is the optimization target.
 3. **Credentials:** an environment-variable or secret-store reference for a
    principal with permission to manage service accounts and their Ducklings,
    plus access to the relevant source data. Admin and Builder preset roles

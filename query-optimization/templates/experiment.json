@@ -11,6 +11,8 @@
     "original_project": "replace-with-original-project-path",
     "original_revision": null,
     "isolated_workspace": null,
+    "dbt_run_scope": null,
+    "optimization_focus": null,
     "command": [],
     "parameters": {},
     "selected_nodes": [],

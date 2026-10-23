@@ -123,6 +123,37 @@ can choose a different row than the original ordered window on tied values.
 Combining multiple windows is not necessarily cheaper than separate windows
 with different physical plans.
 
+## Avoid unnecessary insertion-order preservation
+
+When the workload does not depend on input row order, try disabling
+`preserve_insertion_order`. DuckDB can then reorder results without an
+`ORDER BY`, potentially reducing memory usage, especially for large CSV or
+Parquet imports and exports. Treat this as a measured experiment, not a
+guaranteed speedup. See [DuckDB workload tuning](https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads.html#the-preserve_insertion_order-option).
+
+Capture the existing value before changing it in the isolated experiment runner:
+
+```sql
+SELECT current_setting('preserve_insertion_order');
+SET preserve_insertion_order = false;
+```
+
+This is a [global DuckDB setting](https://duckdb.org/docs/stable/configuration/overview.html#global-configuration-options),
+not a query-local toggle. Use a dedicated experiment process, record each
+variant's effective value, and restore the previous value if reusing the
+process. For dbt, apply it through the experiment profile's connection
+configuration so every relevant adapter connection uses it. Leave the original
+project's configuration unchanged.
+
+Check for implicit ordering dependencies: `LIMIT`/`OFFSET`, `row_number() OVER ()`,
+order-sensitive aggregates, and downstream consumers can produce different
+results when input order changes. Preserve explicit `ORDER BY` clauses and use
+deterministic tie-breakers wherever order is part of correctness. Validate row
+contents and duplicates, not incidental output order, unless order is required.
+See [DuckDB order preservation](https://duckdb.org/docs/stable/sql/dialect/order_preservation.html).
+Compare runtime, memory, and spill evidence under the same workload conditions;
+if writes change the physical layout, check downstream scans too.
+
 ## Physical ordering and row-group pruning
 
 When filters repeatedly target a date or another selective scalar field,
