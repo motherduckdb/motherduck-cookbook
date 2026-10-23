@@ -40,6 +40,7 @@ curl -fsSL https://get.motherduck.com | bash -s dbt-ingestion-s3
 
 ### dbt and transformation
 
+- [query-optimization](query-optimization) - Optimize SQL queries and dbt projects with generated profiles, isolated experiments, and resumable evidence.
 - [dbt-ingestion-s3](dbt-ingestion-s3) - Build Hacker News models from Parquet in S3 with dbt, run locally or on MotherDuck.
 - [dbt-churn-prediction](dbt-churn-prediction) - Build churn feature and label tables with dbt, plus a Python model trained on top.
 - [dbt-ducklake](dbt-ducklake) - Run TPC-DS dbt models on a DuckLake-backed database (`features: ducklake`).

@@ -1,0 +1,12 @@
+version: 2
+models:
+  - name: raw_events
+    columns:
+      - name: event_id
+        data_tests: [not_null, unique]
+  - name: account_totals
+    columns:
+      - name: account_id
+        data_tests: [not_null, unique]
+      - name: total_cents
+        data_tests: [not_null]

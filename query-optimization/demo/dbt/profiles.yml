@@ -1,0 +1,15 @@
+optimization_demo:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('DBT_EXPERIMENT_PATH', 'optimization/demo-dbt.duckdb') }}"
+      schema: main
+      threads: 2
+    motherduck:
+      type: duckdb
+      path: "md:{{ env_var('MOTHERDUCK_EXPERIMENT_DATABASE', 'replace_with_isolated_clone') }}"
+      schema: main
+      threads: 4
+      config_options:
+        motherduck_token: "{{ env_var('MOTHERDUCK_EXPERIMENT_TOKEN', '') }}"
