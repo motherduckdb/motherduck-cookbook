@@ -1,3 +1,4 @@
+-- Baseline test query: repeated JSON parsing.
 WITH parsed AS MATERIALIZED (
     SELECT
         *,

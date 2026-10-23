@@ -150,8 +150,8 @@ def run(args: argparse.Namespace) -> int:
 
     failed = False
     try:
-        # Warm BOTH input paths before measuring either variant. Default :memory:
-        # demos rebuild deterministic inputs per process, so each also warms itself.
+        # Warm BOTH input paths before measuring either variant. In-memory runs
+        # rebuild inputs per process, so each also warms itself.
         read_at = args.inputs_read_at
         if needs_warmup:
             for variant in snapshots:

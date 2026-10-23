@@ -65,7 +65,7 @@ def conditions(path: Path | None, remote: bool) -> dict:
         json.loads(path.read_text(encoding="utf-8"))
         if path
         else {
-            "batch_id": "local-demo",
+            "batch_id": "local",
             "batch_concurrency": 1,
             "duckling_size": "local",
             "dbt_threads": None,

@@ -1,4 +1,4 @@
--- Synthetic data only. Execute in a disposable local database or experiment clone.
+-- Synthetic helper-test inputs; no customer data.
 CREATE TABLE demo_events AS
 SELECT
     event_id: i,

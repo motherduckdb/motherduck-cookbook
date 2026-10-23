@@ -59,14 +59,13 @@ increase within the envelope if memory pressure makes exploration unrepresentati
   dbt job or its actual incremental writes.
 - Profile for diagnosis; measure timing without profiling. Follow methodology
   for warm-up, comparable batches, validation, and opt-in repetitions.
-- Use `--setup` only for the in-memory demo: it reruns in every helper process.
-  Prepare persistent experiment inputs separately.
+- `--setup` reruns per process; prepare persistent experiment inputs separately.
 
 ## What you'll adjust
 
 | Helper option | Meaning |
 | --- | --- |
-| `--database` | `:memory:` for demos; `md:<experiment_clone>` for MotherDuck. |
+| `--database` | `md:<experiment_clone>` or an isolated local DuckDB path. |
 | `--sql` / `--baseline` / `--candidate` | SQL files, including compiled model SELECTs. |
 | `--mode` | `explain` (default), `profiling`, or `timing`. |
 | `--materialize` | Include CTAS into a unique disposable `main.__mdopt_*` table. |
@@ -83,37 +82,25 @@ environment; record versions. No recipe dependency pins or original dependency
 edits/upgrades. Helpers require Python 3.10+; adapt them for older runtimes.
 Commands assume the prepared environment and this recipe's working directory.
 
-Local profile and one unprofiled baseline/candidate pair:
+Provision the isolated slot/clone, prepare conditions, and expose its token
+through the environment. Profile the customer's SQL, then measure one pair:
 
 ```bash
 uv run python scripts/profile.py \
-  --database :memory: --setup demo/setup.sql --sql demo/baseline.sql \
-  --materialize --output optimization/demo/profile
+  --database md:opt_baseline --sql optimization/experiment-001/baseline.sql \
+  --conditions optimization/conditions.json \
+  --output optimization/experiment-001/profile
 
 uv run python scripts/benchmark.py \
-  --database :memory: --setup demo/setup.sql \
-  --baseline demo/baseline.sql --candidate demo/candidate.sql \
-  --output optimization/demo/pair
+  --database md:opt_baseline \
+  --baseline optimization/experiment-001/baseline.sql \
+  --candidate optimization/experiment-001/candidate.sql \
+  --conditions optimization/conditions.json \
+  --output optimization/experiment-001/pair
 ```
 
-Use `--mode profiling` for connection-level profiling. The JSON-versus-typed-column
-demo excludes staging setup from consumer timings; include that cost for pipeline
-claims. Build the [dbt demo](demo/dbt/) and its equivalence test with:
-
-```bash
-mkdir -p optimization
-uv run dbt build --project-dir demo/dbt --profiles-dir demo/dbt --target local
-```
-
-For MotherDuck, provision the isolated slot/clone, prepare conditions, and expose
-its token through the environment:
-
-```bash
-uv run python scripts/profile.py \
-  --database md:opt_baseline --sql optimization/experiment-001/compiled.sql \
-  --conditions optimization/conditions.json --materialize \
-  --output optimization/experiment-001/profile
-```
+Use `--mode profiling` for connection profiles; add `--materialize` to include
+table-model writes. Never use it with a read-scaling token.
 
 ## Security
 

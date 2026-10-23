@@ -14,6 +14,7 @@ import duckdb
 import pytest
 
 RECIPE = Path(__file__).resolve().parents[1] / "query-optimization"
+FIXTURES = Path(__file__).parent / "fixtures" / "query_optimization"
 
 
 def helper(
@@ -38,9 +39,9 @@ def test_profile_preserves_real_operators_and_unmeasured_warmup(
         "--database",
         ":memory:",
         "--setup",
-        RECIPE / "demo/setup.sql",
+        FIXTURES / "setup.sql",
         "--sql",
-        RECIPE / "demo/baseline.sql",
+        FIXTURES / "baseline.sql",
         "--materialize",
         "--mode",
         mode,
@@ -71,11 +72,11 @@ def test_default_benchmark_is_one_pair_and_does_not_accept_candidate(
         "--database",
         ":memory:",
         "--setup",
-        RECIPE / "demo/setup.sql",
+        FIXTURES / "setup.sql",
         "--baseline",
-        RECIPE / "demo/baseline.sql",
+        FIXTURES / "baseline.sql",
         "--candidate",
-        RECIPE / "demo/candidate.sql",
+        FIXTURES / "candidate.sql",
         "--output",
         output,
     )
@@ -111,14 +112,14 @@ def comparisons(
     return [connection.execute(statement).fetchall() for statement in statements]
 
 
-def test_demo_outputs_are_schema_and_multiset_equal() -> None:
+def test_baseline_and_candidate_outputs_are_schema_and_multiset_equal() -> None:
     with duckdb.connect() as con:
-        con.execute((RECIPE / "demo/setup.sql").read_text())
+        con.execute((FIXTURES / "setup.sql").read_text())
         con.execute(
-            "CREATE TABLE baseline AS " + (RECIPE / "demo/baseline.sql").read_text()
+            "CREATE TABLE baseline AS " + (FIXTURES / "baseline.sql").read_text()
         )
         con.execute(
-            "CREATE TABLE candidate AS " + (RECIPE / "demo/candidate.sql").read_text()
+            "CREATE TABLE candidate AS " + (FIXTURES / "candidate.sql").read_text()
         )
         assert comparisons(con, "baseline", "candidate") == [
             [(0,)],
@@ -191,7 +192,7 @@ def test_existing_artifacts_are_not_overwritten(tmp_path: Path) -> None:
         "--database",
         ":memory:",
         "--sql",
-        RECIPE / "demo/candidate.sql",
+        FIXTURES / "candidate.sql",
         "--output",
         output,
     )
@@ -221,7 +222,7 @@ def test_motherduck_requires_batch_conditions_without_connecting(
         "--database",
         "md:not-a-real-database",
         "--sql",
-        RECIPE / "demo/candidate.sql",
+        FIXTURES / "candidate.sql",
         "--output",
         tmp_path / "remote",
     )

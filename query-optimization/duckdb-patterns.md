@@ -130,7 +130,6 @@ remains, batch paths/transforms rather than repeatedly parsing.
 Preserve missing key vs JSON null vs SQL NULL, malformed values, failed casts,
 numeric precision, zones, and mixed types. Include extraction/materialization
 cost in pipeline comparisons. Do not introduce `VARIANT`.
-See the [typed-staging demo](demo/setup.sql).
 
 ## Compatibility macros and setup
 
