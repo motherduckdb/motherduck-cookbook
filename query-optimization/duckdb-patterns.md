@@ -124,6 +124,48 @@ can choose a different row than the original ordered window on tied values.
 Combining multiple windows is not necessarily cheaper than separate windows
 with different physical plans.
 
+## Top N per group with bounded aggregates
+
+When a ranking window selects only a few rows per group, compare it with bounded
+aggregates. `min(value, N)` and `max(value, N)` return lists of values;
+`min_by(row, key, N)` / `max_by(row, key, N)` (also `arg_min` / `arg_max`)
+select associated rows. Hash aggregation can avoid sorting every partition.
+`UNNEST` turns the list into rows; `recursive := true` also expands a `STRUCT`
+payload into columns.
+
+For example, given non-null, unique event IDs within each account, this selects
+up to three latest events per account. The composite key matches
+`ORDER BY event_at DESC, event_id DESC`, after excluding null timestamps:
+
+```sql
+SELECT unnest(
+    max_by(
+        e,
+        struct_pack(event_at := e.event_at, event_id := e.event_id),
+        3
+    ),
+    recursive := true
+)
+FROM events e
+WHERE e.event_at IS NOT NULL
+GROUP BY e.account_id;
+```
+
+Use scalar `max_by` / `arg_max` for latest-row-per-group selection when only one
+row is needed. Preserve the original ordering keys, tie-breakers, NULL policy,
+duplicates, and output schema. This is not a general replacement for
+`rank()` / `dense_rank()` filters that retain ties. Ordinary `arg_max` /
+`arg_min` ignore NULL arguments or keys; a non-null `STRUCT` containing NULL
+fields is not itself NULL. Match the [aggregate semantics](https://duckdb.org/docs/stable/sql/functions/aggregates.html)
+to the original query rather than adding filters that change its results. Add
+an outer `ORDER BY` if consumers require ordered output.
+
+Many groups, large N, or wide payloads can erode the memory advantage. Project
+only needed payload fields and inspect spill. When the group count approaches
+the row count, keep the window approach as a candidate. Fewer DuckDB engine
+threads can reduce aggregation memory pressure; test that separately from the
+SQL rewrite. Engine threads are distinct from dbt's model-scheduling threads.
+
 ## Avoid unnecessary insertion-order preservation
 
 When the workload does not depend on input row order, try disabling
@@ -159,7 +201,10 @@ if writes change the physical layout, check downstream scans too.
 
 When filters repeatedly target a date or another selective scalar field,
 ordering a materialized table by that field can improve pruning and compression.
-Inspect scan filters and scanned rows to decide whether this is relevant.
+DuckDB's zonemaps store per-column minimum and maximum values for row groups.
+Clustering similar values narrows those ranges, allowing a filter to skip groups
+whose ranges cannot match. Inspect scan filters and scanned rows to decide
+whether this is relevant.
 
 Compare the cost of creating that layout with savings for its actual consumers.
 Sorting on dozens of dimensions, especially nested or large text values, may
