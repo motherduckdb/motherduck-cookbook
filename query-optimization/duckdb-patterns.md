@@ -1,8 +1,9 @@
 # Common DuckDB optimization patterns
 
-Use this reference after inspecting the actual query profile. Each pattern
-suggests an experiment, not a universal rewrite. Test it against the same
-inputs and validate its results using the [methodology](methodology.md).
+This are common optimization patterns with DuckDB. After checking baseline query profiles
+you can use these patterns to suggest experiments, it they look like a good fit. Don't
+blindly suggest all patterns as an experiment. Test it against the same inputs and
+validate its results using the [methodology](methodology.md).
 
 ## Columnar scans and pushdown
 
