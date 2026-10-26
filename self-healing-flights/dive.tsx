@@ -2103,10 +2103,12 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 // ----- Option B: zoom from the system to the fix loop -----
 function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const cols = [
-		{ x: 40, I: ShieldCheck, n: 'Guard', chips: ['kill switch', 'one healer at a time', 'heartbeat thread'] },
-		{ x: 265, I: Search, n: 'Check', chips: ['read new runs', 'fingerprint → incident', 'classify: prompt_jev'] },
-		{ x: 490, I: Wrench, n: 'Fix', chips: ['zero-copy sandbox', 'recall similar Guides', 'parallel fixers'] },
-		{ x: 715, I: Rocket, n: 'Ship & remember', chips: ['new Flight version', '2 green runs', 'write a Guide'] },
+		{ I: ShieldCheck, n: 'Guard', chips: ['exit if one is busy', 'cancel a stuck run', 'send heartbeats'] },
+		{ I: Search, n: 'Check', chips: ['read new runs', 'spot failed runs', 'read error logs'] },
+		{ I: Sparkles, n: 'Classify', chips: ['fingerprint errors', 'ask Jev the class', 'open an incident'] },
+		{ I: Wrench, n: 'Fix', chips: ['clone a sandbox', 'recall past Guides', 'fix in parallel'] },
+		{ I: Rocket, n: 'Ship', chips: ['get GPT approval', 'publish new version', 'verify 2 green runs'] },
+		{ I: BookOpen, n: 'Learn', chips: ['write a Guide', 'link helpful Guides', 'reuse next time'] },
 	];
 	const loop = 'M120 190 A240 130 0 0 1 600 190 A240 130 0 0 1 120 190';
 	return (
@@ -2185,36 +2187,43 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				</Tx>
 			</Fig>
 
-			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="Each 5-minute run passes through four stages, left to right; a heartbeat thread keeps a long run visibly alive so the next run knows to wait.">
+			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="Each 5-minute run passes through six stages, left to right; a heartbeat keeps a long run visibly alive so the next run knows to wait.">
 				<Defs p="b2" />
 				<Card x={20} y={36} w={920} h={344} r={22} />
 				<rect x={20} y={12} width={250} height={34} rx={10} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
 				<Tx x={145} y={35} s={15}>
 					heal-demo-healer
 				</Tx>
-				{cols.map((c, i) => (
-					<g key={c.n}>
-						<rect x={c.x} y={66} width={205} height={58} rx={14} fill={A.paper2} stroke={A.ink} strokeWidth={2.5} className="ax-lit" style={lit(A.paper2, i * 2)} />
-						<Ic I={c.I} x={c.x + 30} y={95} s={24} />
-						<Tx x={c.x + 50} y={101} s={c.n.length > 8 ? 14 : 17} a="start">
-							{c.n}
-						</Tx>
-						{i < 3 ? <Edge p="b2" d={`M${c.x + 208} 95 L${c.x + 222} 95`} w={2} /> : null}
-						{c.chips.map((t, j) => (
-							<g key={t}>
-								<rect x={c.x + 10} y={146 + j * 58} width={185} height={44} rx={22} fill={A.paper} stroke={A.ink} strokeWidth={1.5} />
-								{c.n === 'Guard' && j === 2 ? (
-									<g className="ax-beat">
-										<Ic I={HeartPulse} x={c.x + 34} y={168 + j * 58} s={20} c={A.coral} />
+				{cols.map((c, i) => {
+					// Six stage boxes, 135px wide and 14px apart, each wrapping its own pills
+					const x = 40 + i * 149;
+					return (
+						<g key={c.n}>
+							<rect x={x} y={62} width={135} height={240} rx={16} fill={A.paper2} stroke={A.ink} strokeWidth={2.5} className="ax-lit" style={lit(A.paper2, i * 1.333)} />
+							<Ic I={c.I} x={x + 26} y={88} s={22} />
+							<Tx x={x + 44} y={94} s={16} a="start">
+								{c.n}
+							</Tx>
+							{i < cols.length - 1 ? <Edge p="b2" d={`M${x + 137} 88 L${x + 147} 88`} w={2} /> : null}
+							{c.chips.map((t, j) => {
+								const beat = c.n === 'Guard' && j === 2;
+								return (
+									<g key={t}>
+										<rect x={x + 6} y={118 + j * 58} width={123} height={44} rx={22} fill={A.paper} stroke={A.ink} strokeWidth={1.5} />
+										{beat ? (
+											<g className="ax-beat">
+												<Ic I={HeartPulse} x={x + 19} y={140 + j * 58} s={14} c={A.coral} />
+											</g>
+										) : null}
+										<Tx x={x + (beat ? 78 : 67.5)} y={145 + j * 58} s={11.5} w={500} f="sans">
+											{t}
+										</Tx>
 									</g>
-								) : null}
-								<Tx x={c.x + (c.n === 'Guard' && j === 2 ? 112 : 102)} y={173 + j * 58} s={13} w={500} f="sans">
-									{t}
-								</Tx>
-							</g>
-						))}
-					</g>
-				))}
+								);
+							})}
+						</g>
+					);
+				})}
 				<path d="M50 340 L910 340" stroke={A.sky} strokeWidth={3} className="ax-march" fill="none" />
 				<rect x={300} y={326} width={360} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
 				<Ic I={Database} x={322} y={340} s={16} />
