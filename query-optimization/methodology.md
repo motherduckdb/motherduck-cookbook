@@ -178,10 +178,16 @@ Use freshly built equivalent inputs/starting targets, not stale production outpu
 
 ## 7. Evaluate and report
 
-For workload claims, run one comparable baseline/candidate affected job or query
-group after correctness; otherwise label evidence isolated-model only.
-Check unchanged downstream models and public mart contracts too. Measure combined
-suggestions; never add isolated savings. Report each scoped dbt mode separately.
+Optimize pragmatically with profiles and targeted experiments, not exhaustive
+searches or full-pipeline benchmarks after every change. A faster isolated model
+can consume more memory, causing concurrent models to spill and slowing the job.
+Use broader runs selectively when they could change the recommendation, especially
+for resource-intensive changes or promising combinations. Distinguish model-level
+evidence from verified pipeline improvements, and state which broader effects
+remain untested.
+
+When running broader checks, include unchanged concurrent/downstream models and
+public mart contracts. Never add isolated savings; report scoped dbt modes separately.
 
 Deliver the report, diffs, commands, profiles, history, validation, and decisions
 for every candidate. Separate client time, server time, critical path, and job wall
