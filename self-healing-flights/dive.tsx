@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSQLQuery, useDiveState } from '@motherduck/react-sql-query';
+import { BookOpen, Bot, Clock, CloudSun, Database, Eye, FileCode, HeartPulse, KeyRound, LayoutDashboard, Rocket, Search, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 
 export const REQUIRED_DATABASES = [
 	{ type: 'database', path: 'md:heal', alias: 'heal_board' },
@@ -1641,6 +1642,890 @@ function EvalView({ onIncident }: { onIncident: (id: number) => void }) {
 	);
 }
 
+// ---------- architecture tabs (three candidate explainers) ----------
+// MotherDuck brand palette for the explainer diagrams
+const A = {
+	ink: '#383838',
+	muted: '#5f5f5f',
+	paper: '#F4EFEA',
+	paper2: '#ECE5DD',
+	paper3: '#E1D6CB',
+	white: '#FFFFFF',
+	yellow: '#FFDE00',
+	orange: '#FF9538',
+	coral: '#FF7169',
+	coralSoft: '#FFCBC8',
+	teal: '#16AA98',
+	tealSoft: '#53DBC9',
+	sky: '#6FC2FF',
+	skyPale: '#C2E5FF',
+	mono: "'Aeonik Mono', 'Space Mono', Menlo, ui-monospace, monospace",
+	sans: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
+};
+
+const ARCH_CSS = `
+.ax-tok{offset-rotate:0deg;animation:ax-move 3s linear infinite}
+@keyframes ax-move{0%{offset-distance:0%;opacity:0}8%{opacity:1}90%{opacity:1}100%{offset-distance:100%;opacity:0}}
+.ax-play{offset-rotate:0deg;animation:ax-play 10s linear infinite}
+@keyframes ax-play{0%{offset-distance:0%;opacity:1}85%{offset-distance:100%;opacity:1}95%{offset-distance:100%;opacity:0}100%{offset-distance:100%;opacity:0}}
+.ax-march{stroke-dasharray:9 7;animation:ax-dash 1s linear infinite}
+@keyframes ax-dash{to{stroke-dashoffset:-16}}
+.ax-lit{animation:ax-lit 8s ease-in-out infinite}
+@keyframes ax-lit{0%,30%,100%{fill:var(--base)}6%,24%{fill:var(--hi)}}
+.ax-pop{transform-box:fill-box;transform-origin:center;animation:ax-pop 10s ease-out infinite}
+@keyframes ax-pop{0%{transform:scale(1)}3%{transform:scale(1.28)}7%,100%{transform:scale(1)}}
+.ax-pulse{transform-box:fill-box;transform-origin:center;animation:ax-pulse 2.4s ease-in-out infinite}
+@keyframes ax-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+.ax-ring{transform-box:fill-box;transform-origin:center;animation:ax-ring 2.4s ease-out infinite}
+@keyframes ax-ring{0%{transform:scale(.85);opacity:.8}100%{transform:scale(1.5);opacity:0}}
+.ax-beat{transform-box:fill-box;transform-origin:center;animation:ax-beat 1.2s ease-in-out infinite}
+@keyframes ax-beat{0%,100%{transform:scale(1)}15%{transform:scale(1.25)}30%{transform:scale(1)}45%{transform:scale(1.15)}}
+.ax-grow{transform-box:fill-box;transform-origin:left center;animation:ax-grow 10s linear infinite}
+@keyframes ax-grow{0%{transform:scaleX(0)}85%,100%{transform:scaleX(1)}}
+.ax-curtain{transform-box:fill-box;transform-origin:right center;animation:ax-curtain 10s linear infinite}
+@keyframes ax-curtain{0%{transform:scaleX(1)}85%,100%{transform:scaleX(0)}}
+.ax-curtain.ax-fast{animation-name:ax-curtain2}
+@keyframes ax-curtain2{0%{transform:scaleX(1)}60%,100%{transform:scaleX(0)}}
+.ax-play.ax-fast{animation-name:ax-play2}
+@keyframes ax-play2{0%{offset-distance:0%;opacity:1}60%{offset-distance:100%;opacity:1}68%,100%{offset-distance:100%;opacity:0}}
+.ax-blink{animation:ax-blink 6s ease-in-out infinite}
+@keyframes ax-blink{0%,40%,100%{fill:${A.teal}}48%,70%{fill:${A.coral}}}
+.ax-tab:hover{transform:translate(-1px,-1px)}
+@media (prefers-reduced-motion: reduce){
+.ax-root *{animation:none!important}
+.ax-tok,.ax-play,.ax-curtain,.ax-ring{display:none}
+}
+`;
+
+type CSSV = React.CSSProperties & Record<string, string | number>;
+
+// Shared SVG primitives: text, card with hard offset shadow, icon, cylinder, pill
+function Tx({
+	x,
+	y,
+	children,
+	s = 16,
+	w = 700,
+	a = 'middle',
+	c = A.ink,
+	f = 'mono',
+}: {
+	x: number;
+	y: number;
+	children: React.ReactNode;
+	s?: number;
+	w?: number;
+	a?: 'start' | 'middle' | 'end';
+	c?: string;
+	f?: 'mono' | 'sans';
+}) {
+	return (
+		<text x={x} y={y} fontSize={s} fontWeight={w} textAnchor={a} fill={c} fontFamily={f === 'mono' ? A.mono : A.sans}>
+			{children}
+		</text>
+	);
+}
+function Card({
+	x,
+	y,
+	w,
+	h,
+	fill = A.white,
+	r = 16,
+	shadow = 5,
+	cls,
+	style,
+	dash,
+}: {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	fill?: string;
+	r?: number;
+	shadow?: number;
+	cls?: string;
+	style?: CSSV;
+	dash?: string;
+}) {
+	return (
+		<g>
+			{shadow ? <rect x={x + shadow} y={y + shadow} width={w} height={h} rx={r} fill={A.ink} /> : null}
+			<rect x={x} y={y} width={w} height={h} rx={r} fill={fill} stroke={A.ink} strokeWidth={2.5} className={cls} style={style} strokeDasharray={dash} />
+		</g>
+	);
+}
+function Ic({ I, x, y, s = 30, c = A.ink }: { I: React.ElementType; x: number; y: number; s?: number; c?: string }) {
+	return <I x={x - s / 2} y={y - s / 2} size={s} width={s} height={s} color={c} strokeWidth={2} />;
+}
+function Cyl({ cx, cy, w = 130, h = 70, fill = A.skyPale }: { cx: number; cy: number; w?: number; h?: number; fill?: string }) {
+	const rx = w / 2;
+	const top = cy - h / 2;
+	const bot = cy + h / 2;
+	return (
+		<g>
+			<path d={`M${cx - rx} ${top} L${cx - rx} ${bot} A${rx} 12 0 0 0 ${cx + rx} ${bot} L${cx + rx} ${top}`} fill={fill} stroke={A.ink} strokeWidth={2.5} />
+			<ellipse cx={cx} cy={top} rx={rx} ry={12} fill={fill} stroke={A.ink} strokeWidth={2.5} />
+		</g>
+	);
+}
+function StatePill({ cx, cy, w = 170, h = 56, fill, label, dash, cls, style }: { cx: number; cy: number; w?: number; h?: number; fill: string; label: string; dash?: string; cls?: string; style?: CSSV }) {
+	return (
+		<g>
+			{dash ? null : <rect x={cx - w / 2 + 4} y={cy - h / 2 + 4} width={w} height={h} rx={h / 2} fill={A.ink} />}
+			<rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx={h / 2} fill={fill} stroke={A.ink} strokeWidth={2.5} strokeDasharray={dash} className={cls} style={style} />
+			<Tx x={cx} y={cy + 6} s={17}>
+				{label}
+			</Tx>
+		</g>
+	);
+}
+function Defs({ p }: { p: string }) {
+	return (
+		<defs>
+			<marker id={`${p}-ah`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+				<path d="M0 0 L10 5 L0 10 z" fill={A.ink} />
+			</marker>
+		</defs>
+	);
+}
+function Edge({ d, p, dash, c = A.ink, both, cls, w = 2.5 }: { d: string; p: string; dash?: boolean; c?: string; both?: boolean; cls?: string; w?: number }) {
+	return (
+		<path
+			d={d}
+			fill="none"
+			stroke={c}
+			strokeWidth={w}
+			strokeLinecap="round"
+			strokeDasharray={dash ? '7 7' : undefined}
+			className={cls}
+			markerEnd={`url(#${p}-ah)`}
+			markerStart={both ? `url(#${p}-ah)` : undefined}
+		/>
+	);
+}
+// A token that travels along a path (CSS motion path; hidden when motion is reduced)
+function Tok({ d, dur = 3, delay = 0, c = A.coral, r = 8, cls = 'ax-tok' }: { d: string; dur?: number; delay?: number; c?: string; r?: number; cls?: string }) {
+	const st: CSSV = { offsetPath: `path('${d}')`, animationDuration: `${dur}s`, animationDelay: `${delay}s` };
+	return <circle r={r} cx={0} cy={0} fill={c} stroke={A.ink} strokeWidth={2} className={cls} style={st} />;
+}
+const lit = (base: string, delay: number, hi = A.yellow, cycle = 8): CSSV => ({ '--base': base, '--hi': hi, animationDelay: `${delay}s`, animationDuration: `${cycle}s` });
+// Friendly orange duck, centered on (x, y)
+function Duck({ x, y, s = 1 }: { x: number; y: number; s?: number }) {
+	return (
+		<g transform={`translate(${x} ${y}) scale(${s})`} stroke={A.ink} strokeWidth={2.5} strokeLinejoin="round">
+			<path d="M34 6 L48 -6 L44 18 Z" fill={A.orange} />
+			<ellipse cx={4} cy={14} rx={36} ry={21} fill={A.orange} />
+			<circle cx={-16} cy={-14} r={18} fill={A.orange} />
+			<path d="M-33 -17 L-50 -11 L-33 -5 Z" fill={A.yellow} />
+			<circle cx={-20} cy={-18} r={2.8} fill={A.ink} stroke="none" />
+			<path d="M-8 8 Q8 24 26 8" fill="none" />
+		</g>
+	);
+}
+const Check = ({ x, y, c = A.ink }: { x: number; y: number; c?: string }) => (
+	<path d={`M${x - 7} ${y} L${x - 2} ${y + 5} L${x + 8} ${y - 6}`} fill="none" stroke={c} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+);
+const Cross = ({ x, y, c = A.ink }: { x: number; y: number; c?: string }) => (
+	<path d={`M${x - 6} ${y - 6} L${x + 6} ${y + 6} M${x + 6} ${y - 6} L${x - 6} ${y + 6}`} fill="none" stroke={c} strokeWidth={3} strokeLinecap="round" />
+);
+
+function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: string; caption: string; h: number; y0?: number; children: React.ReactNode }) {
+	return (
+		<figure style={{ margin: '0 0 28px', background: A.paper, border: `2px solid ${A.ink}`, borderRadius: 18, boxShadow: `6px 6px 0 ${A.ink}`, padding: '18px 22px 16px' }}>
+			<div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: A.mono, fontWeight: 700, fontSize: 16, color: A.ink }}>
+				<span style={{ background: A.yellow, border: `2px solid ${A.ink}`, borderRadius: 999, padding: '1px 10px', fontSize: 13 }}>{n}</span>
+				{title}
+			</div>
+			<svg viewBox={`0 ${y0} 960 ${h}`} width="100%" role="img" aria-label={`${title}. ${caption}`} style={{ display: 'block', maxWidth: 1040, margin: '10px auto 0', overflow: 'visible' }}>
+				{children}
+			</svg>
+			<figcaption style={{ fontFamily: A.sans, fontSize: 14, lineHeight: 1.5, color: A.muted, marginTop: 10 }}>{caption}</figcaption>
+		</figure>
+	);
+}
+
+const ARCH_SQL = `
+SELECT
+  (SELECT count(*) FROM ${H}."incidents" WHERE status = 'resolved')::INT AS n_res,
+  (SELECT median(cost_usd) FROM ${H}."fixer_runs" WHERE outcome = 'merged' AND cost_usd > 0)::DOUBLE AS fix_cost,
+  (SELECT count(*) FROM ${H}."guide_index")::INT AS n_guides`;
+
+function ArchHeader({ letter, title, sub, live }: { letter: string; title: string; sub: string; live: React.ReactNode }) {
+	return (
+		<header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, margin: '22px 0 26px' }}>
+			<div>
+				<div style={{ fontFamily: A.mono, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: A.ink }}>Architecture · option {letter}</div>
+				<h2 style={{ fontFamily: A.mono, fontSize: 30, fontWeight: 700, letterSpacing: '-0.02em', color: A.ink, margin: '6px 0 4px', lineHeight: 1.15 }}>{title}</h2>
+				<p style={{ fontFamily: A.sans, fontSize: 15, color: A.muted, margin: 0 }}>{sub}</p>
+			</div>
+			{live}
+		</header>
+	);
+}
+function LiveChip({ q, value, label }: { q: ReturnType<typeof useSQLQuery>; value: (r: Row) => string | null; label: string }) {
+	const r = rowsOf(q)[0];
+	const v = r ? value(r) : null;
+	if (!v) return null;
+	return (
+		<div style={{ display: 'flex', alignItems: 'center', gap: 10, background: A.white, border: `2px solid ${A.ink}`, boxShadow: `3px 3px 0 ${A.ink}`, borderRadius: 999, padding: '6px 16px 6px 8px' }}>
+			<span style={{ width: 10, height: 10, borderRadius: 999, background: A.teal, border: `2px solid ${A.ink}`, marginLeft: 4 }} />
+			<span style={{ fontFamily: A.mono, fontWeight: 700, fontSize: 20, color: A.ink }}>{v}</span>
+			<span style={{ fontFamily: A.sans, fontSize: 13, color: A.muted }}>{label}</span>
+		</div>
+	);
+}
+
+// ----- Option A: a left-to-right story -----
+function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
+	const xs = (m: number) => 70 + m * 70;
+	const cyc = 10;
+	const at = (m: number) => ((xs(m) - 70) / 830) * cyc * 0.85;
+	const miles: { m: number; t: string; l1: string; l2?: string; fill: string; icon?: React.ElementType; mark?: 'x' | 'check' }[] = [
+		{ m: 0, t: '2:00', l1: 'a run fails', fill: A.coral, mark: 'x' },
+		{ m: 5, t: '2:05', l1: 'healer opens', l2: 'an incident', fill: A.yellow, icon: Search },
+		{ m: 7, t: '2:07', l1: 'fix ships', l2: '(~2 min)', fill: A.orange, icon: Rocket },
+		{ m: 8.5, t: '2:08', l1: '2 green runs', fill: A.tealSoft, mark: 'check' },
+		{ m: 11, t: '2:11', l1: 'resolved,', l2: 'Guide saved', fill: A.teal, icon: BookOpen },
+	];
+	return (
+		<>
+			<ArchHeader
+				letter="A"
+				title="A pipeline breaks at 2 a.m."
+				sub="Follow one failure from left to right until it is fixed and remembered."
+				live={<LiveChip q={q} value={(r) => (N(r.n_res) ? String(N(r.n_res)) : null)} label="incidents resolved so far" />}
+			/>
+			<Fig n="A1" title="The cast: three Flights and a Dive" h={360} caption="Two pipeline Flights load weather data; the healer Flight watches their runs, ships fixes back to them and logs every step for this Dive.">
+				<Defs p="a1" />
+				<Card x={30} y={50} w={210} h={190} />
+				<Tx x={135} y={88} s={20}>
+					Pipelines
+				</Tx>
+				<rect x={46} y={108} width={178} height={46} rx={23} fill={A.skyPale} stroke={A.ink} strokeWidth={2} />
+				<Ic I={CloudSun} x={72} y={131} s={24} />
+				<Tx x={138} y={137} s={15}>
+					weather
+				</Tx>
+				<circle cx={205} cy={131} r={8} fill={A.teal} stroke={A.ink} strokeWidth={2} className="ax-blink" />
+				<rect x={46} y={168} width={178} height={46} rx={23} fill={A.skyPale} stroke={A.ink} strokeWidth={2} />
+				<Ic I={Clock} x={72} y={191} s={24} />
+				<Tx x={138} y={197} s={15}>
+					hourly
+				</Tx>
+				<circle cx={205} cy={191} r={8} fill={A.teal} stroke={A.ink} strokeWidth={2} />
+				<Edge p="a1" d="M135 248 L135 266" />
+				<Cyl cx={135} cy={305} w={150} h={50} />
+				<Tx x={135} y={318} s={14}>
+					heal_demo
+				</Tx>
+
+				<Card x={380} y={50} w={200} h={190} fill={A.yellow} />
+				<circle cx={480} cy={118} r={46} fill="none" stroke={A.ink} strokeWidth={2} className="ax-ring" />
+				<Duck x={484} y={116} s={0.95} />
+				<Tx x={480} y={200} s={22}>
+					Healer
+				</Tx>
+				<Tx x={480} y={222} s={14} w={400} f="sans">
+					wakes every 5 min
+				</Tx>
+
+				<Edge p="a1" d="M246 100 L372 100" />
+				<Tx x={309} y={88} s={13} w={500} f="sans">
+					failed run
+				</Tx>
+				<Tok d="M246 100 L372 100" c={A.coral} dur={3} />
+				<Edge p="a1" d="M372 195 L246 195" />
+				<Tx x={309} y={220} s={13} w={500} f="sans">
+					fixed version
+				</Tx>
+				<Tok d="M372 195 L246 195" c={A.teal} dur={3} delay={1.5} />
+
+				<Card x={720} y={50} w={210} h={190} />
+				<Ic I={LayoutDashboard} x={825} y={110} s={44} />
+				<Tx x={825} y={178} s={20}>
+					This Dive
+				</Tx>
+				<Tx x={825} y={202} s={13} w={400} f="sans">
+					shows every step
+				</Tx>
+				<Cyl cx={825} cy={312} w={150} h={50} fill={A.white} />
+				<Tx x={825} y={325} s={14}>
+					heal
+				</Tx>
+				<Edge p="a1" d="M825 272 L825 252" />
+				<Edge p="a1" d="M586 160 C 660 160, 640 312, 742 312" />
+				<Tx x={636} y={268} s={13} w={500} f="sans" a="end">
+					logs it all
+				</Tx>
+				<Tok d="M586 160 C 660 160, 640 312, 742 312" c={A.sky} dur={3} delay={0.8} />
+			</Fig>
+
+			<Fig n="A2" title="What one healer run does" h={290} caption="Every 5 minutes the healer makes sure it is the only one running, checks new runs, fixes open incidents, then ships the fix and remembers it.">
+				<Defs p="a2" />
+				{[
+					{ x: 45, I: ShieldCheck, n: 'Guard', a: 'kill switch,', b: 'one healer at a time' },
+					{ x: 285, I: Search, n: 'Check', a: 'a failed run', b: 'becomes an incident' },
+					{ x: 525, I: Wrench, n: 'Fix', a: 'one agent per', b: 'incident, in parallel' },
+					{ x: 765, I: Rocket, n: 'Ship', a: 'new Flight version', b: '+ a Guide to reuse' },
+				].map((s, i) => (
+					<g key={s.n}>
+						<Card x={s.x} y={40} w={180} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 2.133)} />
+						<Ic I={s.I} x={s.x + 90} y={82} s={34} />
+						<Tx x={s.x + 90} y={136} s={21}>
+							{s.n}
+						</Tx>
+						<Tx x={s.x + 90} y={160} s={13} w={400} f="sans">
+							{s.a}
+						</Tx>
+						<Tx x={s.x + 90} y={178} s={13} w={400} f="sans">
+							{s.b}
+						</Tx>
+						{i < 3 ? <Edge p="a2" d={`M${s.x + 192} 120 L${s.x + 234} 120`} /> : null}
+					</g>
+				))}
+				<path d="M45 232 L945 232 Q 960 232 960 248 L960 256 Q 960 272 945 272 L60 272 Q 45 272 45 256 L45 232" fill="none" stroke={A.ink} strokeWidth={2} className="ax-march" opacity={0.5} />
+				<rect x={380} y={260} width={200} height={24} fill={A.paper} />
+				<Tx x={480} y={277} s={13} w={500} f="sans">
+					again in 5 minutes
+				</Tx>
+				<Tok d="M45 232 L945 232" c={A.yellow} dur={8} r={9} />
+			</Fig>
+
+			<Fig n="A3" title="Two breaks, fixed side by side" y0={45} h={315} caption="A cheap coordinator model starts one Claude fixer per incident at the same moment; each works on its own zero-copy sandbox, and an independent approver reviews every fix.">
+				<Defs p="a3" />
+				{[70, 250].map((y, i) => (
+					<g key={y}>
+						<Card x={30} y={y} w={170} h={80} fill={A.coralSoft} />
+						<Tx x={115} y={y + 35} s={17}>
+							{`incident ${i + 1}`}
+						</Tx>
+						<Tx x={115} y={y + 58} s={13} w={400} f="sans">
+							{i ? 'hourly pipeline' : 'weather pipeline'}
+						</Tx>
+					</g>
+				))}
+				<Edge p="a3" d="M206 110 Q 250 110 268 160" />
+				<Edge p="a3" d="M206 290 Q 250 290 268 240" />
+				<circle cx={325} cy={200} r={64} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
+				<Ic I={Sparkles} x={325} y={176} s={28} />
+				<Tx x={325} y={212} s={14}>
+					coordinator
+				</Tx>
+				<Tx x={325} y={232} s={12} w={400} f="sans">
+					cheap model
+				</Tx>
+				<Tx x={325} y={300} s={13} w={500} f="sans">
+					fixers start
+				</Tx>
+				<Tx x={325} y={318} s={13} w={500} f="sans">
+					~55 ms apart
+				</Tx>
+				{[105, 295].map((y, i) => {
+					const d = i ? 'M386 212 C 420 212, 412 295, 444 295' : 'M386 188 C 420 188, 412 105, 444 105';
+					return (
+						<g key={y}>
+							<Edge p="a3" d={d} />
+							<Tok d={d} c={A.yellow} dur={2.4} delay={i * 0.055} />
+							<Card x={450} y={y - 45} w={160} h={90} fill={A.yellow} />
+							<Ic I={Bot} x={482} y={y} s={30} />
+							<Tx x={556} y={y - 2} s={17}>
+								fixer
+							</Tx>
+							<Tx x={556} y={y + 20} s={12} w={400} f="sans">
+								Claude
+							</Tx>
+							<path d={`M618 ${y} L668 ${y}`} stroke={A.ink} strokeWidth={2.5} className="ax-march" fill="none" />
+							<Tx x={643} y={y - 12} s={12} w={500} f="sans">
+								verify
+							</Tx>
+							<Cyl cx={730} cy={y} w={120} h={64} />
+							<Tx x={730} y={y + 10} s={14}>
+								sandbox
+							</Tx>
+							<Edge p="a3" d={i ? `M792 ${y} Q 830 ${y} 848 255` : `M792 ${y} Q 830 ${y} 848 145`} />
+						</g>
+					);
+				})}
+				<Tx x={730} y={190} s={12} w={400} f="sans" c={A.muted}>
+					zero-copy clones
+				</Tx>
+				<Tx x={730} y={208} s={12} w={400} f="sans" c={A.muted}>
+					of heal_demo
+				</Tx>
+				<Card x={830} y={150} w={115} h={100} fill={A.tealSoft} />
+				<Ic I={ShieldCheck} x={887} y={182} s={28} />
+				<Tx x={887} y={220} s={14}>
+					approver
+				</Tx>
+				<Tx x={887} y={238} s={12} w={400} f="sans">
+					GPT
+				</Tx>
+			</Fig>
+
+			<Fig n="A4" title="2 a.m., start to finish" h={250} caption="On the 5-minute schedule an incident usually goes from open to resolved in 4 to 9 minutes; the fix itself takes about 2 (times illustrative).">
+				<line x1={70} y1={110} x2={900} y2={110} stroke={A.paper3} strokeWidth={10} strokeLinecap="round" />
+				<line x1={70} y1={110} x2={900} y2={110} stroke={A.teal} strokeWidth={10} strokeLinecap="round" className="ax-grow" />
+				{miles.map((mi) => (
+					<g key={mi.t}>
+						<Tx x={xs(mi.m)} y={66} s={15}>
+							{mi.t}
+						</Tx>
+						<g className="ax-pop" style={{ animationDelay: `${at(mi.m)}s`, animationDuration: `${cyc}s` }}>
+							<circle cx={xs(mi.m)} cy={110} r={25} fill={mi.fill} stroke={A.ink} strokeWidth={2.5} />
+							{mi.icon ? <Ic I={mi.icon} x={xs(mi.m)} y={110} s={24} /> : mi.mark === 'x' ? <Cross x={xs(mi.m)} y={110} /> : <Check x={xs(mi.m)} y={110} />}
+						</g>
+						<Tx x={xs(mi.m)} y={164} s={14} w={500} f="sans">
+							{mi.l1}
+						</Tx>
+						{mi.l2 ? (
+							<Tx x={xs(mi.m)} y={183} s={14} w={500} f="sans">
+								{mi.l2}
+							</Tx>
+						) : null}
+					</g>
+				))}
+				<Tok d="M70 110 L900 110" c={A.white} r={9} dur={10} cls="ax-play" />
+				<Tx x={900} y={220} s={12} w={400} f="sans" a="end" c={A.muted}>
+					the healer wakes at :00, :05, :10 …
+				</Tx>
+			</Fig>
+		</>
+	);
+}
+
+// ----- Option B: zoom from the system to the fix loop -----
+function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
+	const cols = [
+		{ x: 40, I: ShieldCheck, n: 'Guard', chips: ['kill switch', 'one healer at a time', 'heartbeat thread'] },
+		{ x: 265, I: Search, n: 'Check', chips: ['read new runs', 'fingerprint → incident', 'classify: prompt_jev'] },
+		{ x: 490, I: Wrench, n: 'Fix', chips: ['zero-copy sandbox', 'recall similar Guides', 'parallel fixers'] },
+		{ x: 715, I: Rocket, n: 'Ship & remember', chips: ['new Flight version', '2 green runs', 'write a Guide'] },
+	];
+	const loop = 'M120 190 A240 130 0 0 1 600 190 A240 130 0 0 1 120 190';
+	return (
+		<>
+			<ArchHeader
+				letter="B"
+				title="Zoom in, one level at a time"
+				sub="The whole system, then inside the healer Flight, then the fix loop at its heart."
+				live={<LiveChip q={q} value={(r) => (NN(r.fix_cost) != null ? `$${N(r.fix_cost).toFixed(2)}` : null)} label="median cost of a shipped fix" />}
+			/>
+			<Fig n="B1" title="Level 1 · the system" h={380} caption="Everything except the weather API and the model APIs lives in your MotherDuck account: two databases, three Flights and this Dive.">
+				<Defs p="b1" />
+				<rect x={150} y={20} width={660} height={340} rx={26} fill={A.paper2} stroke={A.ink} strokeWidth={2} strokeDasharray="8 6" />
+				<Tx x={176} y={52} s={13} a="start">
+					YOUR MOTHERDUCK ACCOUNT
+				</Tx>
+				<Card x={10} y={110} w={115} h={80} r={40} shadow={0} />
+				<Ic I={CloudSun} x={67} y={136} s={26} />
+				<Tx x={67} y={174} s={13}>
+					NWS API
+				</Tx>
+				<Card x={835} y={110} w={115} h={80} r={40} shadow={0} />
+				<Ic I={Sparkles} x={892} y={136} s={26} />
+				<Tx x={892} y={174} s={13}>
+					LLM APIs
+				</Tx>
+
+				<Card x={185} y={80} w={170} h={100} />
+				<Tx x={270} y={124} s={18}>
+					Pipelines
+				</Tx>
+				<Tx x={270} y={148} s={12} w={400} f="sans">
+					2 Flights
+				</Tx>
+				<Cyl cx={270} cy={282} w={150} h={56} />
+				<Tx x={270} y={296} s={14}>
+					heal_demo
+				</Tx>
+
+				<rect x={408} y={68} width={204} height={124} rx={22} fill="none" stroke={A.orange} strokeWidth={3} strokeDasharray="6 6" className="ax-pulse" />
+				<Card x={420} y={80} w={180} h={100} fill={A.yellow} />
+				<Duck x={468} y={128} s={0.55} />
+				<Tx x={548} y={126} s={18}>
+					Healer
+				</Tx>
+				<Tx x={548} y={150} s={12} w={400} f="sans">
+					Flight
+				</Tx>
+				<Cyl cx={510} cy={282} w={150} h={56} fill={A.white} />
+				<Tx x={510} y={296} s={14}>
+					heal
+				</Tx>
+				<Card x={660} y={196} w={130} h={100} />
+				<Ic I={LayoutDashboard} x={725} y={230} s={30} />
+				<Tx x={725} y={276} s={16}>
+					Dive
+				</Tx>
+
+				<Edge p="b1" d="M125 150 L179 150" />
+				<Tok d="M125 150 L179 150" c={A.sky} dur={2} />
+				<Edge p="b1" d="M270 186 L270 236" />
+				<Edge p="b1" d="M361 108 L414 108" />
+				<Tok d="M361 108 L414 108" c={A.coral} dur={2.4} />
+				<Edge p="b1" d="M414 152 L361 152" />
+				<Tok d="M414 152 L361 152" c={A.teal} dur={2.4} delay={1.2} />
+				<Edge p="b1" d="M510 186 L510 236" />
+				<Tok d="M510 186 L510 236" c={A.yellow} dur={2} delay={0.5} />
+				<Edge p="b1" d="M588 282 L654 260" />
+				<Edge p="b1" d="M606 128 L829 146" dash both />
+				<Edge p="b1" d="M346 262 Q 400 220 446 188" dash c={A.ink} />
+				<Tx x={380} y={238} s={12} w={500} f="sans" a="end">
+					zero-copy clone
+				</Tx>
+				<Tx x={510} y={60} s={12} c={A.orange}>
+					zoom in ↓
+				</Tx>
+			</Fig>
+
+			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="Each 5-minute run passes through four stages, left to right; a heartbeat thread keeps a long run visibly alive so the next run knows to wait.">
+				<Defs p="b2" />
+				<Card x={20} y={36} w={920} h={344} r={22} />
+				<rect x={20} y={12} width={250} height={34} rx={10} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
+				<Tx x={145} y={35} s={15}>
+					heal-demo-healer
+				</Tx>
+				{cols.map((c, i) => (
+					<g key={c.n}>
+						<rect x={c.x} y={66} width={205} height={58} rx={14} fill={A.paper2} stroke={A.ink} strokeWidth={2.5} className="ax-lit" style={lit(A.paper2, i * 2)} />
+						<Ic I={c.I} x={c.x + 30} y={95} s={24} />
+						<Tx x={c.x + 50} y={101} s={c.n.length > 8 ? 14 : 17} a="start">
+							{c.n}
+						</Tx>
+						{i < 3 ? <Edge p="b2" d={`M${c.x + 208} 95 L${c.x + 222} 95`} w={2} /> : null}
+						{c.chips.map((t, j) => (
+							<g key={t}>
+								<rect x={c.x + 10} y={146 + j * 58} width={185} height={44} rx={22} fill={A.paper} stroke={A.ink} strokeWidth={1.5} />
+								{c.n === 'Guard' && j === 2 ? (
+									<g className="ax-beat">
+										<Ic I={HeartPulse} x={c.x + 34} y={168 + j * 58} s={20} c={A.coral} />
+									</g>
+								) : null}
+								<Tx x={c.x + (c.n === 'Guard' && j === 2 ? 112 : 102)} y={173 + j * 58} s={13} w={500} f="sans">
+									{t}
+								</Tx>
+							</g>
+						))}
+					</g>
+				))}
+				<path d="M50 340 L910 340" stroke={A.sky} strokeWidth={3} className="ax-march" fill="none" />
+				<rect x={300} y={326} width={360} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
+				<Ic I={Database} x={322} y={340} s={16} />
+				<Tx x={490} y={345} s={13} w={500} f="sans">
+					every step is written to the heal database
+				</Tx>
+			</Fig>
+
+			<Fig n="B3" title="Level 3 · the fix loop" h={380} caption="A fixer edits its copy of the pipeline and verifies it in the sandbox; deterministic checks and an independent approver must agree, and a denial sends feedback back at most twice.">
+				<Defs p="b3" />
+				<path d={loop} fill="none" stroke={A.ink} strokeWidth={3} className="ax-march" />
+				<path d="M360 320 A240 130 0 0 1 120 190" fill="none" stroke={A.coral} strokeWidth={3.5} strokeDasharray="9 7" />
+				<Tok d={loop} c={A.yellow} dur={7} r={10} />
+				{[
+					{ cx: 120, cy: 190, I: Bot, a: 'edit code', b: 'Claude fixer', f: A.yellow },
+					{ cx: 360, cy: 60, I: Database, a: 'verify', b: 'run in sandbox', f: A.skyPale },
+					{ cx: 600, cy: 190, I: ShieldCheck, a: 'checks', b: 'tests kept, real change', f: A.white },
+					{ cx: 360, cy: 320, I: Eye, a: 'approver', b: 'independent GPT', f: A.white },
+				].map((n) => (
+					<g key={n.a}>
+						<Card x={n.cx - 95} y={n.cy - 34} w={190} h={68} fill={n.f} />
+						<Ic I={n.I} x={n.cx - 64} y={n.cy} s={26} />
+						<Tx x={n.cx - 42} y={n.cy - 4} s={16} a="start">
+							{n.a}
+						</Tx>
+						<Tx x={n.cx - 42} y={n.cy + 16} s={11.5} w={400} f="sans" a="start">
+							{n.b}
+						</Tx>
+					</g>
+				))}
+				<Tx x={360} y={182} s={24}>
+					≤ 2 rounds
+				</Tx>
+				<Tx x={360} y={208} s={13} w={400} f="sans">
+					a denial comes back as feedback
+				</Tx>
+				<Tx x={150} y={300} s={13} w={500} f="sans" c={A.coral}>
+					denied
+				</Tx>
+				<Edge p="b3" d="M460 320 C 640 320, 700 300, 752 248" />
+				<Tok d="M460 320 C 640 320, 700 300, 752 248" c={A.teal} dur={3} delay={1} />
+				<Tx x={640} y={344} s={13} w={500} f="sans" c={A.teal}>
+					approved
+				</Tx>
+				<Card x={760} y={150} w={180} h={100} fill={A.tealSoft} />
+				<Ic I={Rocket} x={850} y={180} s={28} />
+				<Tx x={850} y={216} s={18}>
+					ship
+				</Tx>
+				<Tx x={850} y={236} s={12} w={400} f="sans">
+					new Flight version
+				</Tx>
+			</Fig>
+
+			<Fig n="B4" title="Level 3 · who holds the keys" h={340} caption="The agents never hold a MotherDuck token: their only tool, verify, goes through a small broker inside the healer that runs their code against a zero-copy clone.">
+				<Defs p="b4" />
+				<rect x={30} y={40} width={360} height={260} rx={22} fill={A.paper2} stroke={A.coral} strokeWidth={3} strokeDasharray="10 7" />
+				<Tx x={50} y={72} s={13} a="start">
+					AGENT WORKSPACE · NO TOKEN
+				</Tx>
+				<Card x={55} y={100} w={140} h={90} fill={A.yellow} />
+				<Ic I={Bot} x={125} y={130} s={28} />
+				<Tx x={125} y={172} s={15}>
+					fixer
+				</Tx>
+				<Card x={225} y={100} w={140} h={90} />
+				<Ic I={FileCode} x={295} y={130} s={28} />
+				<Tx x={295} y={170} s={13}>
+					pipeline code
+				</Tx>
+				<Edge p="b4" d="M199 145 L219 145" />
+				<path d="M295 198 L295 236 L372 236" fill="none" stroke={A.ink} strokeWidth={2.5} />
+				<rect x={372} y={212} width={36} height={48} rx={8} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
+				<Tx x={414} y={196} s={14} a="start">
+					verify
+				</Tx>
+				<Tx x={414} y={212} s={11.5} w={400} f="sans" a="start">
+					its only tool
+				</Tx>
+				<Edge p="b4" d="M410 236 L484 236" />
+				<rect x={475} y={160} width={200} height={150} rx={20} fill="none" stroke={A.orange} strokeWidth={2} strokeDasharray="6 6" />
+				<Tx x={575} y={152} s={11.5} w={500} f="sans" c={A.orange}>
+					inside the healer Flight
+				</Tx>
+				<Card x={490} y={186} w={170} h={100} fill={A.yellow} />
+				<Ic I={KeyRound} x={575} y={214} s={26} />
+				<Tx x={575} y={252} s={17}>
+					broker
+				</Tx>
+				<Tx x={575} y={272} s={12} w={400} f="sans">
+					holds the token
+				</Tx>
+				<Edge p="b4" d="M666 236 L718 236" />
+				<Cyl cx={805} cy={236} w={170} h={80} />
+				<Tx x={805} y={244} s={16}>
+					sandbox
+				</Tx>
+				<Cyl cx={805} cy={80} w={150} h={50} fill={A.white} />
+				<Tx x={805} y={92} s={14}>
+					heal_demo
+				</Tx>
+				<Edge p="b4" d="M805 118 L805 180" dash />
+				<Tx x={817} y={156} s={12} w={500} f="sans" a="start">
+					zero-copy clone
+				</Tx>
+				<Tok d="M295 198 L295 236 L484 236" c={A.yellow} dur={2.6} />
+				<Tok d="M666 236 L718 236" c={A.sky} dur={1.3} delay={1.3} />
+			</Fig>
+		</>
+	);
+}
+
+// ----- Option C: states and time -----
+function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
+	const gx = (t: number) => 210 + t * 5.9;
+	const lanes = ['guard', 'check', 'fixer 1', 'fixer 2', 'approver', 'ship'];
+	const ly = (i: number) => 50 + i * 42;
+	const bars: { lane: number; a: number; b: number; c: string; t?: string; dots?: number[] }[] = [
+		{ lane: 0, a: 0, b: 3, c: A.yellow },
+		{ lane: 1, a: 3, b: 12, c: A.yellow },
+		{ lane: 2, a: 14, b: 90, c: A.orange, t: 'Claude subagent · incident 1', dots: [56, 70, 84] },
+		{ lane: 3, a: 14.1, b: 76, c: A.orange, t: 'incident 2 (+55 ms)', dots: [52, 68] },
+		{ lane: 4, a: 76, b: 86, c: A.tealSoft },
+		{ lane: 4, a: 90, b: 102, c: A.tealSoft },
+		{ lane: 5, a: 86, b: 92, c: A.sky },
+		{ lane: 5, a: 102, b: 112, c: A.sky },
+	];
+	const mx = (m: number) => 110 + m * 31;
+	const cyc = 12;
+	const tAt = (m: number) => (m / 25) * cyc * 0.85;
+	const runs: [number, boolean][] = [
+		[1, true],
+		[4, false],
+		[8, true],
+		[9.5, true],
+		[13, true],
+		[17, true],
+		[21, true],
+		[24.5, true],
+	];
+	return (
+		<>
+			<ArchHeader
+				letter="C"
+				title="The life of an incident"
+				sub="An incident as a state machine, a healer run as a timeline, and how it all adds up over time."
+				live={<LiveChip q={q} value={(r) => (N(r.n_guides) ? String(N(r.n_guides)) : null)} label="Guides written to memory" />}
+			/>
+			<Fig n="C1" title="Every incident is a little state machine" h={410} caption="Most incidents walk the middle path; blips are only watched, some wait for or go to a human, and a failure after a fix reopens the incident.">
+				<Defs p="c1" />
+				<Tok d="M110 190 L900 190" c={A.white} r={9} dur={8} />
+				{[
+					{ cx: 110, l: 'open', f: A.coralSoft },
+					{ cx: 350, l: 'investigating', f: A.yellow },
+					{ cx: 590, l: 'verifying', f: A.skyPale },
+					{ cx: 830, l: 'resolved', f: A.tealSoft },
+				].map((s, i) => (
+					<StatePill key={s.l} cx={s.cx} cy={190} w={180} fill={s.f} label={s.l} cls="ax-lit" style={lit(s.f, ((i * 240) / 790) * 8 - 0.48, A.yellow === s.f ? A.orange : A.yellow)} />
+				))}
+				<Edge p="c1" d="M204 190 L256 190" />
+				<Edge p="c1" d="M444 190 L496 190" />
+				<Edge p="c1" d="M684 190 L736 190" />
+				<Tx x={230} y={232} s={12} w={500} f="sans">
+					fix starts
+				</Tx>
+				<Tx x={470} y={232} s={12} w={500} f="sans">
+					fix ships
+				</Tx>
+				<Tx x={710} y={232} s={12} w={500} f="sans">
+					2 green runs
+				</Tx>
+
+				<StatePill cx={470} cy={62} w={170} fill={A.white} label="watching" dash="7 6" />
+				<Edge p="c1" d="M130 160 Q 170 62 380 62" />
+				<Edge p="c1" d="M560 62 Q 790 62 812 158" />
+				<Tx x={182} y={92} s={12} w={500} f="sans" a="end">
+					API blip
+				</Tx>
+				<Tx x={806} y={100} s={12} w={500} f="sans" a="start">
+					green, no fix
+				</Tx>
+
+				<StatePill cx={250} cy={312} w={170} fill={A.orange} label="escalated" />
+				<StatePill cx={500} cy={312} w={170} fill={A.white} label="proposed" dash="7 6" />
+				<Edge p="c1" d="M330 220 L272 280" />
+				<Edge p="c1" d="M380 220 L466 280" />
+				<Edge p="c1" d="M540 282 L578 222" />
+				<Tx x={250} y={356} s={12} w={500} f="sans">
+					needs a human
+				</Tx>
+				<Tx x={500} y={356} s={12} w={500} f="sans">
+					fix waits for an OK
+				</Tx>
+
+				<path d="M860 220 L860 380 Q 860 395 845 395 L 95 395 Q 80 395 80 380 L80 228" fill="none" stroke={A.coral} strokeWidth={2.5} strokeDasharray="7 7" markerEnd="url(#c1-ah)" />
+				<rect x={690} y={384} width={130} height={22} fill={A.paper} />
+				<Tx x={755} y={400} s={12} w={600} f="sans" c={A.coral}>
+					fails again → reopen
+				</Tx>
+			</Fig>
+
+			<Fig n="C2" title="One healer run, second by second" y0={25} h={310} caption="One healer run fixed two broken pipelines in about two minutes; the two fixers overlap, which is 1.7–2× faster than fixing them one after another.">
+				{[0, 30, 60, 90, 120].map((t) => (
+					<g key={t}>
+						<line x1={gx(t)} y1={40} x2={gx(t)} y2={300} stroke={A.ink} strokeOpacity={0.12} strokeWidth={1.5} />
+						<Tx x={gx(t)} y={322} s={13} w={500}>
+							{t === 120 ? '2 min' : `${t}s`}
+						</Tx>
+					</g>
+				))}
+				{lanes.map((l, i) => (
+					<Tx key={l} x={190} y={ly(i) + 22} s={14} a="end">
+						{l}
+					</Tx>
+				))}
+				{bars.map((b, i) => (
+					<g key={i}>
+						<rect x={gx(b.a)} y={ly(b.lane)} width={Math.max(6, gx(b.b) - gx(b.a))} height={32} rx={8} fill={b.c} stroke={A.ink} strokeWidth={2} />
+						{b.t ? (
+							<Tx x={gx(b.a) + 12} y={ly(b.lane) + 21} s={12} w={600} f="sans" a="start">
+								{b.t}
+							</Tx>
+						) : null}
+						{(b.dots ?? []).map((d) => (
+							<circle key={d} cx={gx(d)} cy={ly(b.lane) + 16} r={5} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
+						))}
+					</g>
+				))}
+				<Tx x={gx(62)} y={ly(1) + 22} s={12} w={400} f="sans" c={A.muted}>
+					○ = a verify call
+				</Tx>
+				<rect x={205} y={38} width={725} height={264} fill={A.paper} className="ax-curtain ax-fast" />
+				<line x1={0} y1={38} x2={0} y2={302} stroke={A.ink} strokeWidth={2.5} className="ax-play ax-fast" style={{ offsetPath: `path('M${gx(0)} 0 L${gx(120)} 0')` } as CSSV} />
+			</Fig>
+
+			<Fig n="C3" title="Across healer ticks, and into memory" h={350} caption="The healer wakes every 5 minutes: one tick opens and fixes, the next sees two green runs and resolves, and the lesson becomes a Guide a later fix can recall.">
+				{[0, 5, 10, 15, 20, 25].map((m) => (
+					<g key={m}>
+						<line x1={mx(m)} y1={88} x2={mx(m)} y2={300} stroke={A.ink} strokeOpacity={0.12} strokeWidth={1.5} strokeDasharray="4 5" />
+						<Tx x={mx(m)} y={36} s={13} w={500}>
+							{m ? `${m} min` : '0'}
+						</Tx>
+						<g className="ax-pop" style={{ animationDelay: `${tAt(m)}s`, animationDuration: `${cyc}s` }}>
+							<circle cx={mx(m)} cy={66} r={18} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
+							<Ic I={Clock} x={mx(m)} y={66} s={20} />
+						</g>
+					</g>
+				))}
+				<Tx x={78} y={71} s={13} a="end">
+					healer
+				</Tx>
+				<Tx x={78} y={145} s={13} a="end">
+					pipeline
+				</Tx>
+				<Tx x={78} y={215} s={13} a="end">
+					incident
+				</Tx>
+				<Tx x={78} y={289} s={13} a="end">
+					memory
+				</Tx>
+				{runs.map(([m, ok]) => (
+					<g key={m} className="ax-pop" style={{ animationDelay: `${tAt(m)}s`, animationDuration: `${cyc}s` }}>
+						<rect x={mx(m) - 13} y={127} width={26} height={26} rx={7} fill={ok ? A.tealSoft : A.coral} stroke={A.ink} strokeWidth={2} />
+						{ok ? <Check x={mx(m)} y={140} /> : <Cross x={mx(m)} y={140} />}
+					</g>
+				))}
+				<rect x={mx(5)} y={194} width={mx(7) - mx(5)} height={32} fill={A.yellow} stroke={A.ink} strokeWidth={2} />
+				<Tx x={(mx(5) + mx(7)) / 2} y={215} s={12} w={600} f="sans">
+					fix
+				</Tx>
+				<rect x={mx(7)} y={194} width={mx(10) - mx(7)} height={32} fill={A.skyPale} stroke={A.ink} strokeWidth={2} />
+				<Tx x={(mx(7) + mx(10)) / 2} y={215} s={12} w={600} f="sans">
+					verifying
+				</Tx>
+				<rect x={mx(10)} y={194} width={mx(25) - mx(10)} height={32} rx={0} fill={A.tealSoft} stroke={A.ink} strokeWidth={2} />
+				<Tx x={(mx(10) + mx(25)) / 2} y={215} s={12} w={600} f="sans">
+					resolved
+				</Tx>
+				<circle cx={mx(5)} cy={210} r={9} fill={A.coral} stroke={A.ink} strokeWidth={2} />
+				<Tx x={mx(5)} y={186} s={11.5} w={600} f="sans" c={A.coral}>
+					open
+				</Tx>
+				<circle cx={mx(10)} cy={284} r={20} fill={A.orange} stroke={A.ink} strokeWidth={2.5} />
+				<Ic I={BookOpen} x={mx(10)} y={284} s={20} />
+				<Tx x={mx(10)} y={326} s={12} w={500} f="sans">
+					Guide saved
+				</Tx>
+				<path d={`M${mx(10) + 24} 278 Q ${mx(15.5)} 236 ${mx(21) - 24} 278`} fill="none" stroke={A.orange} strokeWidth={3} strokeDasharray="7 7" className="ax-march" />
+				<Tok d={`M${mx(10) + 24} 278 Q ${mx(15.5)} 236 ${mx(21) - 24} 278`} c={A.orange} dur={3} />
+				<circle cx={mx(21)} cy={284} r={20} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
+				<Ic I={Search} x={mx(21)} y={284} s={20} />
+				<Tx x={mx(21)} y={326} s={12} w={500} f="sans">
+					next similar break recalls it
+				</Tx>
+				<line x1={0} y1={48} x2={0} y2={304} stroke={A.ink} strokeWidth={2.5} className="ax-play" style={{ offsetPath: `path('M${mx(0)} 0 L${mx(25)} 0')`, animationDuration: `${cyc}s` } as CSSV} />
+			</Fig>
+		</>
+	);
+}
+
+const ARCH_SUB: Record<string, string> = {
+	archA: 'the 2 a.m. story',
+	archB: 'zoom in',
+	archC: 'lifecycle & timeline',
+};
+function ArchView({ which }: { which: string }) {
+	const q = useSQLQuery(ARCH_SQL);
+	return (
+		<div className="ax-root" style={{ background: A.paper, margin: '14px -20px 0', padding: '4px 28px 24px', fontFamily: A.sans, color: A.ink }}>
+			<style>{ARCH_CSS}</style>
+			<div style={{ maxWidth: 1080, margin: '0 auto' }}>
+				{which === 'archA' ? <ArchA q={q} /> : which === 'archB' ? <ArchB q={q} /> : <ArchC q={q} />}
+			</div>
+		</div>
+	);
+}
+
 // ---------- main ----------
 export default function SelfHealingBoard() {
 	const [tab, setTab] = useDiveState<string>('tab', 'overview');
@@ -1695,7 +2580,7 @@ export default function SelfHealingBoard() {
 	}, [reg, runs]);
 	const selectedInc = incs.find((r) => N(r.id) === incSel) ?? incs[0];
 	const nEval = N(health.n_eval);
-	const tabs = ['overview', 'runs', 'incidents', 'memory', ...(nEval ? ['eval'] : [])];
+	const tabs = ['overview', 'runs', 'incidents', 'memory', ...(nEval ? ['eval'] : []), 'archA', 'archB', 'archC'];
 	const openIncident = (id: number) => {
 		setIncSel(id);
 		setTab('incidents');
@@ -1742,7 +2627,8 @@ export default function SelfHealingBoard() {
 							textTransform: 'capitalize',
 						}}
 					>
-						{t}
+						{ARCH_SUB[t] ? `Architecture ${t.slice(4)}` : t}
+						{ARCH_SUB[t] ? <span style={{ color: T.faint, fontWeight: 400, textTransform: 'none' }}> · {ARCH_SUB[t]}</span> : null}
 						{t === 'incidents' && N(health.n_all) ? <span style={{ color: T.faint, fontWeight: 400 }}> {N(health.n_all)}</span> : null}
 					</button>
 				))}
@@ -1944,6 +2830,7 @@ export default function SelfHealingBoard() {
 
 			{tab === 'memory' ? <MemoryView now={now} /> : null}
 			{tab === 'eval' ? <EvalView onIncident={openIncident} /> : null}
+			{ARCH_SUB[tab] ? <ArchView which={tab} /> : null}
 		</main>
 	);
 }
