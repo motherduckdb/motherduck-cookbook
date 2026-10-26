@@ -1830,17 +1830,17 @@ const Cross = ({ x, y, c = A.ink }: { x: number; y: number; c?: string }) => (
 	<path d={`M${x - 6} ${y - 6} L${x + 6} ${y + 6} M${x + 6} ${y - 6} L${x - 6} ${y + 6}`} fill="none" stroke={c} strokeWidth={3} strokeLinecap="round" />
 );
 
-function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: string; caption: string; h: number; y0?: number; children: React.ReactNode }) {
+function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: string; caption?: string; h: number; y0?: number; children: React.ReactNode }) {
 	return (
 		<figure style={{ margin: '0 0 28px', background: A.paper, border: `2px solid ${A.ink}`, borderRadius: 18, boxShadow: `6px 6px 0 ${A.ink}`, padding: '18px 22px 16px' }}>
 			<div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: A.mono, fontWeight: 700, fontSize: 16, color: A.ink }}>
 				<span style={{ background: A.yellow, border: `2px solid ${A.ink}`, borderRadius: 999, padding: '1px 10px', fontSize: 13 }}>{n}</span>
 				{title}
 			</div>
-			<svg viewBox={`0 ${y0} 960 ${h}`} width="100%" role="img" aria-label={`${title}. ${caption}`} style={{ display: 'block', maxWidth: 1040, margin: '10px auto 0', overflow: 'visible' }}>
+			<svg viewBox={`0 ${y0} 960 ${h}`} width="100%" role="img" aria-label={caption ? `${title}. ${caption}` : title} style={{ display: 'block', maxWidth: 1040, margin: '10px auto 0', overflow: 'visible' }}>
 				{children}
 			</svg>
-			<figcaption style={{ fontFamily: A.sans, fontSize: 14, lineHeight: 1.5, color: A.muted, marginTop: 10 }}>{caption}</figcaption>
+			{caption ? <figcaption style={{ fontFamily: A.sans, fontSize: 14, lineHeight: 1.5, color: A.muted, marginTop: 10 }}>{caption}</figcaption> : null}
 		</figure>
 	);
 }
@@ -1961,29 +1961,35 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Tok d="M586 160 C 660 160, 640 312, 742 312" c={A.sky} dur={3} delay={0.8} />
 			</Fig>
 
-			<Fig n="A2" title="What one healer run does" h={290} caption="Every 5 minutes the healer makes sure it is the only one running, checks new runs, fixes open incidents, then ships the fix and remembers it.">
+			<Fig n="A2" title="What one healer Flight does" h={290}>
 				<Defs p="a2" />
 				{[
-					{ x: 45, I: ShieldCheck, n: 'Guard', a: 'kill switch,', b: 'one healer at a time' },
-					{ x: 285, I: Search, n: 'Check', a: 'a failed run', b: 'becomes an incident' },
-					{ x: 525, I: Wrench, n: 'Fix', a: 'one agent per', b: 'incident, in parallel' },
-					{ x: 765, I: Rocket, n: 'Ship', a: 'new Flight version', b: '+ a Guide to reuse' },
-				].map((s, i) => (
-					<g key={s.n}>
-						<Card x={s.x} y={40} w={180} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 2.133)} />
-						<Ic I={s.I} x={s.x + 90} y={82} s={34} />
-						<Tx x={s.x + 90} y={136} s={21}>
-							{s.n}
-						</Tx>
-						<Tx x={s.x + 90} y={160} s={13} w={400} f="sans">
-							{s.a}
-						</Tx>
-						<Tx x={s.x + 90} y={178} s={13} w={400} f="sans">
-							{s.b}
-						</Tx>
-						{i < 3 ? <Edge p="a2" d={`M${s.x + 192} 120 L${s.x + 234} 120`} /> : null}
-					</g>
-				))}
+					{ I: ShieldCheck, n: 'Guard', a: 'one healer', b: 'at a time' },
+					{ I: Search, n: 'Check', a: 'find failed', b: 'pipeline runs' },
+					{ I: Sparkles, n: 'Classify', a: 'Jev: new incident', b: 'or ongoing one?' },
+					{ I: Wrench, n: 'Fix', a: 'one subagent per', b: 'incident, in parallel' },
+					{ I: Rocket, n: 'Ship', a: 'new Flight', b: 'version' },
+					{ I: BookOpen, n: 'Learn', a: 'write or update', b: 'a Guide' },
+				].map((s, i, all) => {
+					// Six equal boxes across the 900px row, 18px apart
+					const x = 45 + i * 153;
+					return (
+						<g key={s.n}>
+							<Card x={x} y={40} w={135} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 1.333)} />
+							<Ic I={s.I} x={x + 67.5} y={82} s={32} />
+							<Tx x={x + 67.5} y={136} s={19}>
+								{s.n}
+							</Tx>
+							<Tx x={x + 67.5} y={160} s={12} w={400} f="sans">
+								{s.a}
+							</Tx>
+							<Tx x={x + 67.5} y={177} s={12} w={400} f="sans">
+								{s.b}
+							</Tx>
+							{i < all.length - 1 ? <Edge p="a2" d={`M${x + 139} 120 L${x + 151} 120`} /> : null}
+						</g>
+					);
+				})}
 				<path d="M45 232 L945 232 Q 960 232 960 248 L960 256 Q 960 272 945 272 L60 272 Q 45 272 45 256 L45 232" fill="none" stroke={A.ink} strokeWidth={2} className="ax-march" opacity={0.5} />
 				<rect x={380} y={260} width={200} height={24} fill={A.paper} />
 				<Tx x={480} y={277} s={13} w={500} f="sans">
