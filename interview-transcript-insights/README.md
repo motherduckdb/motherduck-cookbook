@@ -35,7 +35,7 @@ dataset: 1,250 interviews about AI at work, in three cohorts (workforce,
 creatives, scientists), 14,495 participant answers. Swap `load_turns()` for
 your own source and everything after it works unchanged.
 
-![Reviewing the codebook in the Dive](dive/assets/interview-insights-codebook.png)
+![Browsing a theme's insights and quotes in the Dive](dive/assets/interview-insights-categories.png)
 
 Three files:
 
