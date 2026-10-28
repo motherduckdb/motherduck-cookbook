@@ -1,0 +1,35 @@
+# Security updates only. Each example pins its own lockfile, so routine version
+# bumps would open a PR per example per release; they are disabled with
+# open-pull-requests-limit: 0. Security updates ignore that limit and are
+# grouped so one advisory run yields one PR per directory, not one per package.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directories: ["**/*"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directories: ["**/*"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directories: ["**/*"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
