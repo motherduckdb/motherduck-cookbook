@@ -5,10 +5,10 @@
 
 """Validate README front matter and build the examples catalog.
 
-Every catalog entry is a README.md with YAML front matter holding exactly nine
+Every catalog entry is a README.md with YAML front matter holding nine
 keys: title, id, description, type, category, features, tags, prompt,
-published_date. Running this script with no output path validates the front
-matter across the repo (non-zero exit on the first problem). Pass --output to
+published_date, plus an optional boolean `featured`. Running this script with
+no output path validates the front matter across the repo (non-zero exit on the first problem). Pass --output to
 also write catalog.json.
 """
 
@@ -118,6 +118,7 @@ ALLOWED_KEYS = {
     "features",
     "tags",
     "published_date",
+    "featured",
 }
 REQUIRED_KEYS = {
     "title",
@@ -233,6 +234,15 @@ def assert_date(data: dict[str, Any], readme_path: Path, key: str) -> str:
     raise CatalogError(f"{readme_path}: {key} must be a YYYY-MM-DD date string")
 
 
+def assert_optional_bool(
+    data: dict[str, Any], readme_path: Path, key: str, default: bool = False
+) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise CatalogError(f"{readme_path}: {key} must be true or false")
+    return value
+
+
 def build_item(
     repo_root: Path, readme_path: Path, frontmatter: dict[str, Any], repo: str, ref: str
 ) -> dict[str, Any] | None:
@@ -288,6 +298,7 @@ def build_item(
 
     prompt = assert_string(frontmatter, readme_path, "prompt")
     published_date = assert_date(frontmatter, readme_path, "published_date")
+    featured = assert_optional_bool(frontmatter, readme_path, "featured")
 
     relative_dir = readme_path.parent.relative_to(repo_root).as_posix()
     under_flight_plans = relative_dir == FLIGHT_PLANS_DIR or relative_dir.startswith(
@@ -317,6 +328,7 @@ def build_item(
         "features": features,
         "tags": tags,
         "published_date": published_date,
+        "featured": featured,
         "path": relative_dir,
         "urls": build_urls(repo=repo, ref=ref, path=relative_dir),
     }

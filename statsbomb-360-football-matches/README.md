@@ -20,6 +20,7 @@ prompt: >-
   guide:
   https://motherduck.com/docs/cookbook/statsbomb-360-football-matches
 published_date: 2026-06-15
+featured: true
 ---
 
 # StatsBomb 360 Football Matches — Flights pipeline + animated Dive

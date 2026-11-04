@@ -18,6 +18,7 @@ prompt: >-
   it as a guide:
   https://motherduck.com/docs/cookbook/flight-dlt-ga4-ingest
 published_date: 2026-06-16
+featured: true
 ---
 
 # Ingest Google Analytics 4 into MotherDuck with dlt as a Flight

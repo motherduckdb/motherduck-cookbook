@@ -20,6 +20,7 @@ prompt: >-
   Flights" recipe to my own data and use case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-analysis-agent
 published_date: 2026-07-01
+featured: true
 ---
 
 # Build an automated AI data analysis agent with Flights

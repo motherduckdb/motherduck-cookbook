@@ -16,6 +16,7 @@ prompt: >-
   dbt and Deploy a Dive" recipe to my own data and use case, using it as a guide:
   https://motherduck.com/docs/cookbook/dbt-duckdb-dwh-starter
 published_date: 2026-06-01
+featured: true
 ---
 
 # Build a MotherDuck Warehouse with dbt and Deploy a Dive

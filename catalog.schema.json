@@ -69,6 +69,7 @@
         "features",
         "tags",
         "published_date",
+        "featured",
         "path",
         "urls"
       ],
@@ -132,6 +133,9 @@
         "published_date": {
           "type": "string",
           "format": "date"
+        },
+        "featured": {
+          "type": "boolean"
         },
         "path": {
           "$ref": "#/$defs/path"

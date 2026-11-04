@@ -134,6 +134,8 @@ published_date: 2024-12-11      # publish date (YYYY-MM-DD); downstream orders b
   recipe's docs URL (`https://motherduck.com/docs/cookbook/<id>`).
 - `published_date` is the publish date as `YYYY-MM-DD`, so downstream surfaces
   can order recipes by recency.
+- `featured` (optional) is `true` for recipes the MotherDuck product highlights.
+  Omit it otherwise; the catalog emits `featured: false` by default.
 
 The body follows a consistent, skimmable structure:
 

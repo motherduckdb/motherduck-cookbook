@@ -18,6 +18,7 @@ prompt: >-
   Agents in MotherDuck" recipe to my own data and use case, using it as a guide:
   https://motherduck.com/docs/cookbook/vercel-agent-analytics
 published_date: 2026-04-24
+featured: true
 ---
 
 # Capture Vercel Log Drain Traffic and Classify AI Agents in MotherDuck

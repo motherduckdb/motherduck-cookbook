@@ -17,6 +17,7 @@ prompt: >-
   case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-excel-s3-ingest
 published_date: 2026-07-19
+featured: true
 ---
 
 # Ingest an Excel Workbook from S3 on a Schedule

@@ -126,6 +126,9 @@ Rules:
 - `published_date` is the recipe's publish date as `YYYY-MM-DD`; downstream
   surfaces order by it. Use the date the recipe first landed in the repo. The
   builder also accepts an unquoted YAML date and normalizes it.
+- `featured` is an optional tenth key: set `featured: true` only for recipes
+  the MotherDuck product should highlight. Omit it otherwise; the catalog emits
+  `featured: false` by default.
 - `flight-plans/` is only for reusable Flight templates: items there must be
   `type: template` and include `flights`. Concrete examples never live there.
 - Examples at the repo root may include `flights` when they can deploy as a

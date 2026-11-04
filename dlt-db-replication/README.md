@@ -17,6 +17,7 @@ prompt: >-
   case, using it as a guide:
   https://motherduck.com/docs/cookbook/dlt-db-replication
 published_date: 2024-12-11
+featured: true
 ---
 
 # Replicate PostgreSQL Tables to MotherDuck with dlt
