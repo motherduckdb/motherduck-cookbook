@@ -17,6 +17,7 @@ prompt: >-
   use case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-shopify-ingest
 published_date: 2026-08-27
+featured: true
 ---
 
 # Ingest Shopify Orders and Products as a Flight

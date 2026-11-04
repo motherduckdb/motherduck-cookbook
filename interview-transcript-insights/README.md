@@ -18,6 +18,7 @@ prompt: >-
   Transcripts With AI SQL" recipe to my own data and use case, using it as a
   guide: https://motherduck.com/docs/cookbook/interview-transcript-insights
 published_date: 2026-10-28
+featured: true
 ---
 
 # Find themes and quotes in interview transcripts with AI SQL

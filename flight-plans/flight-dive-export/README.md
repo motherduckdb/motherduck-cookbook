@@ -19,6 +19,7 @@ prompt: >-
   case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-dive-export
 published_date: 2026-09-15
+featured: true
 ---
 
 # Export a Dive to PDF and Deliver It

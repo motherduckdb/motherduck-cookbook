@@ -77,6 +77,7 @@ type: example
             "features": [],
             "tags": ["python", "pyarrow"],
             "published_date": "2025-03-14",
+            "featured": False,
             "path": "python-ingestion",
             "urls": {
                 "github": "https://github.com/motherduckdb/motherduck-cookbook/tree/main/python-ingestion",
@@ -345,5 +346,48 @@ published_date: not-a-date
 
     with pytest.raises(
         build_catalog_module.CatalogError, match="must be a YYYY-MM-DD date"
+    ):
+        build_catalog_module.build_catalog(repo_root)
+
+
+def test_featured_flag_is_emitted(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "featured-recipe" / "README.md",
+        """
+title: Featured
+id: featured-recipe
+description: A featured recipe.
+type: example
+category: analytics
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-01-01
+featured: true
+""",
+    )
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+
+    assert catalog["items"][0]["featured"] is True
+
+
+def test_featured_must_be_boolean(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(
+        repo_root / "featured-recipe" / "README.md",
+        """
+title: Featured
+id: featured-recipe
+description: A featured recipe.
+type: example
+category: analytics
+prompt: Adapt this recipe to my own data and use case.
+published_date: 2025-01-01
+featured: "yes"
+""",
+    )
+
+    with pytest.raises(
+        build_catalog_module.CatalogError, match="featured must be true or false"
     ):
         build_catalog_module.build_catalog(repo_root)

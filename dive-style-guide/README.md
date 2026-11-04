@@ -18,6 +18,7 @@ prompt: >-
   our conventions, using it as a guide:
   https://motherduck.com/docs/cookbook/dive-style-guide
 published_date: 2026-08-27
+featured: true
 ---
 
 # Give Every Dive Your Brand Style With a Guide

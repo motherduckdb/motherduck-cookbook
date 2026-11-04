@@ -19,6 +19,7 @@ prompt: >-
   use case, using it as a guide:
   https://motherduck.com/docs/cookbook/flight-dbt-build-git
 published_date: 2026-07-09
+featured: true
 ---
 
 # Run a dbt Project as a Flight via git clone
