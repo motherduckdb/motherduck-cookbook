@@ -23,26 +23,8 @@ on:
       - "tests/test_snowflake_migration_assessment_flight.py"
       - ".github/workflows/catalog.yml"
   push:
-    paths:
-      - "**/README.md"
-      - "catalog.schema.json"
-      - "scripts/build-catalog.py"
-      - "excel-local-ingest/load_excel.py"
-      - "flight-plans/flight-excel-s3-ingest/flight.py"
-      - "flight-plans/flight-commoncrawl-web-graph/**"
-      - "tests/test_build_catalog.py"
-      - "tests/test_catalog_workflow.py"
-      - "tests/test_excel_ingest_env.py"
-      - "tests/test_dive_export.py"
-      - "tests/test_iceberg_databricks_flights.py"
-      - "tests/iceberg_databricks/**"
-      - "flight-plans/flight-iceberg-databricks-*/**"
-      - "flight-plans/flight-dive-export/flight.py"
-      - "flight-plans/flight-dive-export/requirements.txt"
-      - "tests/test_commoncrawl_web_graph_flight.py"
-      - "flight-plans/flight-snowflake-migration-assessment/**"
-      - "tests/test_snowflake_migration_assessment_flight.py"
-      - ".github/workflows/catalog.yml"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:

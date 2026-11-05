@@ -169,7 +169,11 @@ The body follows a consistent, skimmable structure:
   ```
 
   The catalog shape is defined by [`catalog.schema.json`](catalog.schema.json).
-- On pushes to `main`, CI publishes `catalog.json` as a GitHub Release asset.
+  Besides the front matter, each item carries a generated `files` manifest
+  (path and size of every file in the folder, minus `.gitkeep`), so a consumer
+  can fetch any file of a recipe at the catalog's `source.ref` without listing
+  the repository.
+- On every push to `main`, CI publishes `catalog.json` as a GitHub Release asset.
   Download the latest catalog from
   `https://github.com/motherduckdb/motherduck-cookbook/releases/latest/download/catalog.json`;
   earlier versions remain available on earlier catalog releases.

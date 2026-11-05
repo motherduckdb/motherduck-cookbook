@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -144,6 +145,9 @@ SKIPPED_DIR_NAMES = {
     "node_modules",
     "venv",
 }
+# Placeholder and OS files that never carry recipe content; they are left out
+# of each item's `files` manifest.
+MANIFEST_EXCLUDED_NAMES = {".gitkeep", ".DS_Store"}
 
 
 class CatalogError(Exception):
@@ -186,6 +190,77 @@ def iter_readmes(repo_root: Path) -> list[Path]:
             continue
         readmes.append(path)
     return sorted(readmes)
+
+
+def _git_listed_files(repo_root: Path, item_dir: Path) -> list[Path] | None:
+    """Files git would ship for the item: tracked plus untracked-but-not-ignored.
+
+    Returns None when the repo root is not a git checkout or git is missing, so
+    the caller can fall back to walking the filesystem.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                item_dir.relative_to(repo_root).as_posix(),
+            ],
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [
+        repo_root / entry.decode("utf-8")
+        for entry in result.stdout.split(b"\0")
+        if entry
+    ]
+
+
+def _walked_files(item_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in item_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        relative_parts = path.relative_to(item_dir).parts[:-1]
+        if any(
+            part.startswith(".") or part in SKIPPED_DIR_NAMES for part in relative_parts
+        ):
+            continue
+        files.append(path)
+    return files
+
+
+def list_item_files(repo_root: Path, item_dir: Path) -> list[dict[str, Any]]:
+    """Manifest of the files that make up one catalog item.
+
+    Paths are POSIX and relative to the item folder, sorted, with sizes in
+    bytes, so downstream consumers (the docs site, the product's agent surface)
+    can fetch individual files at the catalog's `source.ref` without listing
+    the repository themselves.
+    """
+    candidates = _git_listed_files(repo_root, item_dir)
+    if candidates is None:
+        candidates = _walked_files(item_dir)
+
+    manifest: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in candidates:
+        if path.name in MANIFEST_EXCLUDED_NAMES or not path.is_file():
+            continue
+        relative = path.relative_to(item_dir).as_posix()
+        if relative in seen:
+            continue
+        seen.add(relative)
+        manifest.append({"path": relative, "bytes": path.stat().st_size})
+    return sorted(manifest, key=lambda entry: entry["path"])
 
 
 def assert_string(data: dict[str, Any], readme_path: Path, key: str) -> str:
@@ -331,6 +406,7 @@ def build_item(
         "featured": featured,
         "path": relative_dir,
         "urls": build_urls(repo=repo, ref=ref, path=relative_dir),
+        "files": list_item_files(repo_root, readme_path.parent),
     }
 
 

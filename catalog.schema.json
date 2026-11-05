@@ -71,7 +71,8 @@
         "published_date",
         "featured",
         "path",
-        "urls"
+        "urls",
+        "files"
       ],
       "properties": {
         "id": {
@@ -157,6 +158,30 @@
               "format": "uri"
             }
           }
+        },
+        "files": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/catalog_file"
+          }
+        }
+      }
+    },
+    "catalog_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }
