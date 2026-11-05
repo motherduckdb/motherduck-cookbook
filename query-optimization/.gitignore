@@ -1,0 +1,4 @@
+optimization/
+*.duckdb*
+*.env
+__pycache__/

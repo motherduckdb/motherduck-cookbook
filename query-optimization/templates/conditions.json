@@ -1,0 +1,8 @@
+{
+  "batch_id": "batch-001",
+  "batch_concurrency": 1,
+  "duckling_size": "standard",
+  "dbt_threads": 4,
+  "source_snapshot": "replace-with-pinned-share-or-snapshot-id",
+  "warmup_policy": "read-all-relevant-inputs-if-last-read-unknown-or-at-least-24-hours-ago"
+}

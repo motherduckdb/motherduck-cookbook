@@ -1,0 +1,69 @@
+{
+  "experiment_id": "experiment-001",
+  "status": "planned",
+  "phase": "inventory",
+  "owner_session": null,
+  "local_processes": [],
+  "updated_at": null,
+  "goal": "Optimize the supplied SQL or dbt workload on MotherDuck",
+  "workload": {
+    "kind": "dbt",
+    "original_project": "replace-with-original-project-path",
+    "original_revision": null,
+    "isolated_workspace": null,
+    "dbt_run_scope": null,
+    "optimization_focus": null,
+    "command": [],
+    "parameters": {},
+    "selected_nodes": [],
+    "materializations": {},
+    "client_versions": {}
+  },
+  "compute_envelope": {
+    "max_service_accounts": 2,
+    "max_accounts_by_size": {"standard": 2, "jumbo": 1},
+    "query_experiment_sizes": ["standard"],
+    "workload_benchmark_sizes": ["jumbo"],
+    "starting_dbt_threads": 4
+  },
+  "source": {
+    "databases_or_shares": [],
+    "snapshot_id": null,
+    "created_by_campaign": false,
+    "last_verified_read_at": null
+  },
+  "batch_conditions": "conditions.json",
+  "resources": [
+    {
+      "slot_id": "slot-01",
+      "service_account": null,
+      "token_id": null,
+      "token_env": "MOTHERDUCK_EXPERIMENT_TOKEN",
+      "duckling_configuration": null,
+      "clone_databases": [],
+      "disposable_relations": [],
+      "status": "not_provisioned",
+      "cleanup": {"status": "pending", "verified_at": null, "evidence": []}
+    }
+  ],
+  "hypothesis": null,
+  "candidate_diff": null,
+  "warmup": {"status": "pending", "coverage": [], "completed_at": null},
+  "baseline": {"status": "pending", "artifacts": [], "query_ids": []},
+  "candidate": {"status": "pending", "artifacts": [], "query_ids": []},
+  "validation": {
+    "status": "pending",
+    "schema": null,
+    "row_counts": null,
+    "multiset_comparison": null,
+    "floating_point_columns_and_tolerances": {},
+    "nondeterminism_controls": [],
+    "dbt_tests": null,
+    "downstream_checks": null
+  },
+  "repeated_measurements_requested": false,
+  "decision": "pending",
+  "reason": null,
+  "last_error": null,
+  "next_step": "Resolve the workload and record the source snapshot before provisioning"
+}
