@@ -26,6 +26,11 @@ def test_main_push_publishes_catalog_release_instead_of_pages() -> None:
     ):
         assert pages_action not in workflow_text
 
+    # Every item's `files` manifest changes with any file edit, so the release
+    # must rebuild on every push to main rather than only on README changes.
+    push_trigger = workflow["on"]["push"]
+    assert push_trigger == {"branches": ["main"]}
+
     jobs = workflow["jobs"]
     release = jobs["release"]
     assert release["name"] == "Publish catalog release"

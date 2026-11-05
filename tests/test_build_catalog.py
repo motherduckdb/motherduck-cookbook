@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -83,7 +85,73 @@ type: example
                 "github": "https://github.com/motherduckdb/motherduck-cookbook/tree/main/python-ingestion",
                 "raw_docs": "https://raw.githubusercontent.com/motherduckdb/motherduck-cookbook/main/python-ingestion/README.md",
             },
+            "files": [
+                {
+                    "path": "README.md",
+                    "bytes": (repo_root / "python-ingestion" / "README.md").stat().st_size,
+                }
+            ],
         }
+    ]
+
+
+FILES_FRONTMATTER = """
+title: Ingest API data into MotherDuck with Python
+id: python-ingestion
+description: Load API data into MotherDuck from Python.
+type: example
+category: ingestion
+features: []
+tags: []
+prompt: Adapt this Python API ingestion recipe to my own data and use case.
+published_date: 2025-03-14
+"""
+
+
+def test_files_manifest_walks_folder_outside_git(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    item_dir = repo_root / "python-ingestion"
+    write_readme(item_dir / "README.md", FILES_FRONTMATTER)
+    (item_dir / "ingest.py").write_text("print('hi')\n", encoding="utf-8")
+    (item_dir / "data").mkdir()
+    (item_dir / "data" / ".gitkeep").write_text("", encoding="utf-8")
+    (item_dir / "data" / "sample.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (item_dir / "node_modules" / "dep").mkdir(parents=True)
+    (item_dir / "node_modules" / "dep" / "index.js").write_text("", encoding="utf-8")
+    (item_dir / ".venv").mkdir()
+    (item_dir / ".venv" / "pyvenv.cfg").write_text("", encoding="utf-8")
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+
+    assert catalog["items"][0]["files"] == [
+        {"path": "README.md", "bytes": (item_dir / "README.md").stat().st_size},
+        {"path": "data/sample.csv", "bytes": 8},
+        {"path": "ingest.py", "bytes": 12},
+    ]
+
+
+def test_files_manifest_follows_git_when_available(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+
+    repo_root = tmp_path / "repo"
+    item_dir = repo_root / "python-ingestion"
+    write_readme(item_dir / "README.md", FILES_FRONTMATTER)
+    (item_dir / "tracked.py").write_text("tracked\n", encoding="utf-8")
+    (repo_root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    subprocess.run([git, "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run([git, "add", "."], cwd=repo_root, check=True)
+
+    (item_dir / "untracked.py").write_text("untracked\n", encoding="utf-8")
+    (item_dir / "debug.log").write_text("ignored\n", encoding="utf-8")
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+
+    assert [entry["path"] for entry in catalog["items"][0]["files"]] == [
+        "README.md",
+        "tracked.py",
+        "untracked.py",
     ]
 
 
