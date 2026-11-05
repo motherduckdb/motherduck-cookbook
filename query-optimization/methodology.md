@@ -1,7 +1,30 @@
 # Optimization methodology
 
-Use experiment copies only; original-source edits and commits require explicit
-authorization. Deliver evidence, including rejected/inconclusive experiments.
+Original-source edits and commits require explicit authorization. Deliver evidence,
+including rejected/inconclusive experiments. Choose the path before requesting credentials.
+
+## Single slow query
+
+Default for "why is this query slow?" when the SQL is read-only:
+
+1. Use the user's existing connection/token and database. Capture exact SQL,
+   parameters, versions, size/concurrency, and the original run's history/profile
+   when available. No management permissions, new service accounts/tokens,
+   shares/clones, resizing, resets, or campaign harness.
+2. Explain observed bottlenecks versus hypotheses. If evidence is missing,
+   [capture a profile](motherduck-measurement.md#capture-profiles) with the same
+   token; `explain analyze` reruns the query. Preserve original-run evidence
+   before warm-up, which could hide a cold-read cause. History access is optional.
+3. Try a few focused read-only rewrites when useful, using that token without
+   modifying source files. For timing comparisons, apply the warm-up and
+   comparable-condition rules below; use stable inputs or label results
+   inconclusive. Validate outputs; repeat measurements only on request.
+4. Save SQL, profiles/IDs, conditions, findings, and any candidate diffs/checks in
+   a small local artifact directory. Mark untested ideas; restore changed settings
+   and close only connections opened for this work. Never revoke the user's token
+   or clean pre-existing resources.
+
+Writes, dbt runs, and broader campaigns use the workflow below with experiment copies.
 
 ## 1. Resolve scope
 

@@ -21,23 +21,27 @@ them from query-attributed spill and cumulative bytes written.
 
 ## Capture profiles
 
-`EXPLAIN ANALYZE` executes SQL, including writes; repoint targets before profiling.
+For lightweight diagnosis, use the user's connection/token and existing database;
+for campaigns, use the experiment clone/token. Adapt database/table names below.
+`explain analyze` executes SQL: profile only read-only SQL on the user's targets;
+repoint writes to disposable targets first. Inspect original-run evidence before
+warm-up; helper warm-up is for comparisons, not reproducing the original cold run.
 
 ```sql
-EXPLAIN (ANALYZE, FORMAT JSON)
-SELECT account_id, total_cents: sum(amount_cents)
-FROM opt_baseline.main.events
-WHERE event_kind = 'payment'
-GROUP BY account_id;
+explain (analyze, format json)
+select account_id, total_cents: sum(amount_cents)
+from my_database.main.events
+where event_kind = 'payment'
+group by account_id;
 ```
 
 Save the full analyzed-plan JSON, not terminal truncation. Alternatively, configure
 the connection executing the target:
 
 ```sql
-SET enable_profiling = 'json';
-SET profiling_coverage = 'ALL';
-SET profiling_output = '/absolute/path/to/optimization/run-001/profile.json';
+set enable_profiling = 'json';
+set profiling_coverage = 'ALL';
+set profiling_output = '/absolute/path/to/optimization/run-001/profile.json';
 ```
 
 Execute/consume the target, preserve its profile before any other statement,
@@ -78,9 +82,10 @@ target/log directories, and processes per account.
 ## Collect query history
 
 Requires Business-plan access, View query history permission (Admin/Builder),
-and a read/write connection. Use a separate observer credential, not the measured
-workload token. Without access, retain profiles/client timings; mark server
-metrics unavailable.
+and a read/write connection. Campaigns use a separate observer credential.
+Lightweight diagnosis may reuse the user's token on a separate collection
+connection if permitted; do not request broader permissions just for diagnosis.
+Without access, retain profiles/client timings; mark server metrics unavailable.
 
 Immediately after the target, preserve its profile and retrieve
 `MD_LAST_QUERY_ID()` before metadata/cleanup. Helpers also tag SQL with

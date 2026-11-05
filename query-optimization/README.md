@@ -2,19 +2,20 @@
 title: Optimize SQL Queries and dbt Projects on MotherDuck
 id: query-optimization
 description: >-
-  Optimize queries and dbt workloads using generated query profiles, isolated
-  experiments, correctness checks, and auditable measurements. Use when a user
-  supplies a query, a query group, or a dbt project to optimize on MotherDuck.
+  Diagnose slow queries with an existing user token, or optimize SQL and dbt
+  workloads through isolated experiments, profiles, correctness checks, and
+  auditable measurements on MotherDuck.
 type: example
 category: getting-started
 features: [admin_api, shares]
 tags: [dbt, python]
 prompt: >-
-  I want to optimize my SQL queries or dbt project on MotherDuck. Help me adapt
+  I want to diagnose or optimize SQL queries or a dbt project on MotherDuck. Help me adapt
   the "Optimize SQL Queries and dbt Projects on MotherDuck" recipe to my own
-  data and use case, using it as a guide. Generate profiles, propose and test
-  changes in isolated experiments, and preserve reports, diffs, and resumable
-  evidence. Leave my original source unchanged unless I explicitly request
+  data and use case, using it as a guide. Use my existing token for single-query
+  diagnosis; reserve isolated resources for optimization campaigns. Generate
+  profiles and preserve reports, diffs, and resumable evidence.
+  Leave my original source unchanged unless I explicitly request
   edits: https://motherduck.com/docs/cookbook/query-optimization
 published_date: 2026-10-23
 ---
@@ -27,34 +28,39 @@ unchanged and make no commits unless explicitly authorized.
 
 ## How it works
 
-Read the [methodology](methodology.md) first. Use [measurement](motherduck-measurement.md)
-to generate profiles and collect query history; consult [DuckDB patterns](duckdb-patterns.md)
-only for observed bottlenecks. No existing profiles or internal tooling required.
+For one slow read-only query, use [lightweight diagnosis](methodology.md#single-slow-query)
+with the user's existing token: no new accounts, clones, or campaign harness.
+Use the full methodology for dbt, write-query, or broader optimization campaigns.
+Generate [profiles/history](motherduck-measurement.md), then consult
+[DuckDB patterns](duckdb-patterns.md) for observed bottlenecks. No existing
+profiles or internal tooling required.
 
 The [helpers](scripts/) capture SQL profiles and paired timings, not resource
 provisioning or campaign orchestration. Adapt an isolated runner for dbt jobs.
 
 ## Questions to answer
 
-Discover what the project provides; clarify only missing inputs:
+Discover what the project provides; clarify only missing inputs. Single-query
+diagnosis needs SQL/parameters, database access, the existing token, and execution
+conditions; management credentials and compute-slot limits are campaign-only.
 
 1. Goal: query, query group, or dbt project.
 2. Workload: SQL and parameters, or project and exact dbt invocation, selectors,
    exclusions, variables, and target. Confirm dbt focus: incremental runs, full
    refreshes, initial builds/backfills, or multiple modes. Never assume full refresh.
-3. Credentials: secret references with service-account/Duckling management
-   capability and source-data access. Admin/Builder include platform permissions;
-   verify actual capabilities and data grants.
-4. Sources: databases/shares; use the same pinned snapshot for both variants.
-5. Compute envelope: maximum service accounts, per-size limits, allowed query/job
+3. Credentials: secret references with source-data access. Campaigns also need
+   service-account/Duckling management capability; verify permissions and grants.
+4. Sources: databases/shares; comparisons need stable inputs. Campaigns pin a snapshot.
+5. Campaign compute envelope: maximum service accounts, per-size limits, allowed query/job
    Duckling sizes, and starting dbt threads. Size and threads remain tunable.
 
-Suggest smaller query-exploration slots and representative job-sized slots;
+For campaigns, suggest smaller query-exploration slots and representative job-sized slots;
 increase within the envelope if memory pressure makes exploration unrepresentative.
 
 ## Caveats
 
-- `EXPLAIN ANALYZE` executes writes. Use dedicated credentials and disposable targets.
+- `explain analyze` executes SQL. Lightweight diagnosis is read-only; writes
+  and dbt require disposable targets and campaign credentials.
 - Helpers accept one `SELECT`, optionally as CTAS; these do not measure a full
   dbt job or its actual incremental writes.
 - Profile for diagnosis; measure timing without profiling. Follow methodology
@@ -65,7 +71,7 @@ increase within the envelope if memory pressure makes exploration unrepresentati
 
 | Helper option | Meaning |
 | --- | --- |
-| `--database` | `md:<experiment_clone>` or an isolated local DuckDB path. |
+| `--database` | Existing database for read-only diagnosis; experiment clone for campaigns. |
 | `--sql` / `--baseline` / `--candidate` | SQL files, including compiled model SELECTs. |
 | `--mode` | `explain` (default), `profiling`, or `timing`. |
 | `--materialize` | Include CTAS into a unique disposable `main.__mdopt_*` table. |
@@ -82,7 +88,11 @@ environment; record versions. No recipe dependency pins or original dependency
 edits/upgrades. Helpers require Python 3.10+; adapt them for older runtimes.
 Commands assume the prepared environment and this recipe's working directory.
 
-Provision the isolated slot/clone, prepare conditions, and expose its token
+For a single-query diagnosis, use [direct profiling](motherduck-measurement.md#capture-profiles)
+with the existing user token. Optional helpers accept `--token-env MOTHERDUCK_TOKEN`;
+MotherDuck helper runs still require `--conditions` and perform warm-up as configured.
+
+For campaigns, provision the isolated slot/clone, prepare conditions, and expose its token
 through the environment. Profile the customer's SQL, then measure one pair:
 
 ```bash
@@ -104,8 +114,9 @@ table-model writes. Never use it with a read-scaling token.
 
 ## Security
 
-Separate provisioning, experiment, and observer credentials. Keep secrets out of
-SQL, artifacts, logs, and diffs. Clone only approved sources through restricted
+Campaigns separate provisioning, experiment, and observer credentials; lightweight
+diagnosis reuses the user's token without changing its permissions. Keep secrets
+out of SQL, artifacts, logs, and diffs. Clone only approved sources through restricted
 shares; clean only campaign-owned resources. Review SQL/profile artifacts for
 sensitive names and literals before sharing.
 
