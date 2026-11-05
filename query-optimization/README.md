@@ -1,30 +1,25 @@
 ---
-title: Optimize SQL Queries and dbt Projects on MotherDuck
+title: Optimize SQL Queries and/or complex workloads like dbt Projects on MotherDuck
 id: query-optimization
 description: >-
-  Diagnose slow queries with an existing user token, or optimize SQL and dbt
-  workloads through isolated experiments, profiles, correctness checks, and
-  auditable measurements on MotherDuck.
+  Harness to diagnose and optimize queries and/or complex workloads like dbt Projects
+  with isolated experiments, profiles, correctness checks, and auditable measurements
+  on MotherDuck.
 type: example
 category: getting-started
-features: [admin_api, shares]
-tags: [dbt, python]
+features: [shares]
+tags: [dbt, migrate]
 prompt: >-
-  I want to diagnose or optimize SQL queries or a dbt project on MotherDuck. Help me adapt
-  the "Optimize SQL Queries and dbt Projects on MotherDuck" recipe to my own
-  data and use case, using it as a guide. Use my existing token for single-query
-  diagnosis; reserve isolated resources for optimization campaigns. Generate
-  profiles and preserve reports, diffs, and resumable evidence.
-  Leave my original source unchanged unless I explicitly request
-  edits: https://motherduck.com/docs/cookbook/query-optimization
-published_date: 2026-10-23
+  I want to optimize SQL queries or a dbt project on MotherDuck.
+  Help me adapt this recipe to my own data and use case, using it as a guide: https://motherduck.com/docs/cookbook/query-optimization
+published_date: 2026-11-05
 ---
 
-# Optimize SQL Queries and dbt Projects on MotherDuck
+# Optimize SQL Queries and/or complex workloads like dbt Projects on MotherDuck
 
-Optimize a query, query group, or dbt project using public interfaces.
-Always deliver reports, diffs, and resumable artifacts; leave original sources
-unchanged and make no commits unless explicitly authorized.
+Harness to diagnose and optimize queries and/or complex workloads like dbt Projects with
+isolated experiments, profiles, correctness checks, and auditable measurements on
+MotherDuck.
 
 ## How it works
 
