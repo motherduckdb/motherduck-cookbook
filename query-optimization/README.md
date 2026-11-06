@@ -26,14 +26,30 @@ MotherDuck.
 For one slow read-only query, use [lightweight diagnosis](methodology.md#single-slow-query)
 with the user's existing token: no new accounts, clones, or campaign harness.
 Use the full methodology for dbt, write-query, or broader optimization campaigns.
-Campaigns log every run, change and decision to a MotherDuck results database and share,
-visualized in the [Optimization results Dive](results/README.md).
 Generate [profiles/history](motherduck-measurement.md), then consult
 [DuckDB patterns](duckdb-patterns.md) for observed bottlenecks. No existing
 profiles or internal tooling required.
 
 The [helpers](scripts/) capture SQL profiles and paired timings, not resource
 provisioning or campaign orchestration. Adapt an isolated runner for dbt jobs.
+
+## Results Dive
+
+Campaigns log every experiment, run and decision as they go. The log goes to a MotherDuck
+results database, shared with the organization, and the **Optimization results** Dive shows it:
+
+- the best configuration found;
+- what each experiment changed and what it gained or cost against the original;
+- which Duckling sizes were used;
+- where pipeline time and spill go.
+
+The Dive follows the MotherDuck light or dark theme.
+
+![Optimization results Dive: KPIs, best configuration and what each experiment did](results/assets/light-overview.png)
+
+Run `setup` once per organization to create the database, share and Dive. Agents then log with
+`record_results.py`. See [results/README.md](results/README.md) for setup, the logging rules
+and more screenshots.
 
 ## Questions to answer
 
