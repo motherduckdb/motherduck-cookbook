@@ -62,6 +62,12 @@ jobs:
       - name: Run Snowflake migration assessment Flight tests
         run: uv run --with pytest --with-requirements flight-plans/flight-snowflake-migration-assessment/requirements.txt python -m pytest tests/test_snowflake_migration_assessment_flight.py -q
 
+      - name: Run query optimization tests
+        # DuckDB: the newest version MotherDuck supports. pytz: needed for TIMESTAMPTZ values.
+        run: |
+          duckdb_version="$(curl -fsS --retry 3 https://api.motherduck.com/latest_supported_duckdb_version.txt)"
+          uv run --with pytest --with pytz --with "duckdb==${duckdb_version}" python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
+
       - name: Build catalog preview
         run: |
           ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"

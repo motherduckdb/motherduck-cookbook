@@ -7,7 +7,7 @@ description: >-
   on MotherDuck.
 type: example
 category: getting-started
-features: [shares]
+features: [dives, shares]
 tags: [dbt, migrate]
 prompt: >-
   I want to optimize SQL queries or a dbt project on MotherDuck.
@@ -32,6 +32,24 @@ profiles or internal tooling required.
 
 The [helpers](scripts/) capture SQL profiles and paired timings, not resource
 provisioning or campaign orchestration. Adapt an isolated runner for dbt jobs.
+
+## Results Dive
+
+Campaigns log every experiment, run and decision as they go. The log goes to a MotherDuck
+results database, shared with the organization, and the **Optimization results** Dive shows it:
+
+- the best configuration found;
+- what each experiment changed and what it gained or cost against the original;
+- which Duckling sizes were used;
+- where pipeline time and spill go.
+
+The Dive follows the MotherDuck light or dark theme.
+
+![Optimization results Dive: KPIs, best configuration and what each experiment did](results/assets/light-overview.png)
+
+Run `setup` once per organization to create the database, share and Dive. Agents then log with
+`record_results.py`. See [results/README.md](results/README.md) for setup, the logging rules
+and more screenshots.
 
 ## Questions to answer
 
@@ -118,4 +136,5 @@ sensitive names and literals before sharing.
 ## Learn more
 
 - [Experiment checkpoint](templates/experiment.json) and [report](templates/report.md).
+- [Results database, logging rules and Dive](results/README.md).
 - [Read-scaling benchmark](../motherduck-performance-benchmark/) for read-only load tests.
