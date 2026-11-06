@@ -26,12 +26,13 @@ Use an observer token (read/write on the results database; never the experiment 
 
 ```bash
 export MOTHERDUCK_TOKEN=...   # observer token
-uv run --with duckdb==1.5.6 python results/record_results.py setup
+# newest DuckDB that MotherDuck supports; a newer client may not connect
+export DUCKDB_VERSION=$(curl -fsS https://api.motherduck.com/latest_supported_duckdb_version.txt)
+uv run --with "duckdb==$DUCKDB_VERSION" python results/record_results.py setup
 ```
 
-Keep the DuckDB pin: it is the newest version MotherDuck supports, and a newer client may not
-connect. Check the [version lifecycle](https://motherduck.com/docs/troubleshooting/version-lifecycle-schedules/)
-before raising it.
+Always install DuckDB at the version that endpoint returns. Don't hardcode a version, and don't
+install the latest from PyPI.
 
 `setup` is idempotent. It creates the `optimization_results` database, its tables and views
 ([schema.sql](schema.sql)), the `optimization_results_share` share (organization access,
@@ -148,7 +149,7 @@ Timestamps are ISO-8601 (UTC or with an offset). `campaign_id` defaults to the o
 ## Examples
 
 ```bash
-R="uv run --with duckdb==1.5.6 python results/record_results.py"
+R="uv run --with duckdb==$DUCKDB_VERSION python results/record_results.py"   # DUCKDB_VERSION from setup
 
 $R log --type campaign --json '{"campaign_id": "orders-dbt-2026-11", "title": "Orders dbt project",
   "goal": "Cut the nightly dbt build without changing results", "workload_kind": "dbt",

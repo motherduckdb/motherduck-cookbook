@@ -63,8 +63,10 @@ jobs:
         run: uv run --with pytest --with-requirements flight-plans/flight-snowflake-migration-assessment/requirements.txt python -m pytest tests/test_snowflake_migration_assessment_flight.py -q
 
       - name: Run query optimization tests
-        # pytz: DuckDB's Python client needs it to return TIMESTAMPTZ values
-        run: uv run --with pytest --with pytz --with duckdb==1.5.6 python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
+        # DuckDB: the newest version MotherDuck supports. pytz: needed for TIMESTAMPTZ values.
+        run: |
+          duckdb_version="$(curl -fsS --retry 3 https://api.motherduck.com/latest_supported_duckdb_version.txt)"
+          uv run --with pytest --with pytz --with "duckdb==${duckdb_version}" python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
 
       - name: Build catalog preview
         run: |
