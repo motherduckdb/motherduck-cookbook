@@ -64,7 +64,7 @@ jobs:
 
       - name: Run query optimization tests
         # pytz: DuckDB's Python client needs it to return TIMESTAMPTZ values
-        run: uv run --with pytest --with pytz --with duckdb==1.5.5 python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
+        run: uv run --with pytest --with pytz --with duckdb==1.5.6 python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
 
       - name: Build catalog preview
         run: |
