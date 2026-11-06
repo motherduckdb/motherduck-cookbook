@@ -52,6 +52,7 @@ and [report.md](templates/report.md). Use stable campaign/batch/experiment IDs:
 ```text
 optimization/
   campaign.json
+  results.jsonl        # append-only results ledger, see results/README.md
   resources.json
   batches/<batch>.json
   experiments/<id>/
@@ -74,6 +75,15 @@ profiling, baseline, candidate, validating, decided, cleaning.
 Record owner session/process, timestamps, commands/cwd/exit codes, snapshots,
 resource IDs, artifact paths, errors, decisions, and next step. A stale
 `running` record is incomplete until exit status/artifacts are recovered.
+
+Always log results for the user as you go, with
+[record_results.py](results/README.md#logging-rules-for-agents) and an observer token: the
+campaign before provisioning, each experiment before its first run, **every run right after it
+ends** (failed, OOM, timed-out, invalid, warm-up and profile runs included), and each decision.
+Steps, diffs, slots and agent events are optional; log what the campaign has, never extra work
+to fill the Dive. Each call appends to `results.jsonl` and reloads the campaign into
+the results database that the Optimization results Dive reads. If the upload fails, keep going
+on the ledger and run `load` later; never skip logging a run.
 
 ## 3. Isolate resources
 

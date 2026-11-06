@@ -2,3 +2,4 @@ optimization/
 *.duckdb*
 *.env
 __pycache__/
+results/.dive_id

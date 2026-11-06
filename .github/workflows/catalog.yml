@@ -62,6 +62,10 @@ jobs:
       - name: Run Snowflake migration assessment Flight tests
         run: uv run --with pytest --with-requirements flight-plans/flight-snowflake-migration-assessment/requirements.txt python -m pytest tests/test_snowflake_migration_assessment_flight.py -q
 
+      - name: Run query optimization tests
+        # pytz: DuckDB's Python client needs it to return TIMESTAMPTZ values
+        run: uv run --with pytest --with pytz --with duckdb==1.5.5 python -m pytest tests/test_query_optimization.py tests/test_query_optimization_results.py -q
+
       - name: Build catalog preview
         run: |
           ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"

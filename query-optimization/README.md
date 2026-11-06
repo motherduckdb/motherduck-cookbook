@@ -7,7 +7,7 @@ description: >-
   on MotherDuck.
 type: example
 category: getting-started
-features: [shares]
+features: [dives, shares]
 tags: [dbt, migrate]
 prompt: >-
   I want to optimize SQL queries or a dbt project on MotherDuck.
@@ -26,6 +26,8 @@ MotherDuck.
 For one slow read-only query, use [lightweight diagnosis](methodology.md#single-slow-query)
 with the user's existing token: no new accounts, clones, or campaign harness.
 Use the full methodology for dbt, write-query, or broader optimization campaigns.
+Campaigns log every run, change and decision to a MotherDuck results database and share,
+visualized in the [Optimization results Dive](results/README.md).
 Generate [profiles/history](motherduck-measurement.md), then consult
 [DuckDB patterns](duckdb-patterns.md) for observed bottlenecks. No existing
 profiles or internal tooling required.
@@ -118,4 +120,5 @@ sensitive names and literals before sharing.
 ## Learn more
 
 - [Experiment checkpoint](templates/experiment.json) and [report](templates/report.md).
+- [Results database, logging rules and Dive](results/README.md).
 - [Read-scaling benchmark](../motherduck-performance-benchmark/) for read-only load tests.
