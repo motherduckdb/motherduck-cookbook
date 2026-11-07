@@ -89,7 +89,8 @@ injects it as `MOTHERDUCK_TOKEN`.
 
 ## Anatomy of an example
 
-Every example README starts with YAML front matter holding exactly nine keys:
+Every example README starts with YAML front matter holding these nine keys,
+plus the optional `featured` and `refs`:
 
 ```yaml
 ---
@@ -137,6 +138,31 @@ published_date: 2024-12-11      # publish date (YYYY-MM-DD); downstream orders b
   can order recipes by recency.
 - `featured` (optional) is `true` for recipes the MotherDuck product highlights.
   Omit it otherwise; the catalog emits `featured: false` by default.
+- `refs` (optional) lists what the recipe uses that links in its body don't
+  capture, most often a dataset it queries in SQL. Agents reading the recipe
+  through the docs Library API get these alongside the recipe's files and
+  links. Each entry has a `kind`:
+
+  ```yaml
+  refs:
+    - kind: dataset                 # needs database, plus docs or url
+      database: sample_data
+      tables: [hn.hacker_news]      # optional
+      attach: ATTACH '...' AS x     # optional: SQL that makes it available
+      docs: /getting-started/sample-data-queries/hacker-news
+    - kind: doc                     # a docs page, path without /docs
+      path: /key-tasks/flights
+    - kind: url                     # anything else, link only
+      url: https://dlthub.com/docs/intro
+      title: dlt docs
+    - kind: skill                   # an agent skill by name
+      id: motherduck-create-flight
+    - kind: recipe                  # another recipe in this catalog
+      id: dbt-ingestion-s3
+  ```
+
+  There is no need to repeat links already in the body; those become refs on
+  their own.
 
 The body follows a consistent, skimmable structure:
 
