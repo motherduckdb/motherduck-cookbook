@@ -459,3 +459,76 @@ featured: "yes"
         build_catalog_module.CatalogError, match="featured must be true or false"
     ):
         build_catalog_module.build_catalog(repo_root)
+
+
+REFS_FRONTMATTER = FILES_FRONTMATTER + """
+refs:
+  - kind: dataset
+    database: sample_data
+    tables: [hn.hacker_news]
+    title: Hacker News
+    docs: /getting-started/sample-data-queries/hacker-news
+  - kind: doc
+    path: /key-tasks/flights
+  - kind: url
+    url: https://dlthub.com/docs/intro
+    title: dlt docs
+  - kind: skill
+    id: motherduck-create-flight
+  - kind: recipe
+    id: python-ingestion
+"""
+
+
+def test_declared_refs_are_emitted_and_match_schema(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(repo_root / "python-ingestion" / "README.md", REFS_FRONTMATTER)
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+
+    assert catalog["items"][0]["refs"] == [
+        {
+            "kind": "dataset",
+            "database": "sample_data",
+            "tables": ["hn.hacker_news"],
+            "title": "Hacker News",
+            "docs": "/getting-started/sample-data-queries/hacker-news",
+        },
+        {"kind": "doc", "path": "/key-tasks/flights"},
+        {"kind": "url", "url": "https://dlthub.com/docs/intro", "title": "dlt docs"},
+        {"kind": "skill", "id": "motherduck-create-flight"},
+        {"kind": "recipe", "id": "python-ingestion"},
+    ]
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(catalog)
+
+
+def test_refs_are_omitted_when_none_are_declared(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(repo_root / "python-ingestion" / "README.md", FILES_FRONTMATTER)
+
+    catalog = build_catalog_module.build_catalog(repo_root)
+
+    assert "refs" not in catalog["items"][0]
+
+
+@pytest.mark.parametrize(
+    ("refs_yaml", "message"),
+    [
+        ("refs: sample_data", "refs must be a list"),
+        ("refs:\n  - sample_data", r"refs\[0\] must be a mapping"),
+        ("refs:\n  - kind: dive\n    id: d1", "kind must be one of"),
+        ("refs:\n  - kind: doc", r"needs \['path'\]"),
+        ("refs:\n  - kind: doc\n    path: /x\n    href: /y", "unknown keys"),
+        ("refs:\n  - kind: dataset\n    database: sample_data", "needs docs"),
+        ("refs:\n  - kind: dataset\n    database: x\n    url: ftp://x", "url must start with"),
+        ("refs:\n  - kind: dataset\n    database: x\n    docs: /d\n    tables: x", "tables must be a list"),
+        ("refs:\n  - kind: recipe\n    id: not-in-catalog", "not in the catalog"),
+    ],
+)
+def test_invalid_refs_fail(tmp_path: Path, refs_yaml: str, message: str) -> None:
+    repo_root = tmp_path / "repo"
+    write_readme(repo_root / "python-ingestion" / "README.md", FILES_FRONTMATTER + refs_yaml)
+
+    with pytest.raises(build_catalog_module.CatalogError, match=message):
+        build_catalog_module.build_catalog(repo_root)
