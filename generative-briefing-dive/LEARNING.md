@@ -6,6 +6,7 @@
 - What the next analysis reads back
 - Guides
 - Viewer feedback
+- Questions and viewer notes
 - The analyst step and the number check
 - Improving prompts and models
 - Recipe settings
@@ -23,6 +24,7 @@ The Flight creates these tables in `"<DB>".main`:
 | `llm_calls` | `prompt()` call | Step (`plan`, `probe`, `narrate`), model, prompt version, input and output size, latency, success |
 | `insights` | insight on a page | Tone, title, body, investigation question, continuity, first seen, times seen |
 | `feedback` | viewer event | Ratings, chart-type switches, hidden blocks, moved blocks, Investigate clicks |
+| `annotations` | viewer note | Kind (`date` or `topic`), the period or dimension and value, kind of note, the note, the question it answers, whether it's active |
 | `evals` | eval question | Prompt version, model, plan score, grounded share, latency |
 
 The prompt version is a hash of every instruction and schema, so it changes whenever a prompt does.
@@ -59,6 +61,20 @@ A Dive can't write to a database, so viewer actions go through the Flight:
 
 The Dive's **Memory** page reads these tables directly. It shows the insight timeline, frequent questions, viewer actions, and every prompt version with its speed, grounded share, eval scores and ratings.
 
+## Questions and viewer notes
+
+The briefing asks its viewers about what the data can't explain, and remembers the answers as notes.
+
+- **Asking:** the narrator returns up to `VIEWER_QUESTIONS` (2) questions when the data shows what moved but not why in business terms. A question is about a date (a spike in one period of a time chart) or a topic (one value of a dimension, such as a referrer, page or borough). Each offers 2 to 4 likely explanations, such as "Partner referral" or "Bot traffic".
+- **Checking:** the engine keeps a question only when its `x` is in the block's data and its dimension is in the catalog. It drops questions an earlier note already answers, and questions asked in the last three briefings.
+- **Answering:** the page shows the questions under the insights. A viewer picks an explanation or writes one, chooses a kind (event, release, campaign, data issue, expected, not important) and answers. The answer goes to the Flight as an `annotate` event in a `MODE=feedback` run, and the Dive shows it at once while the run saves it.
+- **Unprompted notes:** the pin on any time chart or category chart adds a note to one of its periods or values.
+- **Where notes show:**
+  - **Charts:** every block that shows that date or value shows the note, as a marker on line and area charts and as a line under the block.
+  - **The narrator:** the next analysis reads every active note. It uses a note as the explanation when the data moves there, treats a period noted as a data issue as unreliable, and doesn't report what viewers noted as not important unless it grows.
+  - **The memory Guide:** it lists the notes, so AI Chat and other agents see them too.
+  - **The Memory page:** it lists them with a Remove button, which sends an `unannotate` event.
+
 ## The analyst step and the number check
 
 - **Analyst step:** after compiling the page, one `prompt()` call proposes up to `ANALYST_PROBES` follow-up queries, such as which segment drove a change. Each is a hypothesis built from catalog ids. Python compiles and runs them like any block. The narrator uses the results as evidence and may put two of them on the page, marked as follow-up queries.
@@ -83,3 +99,4 @@ The Dive's **Memory** page reads these tables directly. It shows the insight tim
 | `MEMORY_GUIDE` | `True` | Write the memory Guide after each briefing |
 | `ANALYST_PROBES` | `3` | Follow-up queries before narrating; `0` turns the step off |
 | `DEFAULT_MODEL` | `gpt-6-luna` | The `prompt()` model when the Flight's `MODEL` config is empty. Check current model names in the `prompt()` docs. |
+| `VIEWER_QUESTIONS` | `2` | Questions the narrator may ask viewers per page; `0` turns them off |

@@ -33,6 +33,7 @@ import {
 	LayoutGrid,
 	Loader2,
 	Palette,
+	Pin,
 	RefreshCw,
 	RotateCcw,
 	Sparkles,
@@ -274,7 +275,7 @@ function PagesMenu({ rows, selected, onSelect }: any) {
 type Row = { t: string; slots: (string | null)[] };
 
 // Reading order: numbers, then charts (any registered chart type), insights, tables, text.
-const RANK: Record<string, number> = { kpi: 0, table: 3, text: 4, callouts: 2, timeline: 3 };
+const RANK: Record<string, number> = { kpi: 0, table: 3, text: 4, callouts: 2, questions: 2, timeline: 3 };
 const isChart = (b: any) => !(b.type in RANK);
 
 function templateFor(spans: number[]) {
@@ -284,8 +285,9 @@ function templateFor(spans: number[]) {
 // Default arrangement: KPIs, then charts, callouts after the first chart row, then tables.
 function defaultRows(blocks: any[], kind = ''): Row[] {
 	const ordered = [...blocks].sort((a, b) => (RANK[a.type] ?? 1) - (RANK[b.type] ?? 1));
-	const callouts = ordered.filter((b) => b.type === 'callouts');
-	const rest = ordered.filter((b) => b.type !== 'callouts');
+	// Insights and the page's questions for viewers lead; they are placed below.
+	const callouts = ordered.filter((b) => b.type === 'callouts' || b.type === 'questions');
+	const rest = ordered.filter((b) => b.type !== 'callouts' && b.type !== 'questions');
 	const rows: Row[] = [];
 	let cur: any[] = [];
 	const flush = () => {
@@ -449,8 +451,21 @@ function viewSpans(row: Row) {
 
 // ---- Page ----------------------------------------------------------------------------
 
+// What a viewer can attach a note to in a block: its periods, or the values of its dimension.
+function noteTargets(b: any) {
+	const time = b.x?.kind === 'time';
+	if (!b.data?.length || (!time && !b.source?.dimension) || ['kpi', 'callouts', 'questions'].includes(b.type)) return null;
+	const xs = b.data.map((d: any) => String(d.x));
+	return {
+		kind: time ? 'date' : 'topic',
+		options: (time ? [...xs].reverse() : xs).slice(0, 60).map((x: string) => ({ value: x, label: time ? fmtPeriod(x, b.x?.grain) : x })),
+	};
+}
+
 function BlockCard({ b, layout, arrange, flash, onDraft, jump, nav }: any) {
 	const t = useTheme();
+	const [noting, setNoting] = useState(false);
+	const targets = nav?.annotate ? noteTargets(b) : null;
 	const entry = REGISTRY[b.type];
 	const body = <BlockView block={b} variant={layout.variant(b)} onJump={jump} nav={arrange ? null : nav} />;
 	if (!arrange && entry && !entry.chrome) return body;
@@ -472,15 +487,33 @@ function BlockCard({ b, layout, arrange, flash, onDraft, jump, nav }: any) {
 						</Button>
 					</>
 				) : b.type !== 'callouts' && !isKpi ? (
-					<Button variant="ghost" size="icon" title="Ask a follow-up about this" onClick={() => onDraft(`${b.title}: why, and what is driving it?`)}>
-						<Wand2 size={13} />
-					</Button>
+					<>
+						{targets && (
+							<Button variant="ghost" size="icon" title="Add a note: what happened on a date, or about a value" onClick={() => setNoting(!noting)}>
+								<Pin size={13} />
+							</Button>
+						)}
+						<Button variant="ghost" size="icon" title="Ask a follow-up about this" onClick={() => onDraft(`${b.title}: why, and what is driving it?`)}>
+							<Wand2 size={13} />
+						</Button>
+					</>
 				) : null
 			}
 			footer={!arrange && b.source ? <SourceFooter block={b} /> : null}
 		>
 			{arrange ? <div style={{ maxHeight: 150, overflow: 'hidden', pointerEvents: 'none', opacity: 0.55, maskImage: 'linear-gradient(black 60%, transparent)' }}>{body}</div> : body}
 			{!arrange && <BlockInsight block={b} />}
+			{!arrange && <NotesLine block={b} />}
+			{!arrange && noting && targets && (
+				<NoteForm
+					targets={targets.options}
+					onCancel={() => setNoting(false)}
+					onSave={(v: any) => {
+						nav.annotate({ kind: targets.kind, x: v.target, grain: b.x?.grain, dimension: targets.kind === 'topic' ? b.source.dimension : '', value: targets.kind === 'topic' ? v.target : '', category: v.category, note: v.note });
+						setNoting(false);
+					}}
+				/>
+			)}
 		</Card>
 	);
 }
@@ -511,7 +544,7 @@ function ContextLine({ spec }: any) {
 }
 
 // What the Dive has learned, read straight from the Flight's log tables.
-function MemoryPage({ db }: any) {
+function MemoryPage({ db, nav }: any) {
 	const t = useTheme();
 	const T = (name: string) => `"${db}"."main"."${name}"`;
 	const runs = useSQLQuery(`
@@ -594,6 +627,31 @@ function MemoryPage({ db }: any) {
 					<Card title={timeline.title} icon={componentIcon('timeline')}>
 						<BlockView block={timeline} />
 					</Card>
+					<Card title="Notes from viewers" icon={Pin} description="What people said about dates and segments, mostly in answer to the briefing's questions. Every analysis reads them, and they appear on the charts.">
+						{(nav?.notes || []).length ? (
+							<div className="space-y-2">
+								{nav.notes.map((n: any, i: number) => (
+									<div key={n.id || i} className="flex flex-wrap items-baseline gap-x-2 text-sm" style={{ borderTop: i ? `1px solid ${t.flat ? t.rule : t.line}` : 'none', paddingTop: i ? 8 : 0 }}>
+										<span className="font-semibold">{n.kind === 'date' ? (n.grain === 'week' ? `Week of ${n.x}` : n.x) : `${n.dimension.replace(/_/g, ' ')}: ${n.value}`}</span>
+										<Badge>{CATEGORY_LABEL[n.category] || 'Note'}</Badge>
+										<span style={{ color: t.text }}>{n.note}</span>
+										<span className="ml-auto text-xs" style={{ color: t.muted }}>
+											{n.pending ? 'saving…' : n.created}
+											{n.id && nav?.unannotate && (
+												<button className="ml-2" style={{ cursor: 'pointer', borderBottom: `1px solid ${t.muted}` }} onClick={() => nav.unannotate(n.id)}>
+													Remove
+												</button>
+											)}
+										</span>
+									</div>
+								))}
+							</div>
+						) : (
+							<p className="text-sm" style={{ color: t.muted }}>
+								No notes yet. Answer a briefing's question, or use the pin on a chart to note what happened on a date or with a segment.
+							</p>
+						)}
+					</Card>
 					<div className="grid gap-10 md:grid-cols-2">
 						{blocks.slice(0, 2).map((b) => (
 							<Card key={b.id} title={b.title} icon={componentIcon('table')}>
@@ -621,7 +679,8 @@ function SpecPage({ spec, arrange, onDraft, nav }: any) {
 	const ref = useRef<HTMLDivElement>(null);
 	const width = useWidth(ref);
 	const narrow = width < 760;
-	const blocks: any[] = spec.blocks || [];
+	const notes = nav?.notes || [];
+	const blocks: any[] = useMemo(() => (spec.blocks || []).map((b: any) => withNotes(b, notes)), [spec.blocks, notes]);
 	const layout = useLayout(spec.id, blocks, spec.kind, nav?.learned || {}, (e: any) => nav?.signal?.({ ...e, s: spec.id }));
 	const [flash, setFlash] = useState<string | null>(null);
 	const [showSummary, setShowSummary] = useState(false);
@@ -908,6 +967,20 @@ export default function GenerativeBriefing() {
 		return out;
 	}, [learnedQ.data]);
 
+	// Viewer notes on dates and topics. Saved through the Flight; shown at once from local state.
+	const annQ = useSQLQuery(`SELECT annotation_id, kind, x, grain, dimension, value, category, note, strftime(created_at, '%Y-%m-%d') AS created
+		FROM "${APP.db}"."main"."annotations" WHERE active ORDER BY created_at DESC LIMIT 200`);
+	const [localNotes, setLocalNotes] = useState<any[]>([]);
+	const [removed, setRemoved] = useState<string[]>([]);
+	const notes = useMemo(() => {
+		const saved = (Array.isArray(annQ.data) ? annQ.data : [])
+			.map((r: any) => ({ id: String(r.annotation_id), kind: String(r.kind), x: String(r.x), grain: String(r.grain || ''), dimension: String(r.dimension || ''), value: String(r.value || ''), category: String(r.category), note: String(r.note || ''), created: String(r.created) }))
+			.filter((n: any) => !removed.includes(n.id));
+		const same = (a: any, b: any) => a.kind === b.kind && (a.kind === 'date' ? a.x === b.x : a.dimension === b.dimension && a.value === b.value) && a.note === b.note;
+		return [...localNotes.filter((l) => !saved.some((n: any) => same(n, l))), ...saved];
+	}, [annQ.data, localNotes, removed]);
+	const refreshNotes = () => [15000, 40000].forEach((ms) => setTimeout(() => annQ.refetch(), ms));
+
 	const gen = useGenerator((requestId) => {
 		setWaitingFor(requestId);
 		list.refetch();
@@ -970,6 +1043,18 @@ export default function GenerativeBriefing() {
 			gen.generate('investigate', String(item.question).slice(0, 600), currentId, '', takeSignals([{ e: 'investigate', s: currentId, t: String(item.title || '').slice(0, 120) }]));
 		},
 		learned,
+		notes,
+		noteFor: (item: any) => notes.find((n: any) => n.kind === item.kind && (item.kind === 'date' ? n.x === String(item.x).slice(0, 10) : n.dimension === item.dimension && n.value === item.value)) || null,
+		annotate: (n: any) => {
+			const x = n.kind === 'date' ? String(n.x).slice(0, 10) : String(n.value);
+			setLocalNotes((prev) => [{ ...n, x, pending: true }, ...prev]);
+			sendFeedback([{ e: 'annotate', s: currentId, k: n.kind, x, g: n.grain || '', dim: n.dimension || '', val: n.value || '', cat: n.category, note: n.note || '', q: n.question || '' }]);
+			refreshNotes();
+		},
+		unannotate: (id: string) => {
+			setRemoved((prev) => [...prev, id]);
+			sendFeedback([{ e: 'unannotate', s: currentId, t: id }]);
+		},
 		signal: (e: any) => setSignals((prev) => [...prev, e].slice(-50)),
 		rating: (kind: string, target: string) => ratings[`${currentId}|${kind}|${target}`] || '',
 		rate: (kind: string, target: string, value: string) => {
@@ -1011,7 +1096,7 @@ export default function GenerativeBriefing() {
 					</div>
 
 					{view === 'memory' ? (
-						<MemoryPage db={APP.db} />
+						<MemoryPage db={APP.db} nav={nav} />
 					) : list.isError ? (
 						<Callout tone="critical" title="Couldn't load briefings">
 							{String(list.error)}

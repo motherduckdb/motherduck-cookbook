@@ -828,7 +828,7 @@ Catalog:
 NARRATE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["headline", "summary", "callouts", "blocks", "follow_ups", "promote"],
+    "required": ["headline", "summary", "callouts", "blocks", "follow_ups", "promote", "viewer_questions"],
     "properties": {
         "headline": {"type": "string", "description": "One sentence, the single most important finding, with a number"},
         "summary": {"type": "string", "description": "2-3 plain sentences a manager can read in 15 seconds. Specific numbers. No hype words."},
@@ -871,6 +871,22 @@ NARRATE_SCHEMA = {
         },
         "follow_ups": {"type": "array", "items": S, "description": "3 short follow-up questions a manager would ask next, answerable with the catalog"},
         "promote": {"type": "array", "items": S, "description": "0-2 probe ids (p1, p2, p3) whose result a reader should see on the page"},
+        "viewer_questions": {
+            "type": "array",
+            "description": "0-2 questions for the page's viewers about something the data cannot explain",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["kind", "block_id", "x", "question", "options"],
+                "properties": {
+                    "kind": {"type": "string", "enum": ["date", "topic"], "description": "date: a spike or drop in one period of a time chart; topic: one value of a category (a referrer, page, borough) that behaves unusually"},
+                    "block_id": {"type": "string", "description": "id of the component that shows it"},
+                    "x": {"type": "string", "description": "the exact x value in that component's data: the period for a date, the category value for a topic"},
+                    "question": {"type": "string", "description": "max 20 words, plain, dates written as '2 Nov' (never ISO), e.g. 'What happened in the week of 2 Nov? Other-channel visitors doubled.'"},
+                    "options": {"type": "array", "items": S, "description": "2-4 short likely explanations a viewer can pick, e.g. 'Newsletter mention', 'Bot traffic'"},
+                },
+            },
+        },
     },
 }
 
@@ -881,6 +897,8 @@ Probes are follow-up queries an analyst ran to test why things moved. Use their 
 detected_shifts compare the last 4 weeks with the start of the history; largest_step is the biggest step anywhere in that history, not the current period. Neither is the previous-period comparison the components use: when they point different ways, say which comparison you mean instead of calling it a conflict.
 Memory holds earlier briefings' insights and what viewers did with them. Set each callout's continuity against it: new, ongoing (still true, similar size), worsening, improving, or resolved (an earlier insight that no longer holds; at most one, with tone positive). Set refers_to to the earlier title when continuing it, and say how long an ongoing issue has lasted. Do not repeat an earlier insight unchanged unless it is critical. Avoid insights similar to ones viewers rated not useful.
 Business context from the recipe's Guides (definitions, targets, known events) decides what matters: cite a target when the data crosses it.
+Viewer notes in memory are what people who know the business said about a date or a segment. Use them as the explanation when the data moves there ("the spike in the week of 2 Nov follows the launch viewers noted"), treat periods noted as a data issue as unreliable, and do not report movements noted as not important unless they grow. A component's viewer_notes are notes on periods or values it shows: when a callout, caption or insight discusses that period or value, say what viewers noted.
+Ask viewer_questions when the data shows what moved but not why in business terms: a launch, campaign, partner mention, outage, tracking change or bot traffic that only a person would know. Ask about a sharp spike or drop in one period of a time chart (kind date) or about one segment that changed sharply, such as a single referrer, page or borough (kind topic). Prefer asking over guessing: when a movement drives an insight and nothing in the data, Guides or viewer notes explains its cause, ask one question. Never ask what a viewer note already answers or what open_questions already ask: those are still waiting for an answer. Offer 2-4 concrete likely explanations as options.
 Known context about {domain} (use only when the data supports it): {context}
 Business context from Guides:
 {guides}
@@ -919,6 +937,11 @@ Business context from Guides:
 {guides}
 Catalog:
 {catalog}"""
+
+
+def with_notes(out, block, memory):
+    notes = notes_for(block, memory.get("viewer_notes") or [])
+    return dict(out, viewer_notes=notes) if notes else out
 
 
 def compact(block):
@@ -1018,9 +1041,14 @@ LOG_DDL = [
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.feedback (
         created_at TIMESTAMP, recorded_by VARCHAR, spec_id VARCHAR, event VARCHAR, target VARCHAR,
         value VARCHAR, detail VARCHAR)""",
+    f"""CREATE TABLE IF NOT EXISTS "{DB}".main.annotations (
+        annotation_id VARCHAR, created_at TIMESTAMP, recorded_by VARCHAR, spec_id VARCHAR, kind VARCHAR, x VARCHAR,
+        grain VARCHAR, dimension VARCHAR, value VARCHAR, category VARCHAR, note VARCHAR, question VARCHAR, active BOOLEAN)""",
 ]
 
-FEEDBACK_EVENTS = {"rate_page", "rate_insight", "variant", "hide", "show", "layout", "investigate", "ask", "open", "theme"}
+FEEDBACK_EVENTS = {"rate_page", "rate_insight", "variant", "hide", "show", "layout", "investigate", "ask", "open", "theme", "annotate", "unannotate"}
+NOTE_CATEGORIES = {"event", "release", "campaign", "data_issue", "expected", "noise"}
+VIEWER_QUESTIONS = int(globals().get("VIEWER_QUESTIONS", 2))
 ANALYST_PROBES = int(globals().get("ANALYST_PROBES", 3))
 GUIDE_TOPICS = list(globals().get("GUIDE_TOPICS", []))
 MEMORY_GUIDE = globals().get("MEMORY_GUIDE", True)
@@ -1074,20 +1102,49 @@ def llm(con, model, instructions, payload, name, schema):
     return Run("adhoc", model).llm(con, name, instructions, payload, name, schema)
 
 
+def clean_note(e):
+    """A viewer note, validated: [kind, x, grain, dimension, value, category, note, question], or None."""
+    kind, cat = e.get("k"), e.get("cat") or "event"
+    if kind not in ("date", "topic") or cat not in NOTE_CATEGORIES:
+        return None
+    text = lambda v, n: re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+    x, dim, val = text(e.get("x"), 32), text(e.get("dim"), 64), text(e.get("val"), 200)
+    if kind == "date":
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", x[:10]):
+            return None
+        x, dim, val = x[:10], "", ""
+    elif dim not in ALL_DIMS or not val:
+        return None
+    grain = e.get("g") if e.get("g") in ("day", "week", "month") else ("day" if kind == "date" else "")
+    return [kind, x, grain, dim, val, cat, text(e.get("note"), 240), text(e.get("q"), 300)]
+
+
 def record_feedback(con, raw, recorded_by):
     """Viewer events the Dive collected. A Dive can't write, so it sends them with a Flight run."""
     try:
         events = json.loads(raw or "[]")
     except json.JSONDecodeError:
         return 0
-    rows = []
+    rows, notes = [], []
     for e in events[:60] if isinstance(events, list) else []:
         if not isinstance(e, dict) or e.get("e") not in FEEDBACK_EVENTS:
             continue
         spec_id = str(e.get("s") or "")
         if spec_id and not re.fullmatch(r"[0-9a-f-]{36}", spec_id):
             continue
+        if e["e"] == "annotate":
+            note = clean_note(e)
+            if not note:
+                continue
+            notes.append([str(uuid.uuid4()), utc_now(), recorded_by, spec_id or None, *note])
+            e = dict(e, t=note[1] or note[4], v=note[5], d=note[6])
+        elif e["e"] == "unannotate":
+            if not re.fullmatch(r"[0-9a-f-]{36}", str(e.get("t") or "")):
+                continue
+            con.execute(f'UPDATE "{DB}".main.annotations SET active = false WHERE annotation_id = ?', [e["t"]])
         rows.append([utc_now(), recorded_by, spec_id, e["e"], str(e.get("t") or "")[:120], str(e.get("v") or "")[:200], str(e.get("d") or "")[:300]])
+    if notes:
+        con.executemany(f'INSERT INTO "{DB}".main.annotations VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)', notes)
     if rows:
         con.executemany(f'INSERT INTO "{DB}".main.feedback VALUES (?::TIMESTAMP, ?, ?, ?, ?, ?, ?)', rows)
     return len(rows)
@@ -1099,7 +1156,7 @@ def record_feedback(con, raw, recorded_by):
 
 
 def load_memory(con, as_of):
-    m = {"previous_insights": [], "rated_useful": [], "rated_not_useful": [], "frequent_questions": [], "viewer_preferences": [], "briefings_remembered": 0}
+    m = {"previous_insights": [], "rated_useful": [], "rated_not_useful": [], "frequent_questions": [], "viewer_preferences": [], "briefings_remembered": 0, "viewer_notes": [], "open_questions": []}
     q = lambda sql, p=None: con.execute(sql, p or []).fetchall()
     briefings = q(f"""SELECT run_id, as_of FROM (
             SELECT run_id, as_of, row_number() OVER (PARTITION BY as_of ORDER BY created_at DESC) AS n
@@ -1119,7 +1176,82 @@ def load_memory(con, as_of):
     for event, target, value, n in q(f"""SELECT event, target, value, count(*) AS n FROM "{DB}".main.feedback
             WHERE event IN ('variant', 'hide') GROUP BY ALL HAVING count(*) >= 2 ORDER BY n DESC LIMIT 8"""):
         m["viewer_preferences"].append(f"viewers switched {target} blocks to {value} {n} times" if event == "variant" else f"viewers hid {target} blocks {n} times")
+    for kind, x, grain, dim, val, cat, note, created in q(f"""SELECT kind, x, grain, dimension, value, category, note, strftime(created_at, '%Y-%m-%d')
+            FROM "{DB}".main.annotations WHERE active ORDER BY created_at DESC LIMIT 40"""):
+        about = f"{grain or 'day'} of {x}" if kind == "date" else f"{dim} = {val}"
+        m["viewer_notes"].append({"about": about, "kind": kind, "x": x, "grain": grain, "dimension": dim, "value": val, "category": cat, "note": note, "noted_on": created})
+    # Questions the last briefings asked that nobody has answered yet stay open.
+    seen = set()
+    for (qs,) in q(f"""SELECT json_extract(narrative, '$.viewer_questions') FROM "{DB}".main.gen_runs
+            WHERE kind = 'briefing' AND status = 'ready' AND as_of <= ? ORDER BY created_at DESC LIMIT 3""", [as_of.isoformat()]):
+        try:
+            items = [v for v in json.loads(qs or "[]") if isinstance(v, dict) and v.get("question") and v.get("kind") in ("date", "topic")]
+        except (TypeError, ValueError):
+            continue
+        for v in items:
+            if question_key(v) not in seen and not note_covers(m["viewer_notes"], v):
+                seen.add(question_key(v))
+                m["open_questions"].append(v)
     return m
+
+
+def question_key(v):
+    return f"date {v.get('x', '')[:10]}" if v.get("kind") == "date" else f"topic {v.get('dimension')}={v.get('value')}"
+
+
+def period_end(day, grain):
+    if grain == "week":
+        return day + dt.timedelta(days=7)
+    if grain == "month":
+        return (day.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
+    return day + dt.timedelta(days=1)
+
+
+def note_covers(notes, v):
+    """True when a viewer note answers question v: a date note inside its period, or a note on the same value."""
+    for n in notes:
+        if n["kind"] != v.get("kind"):
+            continue
+        if n["kind"] == "topic" and n["dimension"] == v.get("dimension") and n["value"] == v.get("value"):
+            return True
+        if n["kind"] == "date":
+            try:
+                start, day = dt.date.fromisoformat(v["x"][:10]), dt.date.fromisoformat(n["x"][:10])
+            except (KeyError, ValueError):
+                continue
+            if start <= day < period_end(start, v.get("grain") or "day"):
+                return True
+    return False
+
+
+def notes_for(block, notes):
+    """The viewer notes that apply to a block: dates inside one of its periods, values it shows."""
+    data = block.get("data") or []
+    if not notes or not data or not isinstance(data, list):
+        return []
+    out = []
+    time_axis = (block.get("x") or {}).get("kind") == "time"
+    grain = (block.get("x") or {}).get("grain") or "day"
+    dim = (block.get("source") or {}).get("dimension") or ""
+    xs = sorted(str(d.get("x")) for d in data if isinstance(d, dict))
+    for n in notes:
+        if n["kind"] == "date" and time_axis:
+            try:
+                day = dt.date.fromisoformat(n["x"][:10])
+            except ValueError:
+                continue
+            for x in xs:
+                try:
+                    start = dt.date.fromisoformat(x[:10])
+                except ValueError:
+                    break
+                if start <= day < period_end(start, grain):
+                    out.append({"period": x[:10], "category": n["category"], "note": n["note"]})
+                    break
+        elif n["kind"] == "topic":
+            if any((dim == n["dimension"] and str(d.get("x")) == n["value"]) or str(d.get("value")) == n["value"] for d in data if isinstance(d, dict)):
+                out.append({"value": n["value"], "category": n["category"], "note": n["note"]})
+    return out[:5]
 
 
 def read_guides(con):
@@ -1155,6 +1287,9 @@ def write_memory_guide(con, memory, insights, as_of):
     if resolved:
         lines += ["", "## Earlier insights not repeated"]
         lines += [f"- {p['title']} (briefing of {p['briefing_as_of']})" for p in resolved[:8]]
+    if memory["viewer_notes"]:
+        lines += ["", "## Notes from viewers", "What people who know the business said about dates and segments. The briefing uses them to explain movements."]
+        lines += [f"- **{n['about']}** ({n['category'].replace('_', ' ')}, noted {n['noted_on']}): {n['note'] or '(no text)'}" for n in memory["viewer_notes"][:20]]
     if memory["frequent_questions"]:
         lines += ["", "## What viewers ask"] + [f"- {q}" for q in memory["frequent_questions"]]
     if memory["viewer_preferences"] or memory["rated_not_useful"]:
@@ -1364,7 +1499,7 @@ def about(block):
 def run_probes(con, run, compiler, blocks, changes, memory, guides_text, n_existing):
     if ANALYST_PROBES <= 0:
         return [], []
-    payload = json.dumps({"components": [compact(b) for b in blocks], "detected_shifts": shifts_for_model(changes), "earlier_insights": memory["previous_insights"][:8]}, default=str)
+    payload = json.dumps({"components": [with_notes(compact(b), b, memory) for b in blocks], "detected_shifts": shifts_for_model(changes), "earlier_insights": memory["previous_insights"][:8], "viewer_notes": memory["viewer_notes"][:15]}, default=str)
     out = run.llm(con, "probe", PROBE_INSTRUCTIONS.format(audience=AUDIENCE, n=ANALYST_PROBES, guides=guides_text[:3000] or "(none)", catalog=catalog_text(con)), payload, "dive_probes", PROBE_SCHEMA)
     probes, results = out.get("probes", [])[:ANALYST_PROBES], []
     for i, p in enumerate(probes):
@@ -1380,13 +1515,57 @@ def run_probes(con, run, compiler, blocks, changes, memory, guides_text, n_exist
 
 def narrate(con, run, spec, blocks, probe_blocks, changes, memory, guides_text, question, as_of):
     payload = json.dumps({
-        "components": [compact(b) for b in blocks],
+        "components": [with_notes(compact(b), b, memory) for b in blocks],
         "probes": [compact(b) for b in probe_blocks],
         "detected_shifts": shifts_for_model(changes),
-        "memory": {k: memory[k] for k in ("previous_insights", "rated_useful", "rated_not_useful", "viewer_preferences")},
+        "memory": {k: memory[k] for k in ("previous_insights", "rated_useful", "rated_not_useful", "viewer_preferences", "viewer_notes")},
+        "open_questions": [v["question"] for v in memory["open_questions"]],
     }, default=str)
     instructions = NARRATE_INSTRUCTIONS.format(audience=AUDIENCE, domain=DOMAIN_DESCRIPTION, context=DOMAIN_CONTEXT, guides=guides_text[:5000] or "(none)", question=question, as_of=as_of.isoformat())
     return run.llm(con, "narrate", instructions, payload, "dive_narrative", NARRATE_SCHEMA), instructions, payload
+
+
+def build_questions(spec, nar, memory):
+    """The narrator's questions for viewers, kept only when they point at a real x in a
+    block and no viewer note or recent briefing already covers them."""
+    by_id = {b["id"]: b for b in spec["blocks"]}
+    carried = memory["open_questions"]
+    open_keys = {question_key(v) for v in carried}
+    out = []
+    for v in nar.get("viewer_questions") or []:
+        b = by_id.get(v.get("block_id"))
+        q = (v.get("question") or "").strip()
+        if not b or not q or not b.get("data"):
+            continue
+        x = str(v.get("x") or "")
+        row = next((d for d in b["data"] if str(d.get("x")) == x), None)
+        if row is None:
+            continue
+        item = {"id": f"q{len(out) + 1}", "kind": v.get("kind"), "question": q[:200], "options": [str(o)[:40] for o in (v.get("options") or [])][:4], "block_id": b["id"]}
+        if v.get("kind") == "date" and (b.get("x") or {}).get("kind") == "time":
+            grain = b["x"].get("grain") or "day"
+            day = dt.date.fromisoformat(x[:10])
+            item.update(x=x[:10], grain=grain, label={"week": f"the week of {day.day} {day:%b %Y}", "month": f"{day:%B %Y}"}.get(grain, f"{day.day} {day:%b %Y}"))
+            about = f"{grain} of {x[:10]}"
+        elif v.get("kind") == "topic":
+            dim = (b.get("source") or {}).get("dimension") or ""
+            value = x
+            if row.get("value") is not None and row.get("dimension"):  # a drivers row: "referrer: example.org"
+                dim, value = str(row["dimension"]).replace(" ", "_"), str(row["value"])
+            if dim not in ALL_DIMS:
+                continue
+            item.update(x=value, dimension=dim, value=value, label=f"{dim.replace('_', ' ')} {value}")
+            about = f"{dim} = {value}"
+        else:
+            continue
+        if note_covers(memory["viewer_notes"], item) or question_key(item) in open_keys:
+            continue
+        out.append(item)
+    # Unanswered questions from earlier briefings stay on the page; a new one may join them.
+    keep = carried[: max(1, VIEWER_QUESTIONS - len(out))] if out else carried
+    merged = [dict(v, id=f"q{i + 1}", carried=True) for i, v in enumerate(keep)]
+    merged += [dict(v, id=f"q{len(merged) + i + 1}") for i, v in enumerate(out)]
+    return merged[:VIEWER_QUESTIONS]
 
 
 def link_insights(callouts, memory, as_of):
@@ -1454,7 +1633,7 @@ def generate(con, run, mode, question, parent, as_of):
         b["about"] = about(b)
     spec["blocks"] = blocks + promoted
     callouts = apply_narrative(spec, nar)
-    allowed = text_numbers(guides_text) + text_numbers(" ".join(p["body"] or "" for p in memory["previous_insights"]))
+    allowed = text_numbers(guides_text) + text_numbers(" ".join(p["body"] or "" for p in memory["previous_insights"])) + text_numbers(" ".join(n["note"] or "" for n in memory["viewer_notes"]))
     checks = check_numbers(spec, narrative_texts(spec, callouts), probe_blocks, allowed)
     if checks["checked"] and checks["grounded"] / checks["checked"] < 0.85:
         # One retry with the ungrounded numbers named; keep whichever result checks better.
@@ -1468,10 +1647,15 @@ def generate(con, run, mode, question, parent, as_of):
     callouts = link_insights(callouts, memory, as_of)
     if callouts:
         spec["blocks"].insert(1, {"id": "callouts", "type": "callouts", "title": "Insights" if spec["kind"] == "briefing" else "Findings", "span": 12, "items": callouts})
+    questions = build_questions(spec, nar, memory) if VIEWER_QUESTIONS > 0 else []
+    nar["viewer_questions"] = questions  # what was asked, so later briefings do not ask again
+    if questions:
+        spec["blocks"].insert(2 if callouts else 1, {"id": "questions", "type": "questions", "title": "Questions for you", "span": 12, "items": questions})
     context = {
         "briefings_remembered": memory["briefings_remembered"], "earlier_insights": len(memory["previous_insights"]),
         "feedback_used": len(memory["rated_useful"]) + len(memory["rated_not_useful"]) + len(memory["viewer_preferences"]),
         "guides": guides_used, "probes_run": len(probe_blocks), "probes_shown": len(promoted),
+        "viewer_notes": len(memory["viewer_notes"]),
     }
     spec["checks"], spec["context"] = checks, context
     run.done("narrate", rows=len(callouts))

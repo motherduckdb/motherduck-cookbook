@@ -1,7 +1,7 @@
 {
 	"version": 1,
 	"about": "The MotherDuck Dive component catalog. Agents read it to pick components; a Flight that plans pages from components (motherduck-build-malleable-dive) builds its planner rules from the entries that have plan_rule. Order is assembly order.",
-	"common_fields": "Every block may also carry: caption (one sentence), insight (a 'so what' line, rendered by BlockInsight), about ({ definitions: [{ term, text }], why }, rendered with the source by SourceFooter), probe and hypothesis (a follow-up query an analyst step ran), highlight (x values to emphasise).",
+	"common_fields": "Every block may also carry: caption (one sentence), insight (a 'so what' line, rendered by BlockInsight), about ({ definitions: [{ term, text }], why }, rendered with the source by SourceFooter), probe and hypothesis (a follow-up query an analyst step ran), highlight (x values to emphasise). notes ([{ kind, at, category, note }], added by withNotes and rendered by NotesLine) are what viewers said about a date or value the block shows.",
 	"files": {
 		"core": "kit/core.tsx",
 		"blocks": "kit/blocks.tsx"
@@ -15,7 +15,11 @@
 			"data": "{ items: [{ key, label, value, prior?, format, good?, spark?, spark_x?, spark_grain? }], compare? }",
 			"when": "3-4 headline numbers with their change and a weekly sparkline. The first block on most pages.",
 			"plan_rule": "kpi: 2-4 headline measures from any datasets, with a comparison. Start every page with one (span 12).",
-			"variants": ["metric", "stat", "gauge"]
+			"variants": [
+				"metric",
+				"stat",
+				"gauge"
+			]
 		},
 		{
 			"type": "metric",
@@ -24,7 +28,11 @@
 			"kind": "block",
 			"data": "the kpi shape",
 			"when": "Headline numbers as separate cards with a change chip, count-up number, context line and sparkline. Inspired by uiarc metric-card.",
-			"variants": ["kpi", "stat", "gauge"]
+			"variants": [
+				"kpi",
+				"stat",
+				"gauge"
+			]
 		},
 		{
 			"type": "stat",
@@ -33,7 +41,11 @@
 			"kind": "block",
 			"data": "the kpi shape",
 			"when": "Many small numbers in little space: label, icon indicator, value, trend. Inspired by diceui stat.",
-			"variants": ["kpi", "metric", "gauge"]
+			"variants": [
+				"kpi",
+				"metric",
+				"gauge"
+			]
 		},
 		{
 			"type": "gauge",
@@ -42,7 +54,11 @@
 			"kind": "block",
 			"data": "the kpi shape; every item a rate (format pct) or with min/max",
 			"when": "A rate or a value against a target or capacity, with a tick at the comparison. Inspired by diceui gauge.",
-			"variants": ["kpi", "metric", "stat"]
+			"variants": [
+				"kpi",
+				"metric",
+				"stat"
+			]
 		},
 		{
 			"type": "line",
@@ -52,7 +68,12 @@
 			"data": "{ x: { kind: 'time', grain }, series: [{ key, label, format, good?, muted? }], data: [{ x, [key]: n }], annotations?: [{ x, label, series }], points?: [{ x, series }] }",
 			"when": "A trend over time: 1-3 measures with one unit, or one measure split into up to 6 groups.",
 			"plan_rule": "line: trends over time (a window of 90 days or longer, time_grain week or month). Use series_dimension only to compare a few groups. All measures must share a unit.",
-			"variants": ["area", "bar", "heatmap", "table"]
+			"variants": [
+				"area",
+				"bar",
+				"heatmap",
+				"table"
+			]
 		},
 		{
 			"type": "area",
@@ -61,7 +82,12 @@
 			"kind": "block",
 			"data": "the line shape",
 			"when": "A trend where the latest value matters: headline value and change, legend toggles, gradient fill, crosshair. Inspired by uiarc line-chart.",
-			"variants": ["line", "bar", "heatmap", "table"]
+			"variants": [
+				"line",
+				"bar",
+				"heatmap",
+				"table"
+			]
 		},
 		{
 			"type": "bar",
@@ -71,7 +97,10 @@
 			"data": "{ x: { kind: 'category' }, series: [{ key, label, format }, { key: '<key>_prior', muted: true }?], data: [{ x, [key]: n }] }",
 			"when": "Compare a measure across categories, optionally against the previous period. Horizontal when labels are long.",
 			"plan_rule": "bar: compare a measure across a categorical dimension; use a compare to show what changed. All measures must share a unit.",
-			"variants": ["treemap", "table"]
+			"variants": [
+				"treemap",
+				"table"
+			]
 		},
 		{
 			"type": "table",
@@ -81,7 +110,11 @@
 			"data": "the bar shape; a series format 'row' reads _format per row; delta_pct and text columns",
 			"when": "Rankings, exact values, or several measures with different units per row.",
 			"plan_rule": "table: rankings or several measures per row. Never show the same measures by the same dimension as both a bar and a table.",
-			"variants": ["bar", "treemap", "timeline"]
+			"variants": [
+				"bar",
+				"treemap",
+				"timeline"
+			]
 		},
 		{
 			"type": "drivers",
@@ -101,7 +134,11 @@
 			"data": "calendar: the line shape with one daily series (or mode 'calendar'); matrix: the line shape with several series (rows) over periods, or { mode: 'matrix', rows, cols, cells: [{ row, col, v }], format }",
 			"when": "Patterns by day (calendar, like an activity heatmap) or a category against time (matrix): weekly rhythms, outliers, when something started. Inspired by uiarc activity-heatmap.",
 			"plan_rule": "heatmap: a measure by day over 90 days or more (dimension empty: a calendar of daily activity), or a measure by a dimension against weeks (dimension set: up to 10 rows). Use it for rhythms and outliers, not for exact values.",
-			"variants": ["line", "area", "table"]
+			"variants": [
+				"line",
+				"area",
+				"table"
+			]
 		},
 		{
 			"type": "sankey",
@@ -111,7 +148,10 @@
 			"data": "{ nodes: [{ name, side: 'source'|'target' }], links: [{ source, target, value }], format, source_label, target_label } plus the bar shape of the flows",
 			"when": "How a count flows from one set of categories into another: channel to section, topic to outcome.",
 			"plan_rule": "sankey: how an additive count flows from one dimension (dimension) to another dimension of the same dataset (series_dimension), e.g. channel to section, topic to outcome. Up to 6 values per side.",
-			"variants": ["bar", "table"]
+			"variants": [
+				"bar",
+				"table"
+			]
 		},
 		{
 			"type": "treemap",
@@ -121,7 +161,10 @@
 			"data": "{ tree: { name, children: [{ name, value } | { name, children }] }, format } or the bar shape with one additive measure",
 			"when": "Part-to-whole for many categories of one additive measure, optionally grouped (click a group to zoom). Inspired by uiarc treemap.",
 			"plan_rule": "treemap: share of one additive measure (count or currency) across up to 20 values of a dimension; set series_dimension to group them into a second level.",
-			"variants": ["bar", "table"]
+			"variants": [
+				"bar",
+				"table"
+			]
 		},
 		{
 			"type": "timeline",
@@ -130,7 +173,9 @@
 			"kind": "block",
 			"data": "{ items: [{ date, title, body?, tone? }], activeIndex? } or a table with timeline: { date, title }",
 			"when": "Events in order: detected shifts, releases, incidents, steps of an investigation. Inspired by diceui timeline.",
-			"variants": ["table"]
+			"variants": [
+				"table"
+			]
 		},
 		{
 			"type": "callouts",
@@ -147,6 +192,14 @@
 			"kind": "block",
 			"data": "{ body }",
 			"when": "A short paragraph."
+		},
+		{
+			"type": "questions",
+			"label": "Questions",
+			"file": "kit/notes.tsx",
+			"kind": "block",
+			"data": "{ items: [{ id, kind: date|topic, x, grain?, dimension?, value?, label, question, options: [string] }] }",
+			"when": "Questions the page asks its viewers about a date or a segment it cannot explain from the data. With nav.annotate and nav.noteFor, each item takes an answer (a category and a note). The same file has withNotes(block, notes), which pins saved notes to every block that shows that date or value, NotesLine, which renders them under a block, and NoteForm."
 		},
 		{
 			"type": "datepicker",
