@@ -102,6 +102,37 @@ Copy `recipes/nyc-311` to `recipes/<name>` and replace:
 
 The components live in `dive-components/`: KPI rows, metric cards, gauges, line, area, bar, table, calendar and matrix heatmaps, Sankey, treemap, timeline, callouts and a date picker. Add your own by copying `dive-components/examples/funnel.tsx`.
 
+## Boards: one Flight, several dashboards
+
+A board is a dashboard for one audience on the recipe's data. Every board shares the sources, marts, catalog, Flight and viewer notes. Each board has its own morning page, its own memory and its own Dive. Use boards when different audiences read the same data, such as a daily team view and a monthly leadership view. Use a separate recipe and Flight for different data.
+
+```python
+BOARDS = {
+    "operations": {"LABEL": "Operations"},            # the first board uses the settings above
+    "leadership": {
+        "LABEL": "Leadership",
+        "CADENCE": "monthly",                          # report on the last complete month
+        "AUDIENCE": "city leadership, reading once a month",
+        "BRIEFING_QUESTION": "…",
+        "DEFAULT_COMPARE": "previous_year",
+        "WATCH": [("requests.requests", "Requests"), …],
+        "PLANNER_HINTS": PLANNER_HINTS + "\n- This is a monthly leadership view: …",
+        "BRIEFING_PLAN": {"title": "…", "blocks": [{"type": "kpi", "window": "last_full_month", …}, …]},
+    },
+}
+```
+
+- **Settings:** a board can override `AUDIENCE`, `BRIEFING_QUESTION`, `BRIEFING_PLAN`, `WATCH`, `PLANNER_HINTS`, `DEFAULT_COMPARE`, `CADENCE` and `LABEL`. Anything it leaves out comes from the recipe.
+- **Monthly boards:**
+  - The windows `last_full_month` and `last_12_full_months` cover calendar months. Use them with `time_grain: "month"`.
+  - A monthly comparison is month against month: the month before with `previous_period`, or the same month a year earlier with `previous_year`.
+  - With `CADENCE: "monthly"`, a briefing reports on the last complete month. The scheduled run writes it once, when the month is new, and the page leaves out the weekly change table.
+- **The Flight:** the `BOARD` config key picks the board. A scheduled briefing without `BOARD` writes every board in one run.
+- **Tables:** `dive_specs`, `gen_runs`, `insights` and `feedback` have a `board` column, so memory, ratings and questions stay per board. `annotations` and the Guides are shared, so a note added on one board explains the data on all of them. Each board after the first writes its own memory Guide, "What the `<DB>` `<label>` briefing has learned".
+- **Dives:** in `app.json`, `boards` maps each board to its label and any overrides, such as `tagline` and `examples`. `build.py` writes `dive/` for the first board and `dive-<board>/` for each of the others. `deploy.py` deploys one Dive per board, writes each Dive's id into `app.json`, and rebuilds so every Dive links to the others in its top bar.
+
+The NYC 311 recipe has two boards: `operations`, the daily briefing, and `leadership`, a monthly view of the last complete month against the same month a year earlier.
+
 ## Run it
 
 ```bash

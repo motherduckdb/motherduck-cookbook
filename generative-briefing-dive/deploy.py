@@ -7,7 +7,9 @@
    source, requirements, the config keys the Dive sends, a daily 06:00 UTC schedule, the
    run chart, a 600-second cap.
 3. Writes the Flight id into app.json and rebuilds, so the Dive runs that Flight.
-4. Creates the Dive, or adds a version when a Dive with the same title exists (MD_LIST_DIVES).
+4. Creates each board's Dive, or adds a version when a Dive with the same title exists
+   (MD_LIST_DIVES). A recipe with boards gets one Dive per board; their ids go into
+   app.json, and the Dives are rebuilt once more so each links to the others.
 
 The Dive reads only the recipe's output database. Run the briefing once
 (SELECT * FROM MD_RUN_FLIGHT(flight_id := '<id>')) so it has a page to show.
@@ -24,7 +26,7 @@ import sys
 import duckdb
 
 ROOT = pathlib.Path(__file__).resolve().parent
-CONFIG_KEYS = {"MODE": "briefing", "PROMPT": "", "REQUEST_ID": "", "PARENT": "", "AS_OF": "", "FEEDBACK": ""}
+CONFIG_KEYS = {"MODE": "briefing", "PROMPT": "", "REQUEST_ID": "", "PARENT": "", "AS_OF": "", "FEEDBACK": "", "BOARD": ""}
 
 
 def build(recipe):
@@ -73,22 +75,42 @@ def main():
             build(recipe)
         print(f"  flight_id {flight_id}")
 
-    title = json.loads((recipe / "dive" / "dive.metadata.json").read_text())["title"]
-    content = (recipe / "dive" / "index.tsx").read_text()
-    resources = app.get("requiredDatabases") or [{"type": "database", "path": f"md:{app['db']}", "alias": app["db"]}]
-    res_sql = "[" + ", ".join(f"{{'url': '{r['path']}', 'alias': '{r['alias']}'}}" for r in resources) + "]"
-    dive = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [title]).fetchone()
-    print(f"Dive {title!r}: {'new version of ' + str(dive[0]) if dive else 'create'}")
-    if not a.dry_run:
+    dirs = [("", "dive")] if not app.get("boards") else [(b, "dive" if i == 0 else f"dive-{b}") for i, b in enumerate(app["boards"])]
+    created = deploy_dives(con, recipe, app, dirs, a.dry_run)
+    if created and not a.dry_run:
+        # New Dive ids: write them to app.json and rebuild, so every board links to the others.
+        app = json.loads(app_path.read_text())
+        for board, dive_id in created.items():
+            app["boards"][board]["diveId"] = dive_id
+        app_path.write_text(json.dumps(app, indent="\t", ensure_ascii=False) + "\n")
+        build(recipe)
+        deploy_dives(con, recipe, app, dirs, False)
+
+
+def deploy_dives(con, recipe, app, dirs, dry_run):
+    """Create or update each board's Dive. Returns {board: id} for Dives created now."""
+    created = {}
+    for board, dirname in dirs:
+        meta = json.loads((recipe / dirname / "dive.metadata.json").read_text())
+        title = meta["title"]
+        content = (recipe / dirname / "index.tsx").read_text()
+        resources = app.get("requiredDatabases") or [{"type": "database", "path": f"md:{app['db']}", "alias": app["db"]}]
+        res_sql = "[" + ", ".join(f"{{'url': '{r['path']}', 'alias': '{r['alias']}'}}" for r in resources) + "]"
+        dive = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [title]).fetchone()
+        print(f"Dive {title!r}{' (board ' + board + ')' if board else ''}: {'new version of ' + str(dive[0]) if dive else 'create'}")
+        if dry_run:
+            continue
         con.execute("SET VARIABLE dive_src = ?", [content])
         if dive:
             con.execute(f"SELECT * FROM MD_UPDATE_DIVE_CONTENT(id := '{dive[0]}', content := getvariable('dive_src'), required_resources := {res_sql})")
             dive_id = str(dive[0])
         else:
-            desc = json.loads((recipe / "dive" / "dive.metadata.json").read_text()).get("description", "")
-            con.execute("SET VARIABLE dive_desc = ?", [desc])
+            con.execute("SET VARIABLE dive_desc = ?", [meta.get("description", "")])
             dive_id = str(con.execute(f"SELECT id FROM MD_CREATE_DIVE(title := '{title.replace(chr(39), chr(39) * 2)}', content := getvariable('dive_src'), description := getvariable('dive_desc'), required_resources := {res_sql})").fetchone()[0])
+        if board and app["boards"][board].get("diveId") != dive_id:
+            created[board] = dive_id
         print(f"  https://app.motherduck.com/dives/{dive_id}")
+    return created
 
 
 if __name__ == "__main__":

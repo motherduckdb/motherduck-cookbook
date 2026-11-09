@@ -114,3 +114,34 @@ BRIEFING_PLAN = {
         {"type": "table", "title": "Agency performance", "measures": ["requests.requests", "requests.avg_days_to_close", "requests.slow_share"], "dimension": "agency", "window": "last_28_days", "compare": "previous_year", "limit": 10, "span": 12, "why": "Volume and speed per agency."},
     ],
 }
+
+# ---- Boards ----------------------------------------------------------------------
+# Two dashboards on the same data and Flight. "operations" is the briefing above.
+# "leadership" is a monthly, high-level view: the last complete month against the same
+# month a year earlier. The 06:00 run writes it once per month.
+BOARDS = {
+    "operations": {"LABEL": "Operations"},
+    "leadership": {
+        "LABEL": "Leadership",
+        "CADENCE": "monthly",
+        "AUDIENCE": "city leadership (deputy mayor for operations and agency commissioners), reading once a month",
+        "BRIEFING_QUESTION": "Monthly 311 leadership briefing: how did last month compare with the same month a year earlier, which agencies and boroughs need attention, and is service getting faster?",
+        "DEFAULT_COMPARE": "previous_year",
+        "WATCH": [("requests.requests", "Requests"), ("requests.avg_days_to_close", "Days to close"), ("requests.slow_share", "Closed after 7+ days")],
+        "PLANNER_HINTS": PLANNER_HINTS + """
+- This is a monthly leadership view: use window last_full_month for totals and comparisons, and last_12_full_months with time_grain month for trends.
+- Stay high level: citywide totals, agencies and boroughs. Use complaint types only to explain an agency's change.""",
+        "BRIEFING_PLAN": {
+            "title": "Monthly 311 leadership briefing",
+            "subtitle": "Last month against the same month a year earlier",
+            "blocks": [
+                {"type": "kpi", "title": "The month at a glance", "measures": ["requests.requests", "requests.avg_days_to_close", "requests.slow_share", "requests.online_share"], "window": "last_full_month", "compare": "previous_year", "span": 12, "why": "Demand, speed and how residents reach the city, against the same month last year."},
+                {"type": "line", "title": "Monthly requests by borough", "measures": ["requests.requests"], "series_dimension": "borough", "window": "last_12_full_months", "time_grain": "month", "span": 8, "why": "The year's shape: seasonality and where demand is growing."},
+                {"type": "bar", "title": "Requests by agency (month)", "measures": ["requests.requests"], "dimension": "agency", "window": "last_full_month", "compare": "previous_year", "limit": 8, "span": 4, "why": "Which agencies carry the load this month."},
+                {"type": "line", "title": "Monthly days to close", "measures": ["requests.avg_days_to_close", "requests.slow_share"], "window": "last_12_full_months", "time_grain": "month", "span": 6, "why": "Is service getting faster over the year?"},
+                {"type": "bar", "title": "Days to close by borough (month)", "measures": ["requests.avg_days_to_close"], "dimension": "borough", "window": "last_full_month", "compare": "previous_year", "limit": 6, "span": 6, "why": "Where residents wait longest."},
+                {"type": "table", "title": "Agency scorecard", "measures": ["requests.requests", "requests.avg_days_to_close", "requests.slow_share"], "dimension": "agency", "window": "last_full_month", "compare": "previous_year", "limit": 10, "span": 12, "why": "Volume and speed per agency for the month, against a year ago."},
+            ],
+        },
+    },
+}

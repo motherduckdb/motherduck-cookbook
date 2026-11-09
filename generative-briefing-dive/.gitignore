@@ -2,3 +2,4 @@
 recipes/*/flight/
 recipes/*/dive/
 __pycache__/
+recipes/*/dive-*/

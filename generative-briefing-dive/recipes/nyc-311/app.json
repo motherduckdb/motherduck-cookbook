@@ -15,5 +15,21 @@
 		"Which agencies take longest to close requests?",
 		"How do people report noise complaints: phone, online or the app?",
 		"Why are heat and hot water complaints so high in Brooklyn?"
-	]
+	],
+	"boards": {
+		"operations": {
+			"label": "Operations"
+		},
+		"leadership": {
+			"label": "Leadership",
+			"tagline": "Monthly leadership briefing",
+			"placeholder": "Ask about the month…",
+			"examples": [
+				"Which agencies got slower than a year ago?",
+				"Where are residents waiting longest?",
+				"How has the online and app share of requests changed this year?",
+				"Which boroughs drove the growth in requests?"
+			]
+		}
+	}
 }

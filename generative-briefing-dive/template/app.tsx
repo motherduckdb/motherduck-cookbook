@@ -47,6 +47,10 @@ import {
 
 const FLIGHT_ID = APP.flightId;
 const SPECS = `"${APP.db}"."main"."dive_specs"`;
+// The board this Dive shows: pages, runs, insights and viewer events are per board; notes are shared.
+const BOARD: string = /^[a-z0-9-]{1,40}$/.test(APP.board || '') ? APP.board : '';
+const onBoard = (alias = '') => (BOARD ? `${alias}board = '${BOARD}'` : 'true');
+const ON_BOARD = onBoard();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EXAMPLES: string[] = APP.examples;
 
@@ -103,7 +107,7 @@ function useGenerator(onDone: (requestId: string) => void) {
 		const requestId = newRequestId();
 		setPending({ requestId, prompt, mode, parent, asOf, startedAt: Date.now() });
 		// Viewer events ride along: a Dive can't write, the Flight records them.
-		start.run({ MODE: mode, PROMPT: prompt, REQUEST_ID: requestId, PARENT: parent, AS_OF: asOf, FEEDBACK: feedback });
+		start.run({ MODE: mode, PROMPT: prompt, REQUEST_ID: requestId, PARENT: parent, AS_OF: asOf, FEEDBACK: feedback, BOARD });
 	};
 	const startErr = start.error ? String(start.error.message || start.error) : null;
 	const friendlyStartErr =
@@ -210,6 +214,7 @@ function AskBar({ gen, draft, setDraft, ask, suggestions }: any) {
 
 const KIND_ICON = (kind: string, size = 13) => (kind === 'briefing' ? <Newspaper size={size} /> : kind === 'investigation' ? <SearchCheck size={size} /> : <MessageSquare size={size} />);
 const KIND_LABEL: Record<string, string> = { briefing: 'Daily briefing', question: 'Answer', investigation: 'Investigation' };
+const pageLabel = (spec: any) => (spec?.kind === 'briefing' && spec?.cadence === 'monthly' ? 'Monthly briefing' : KIND_LABEL[spec?.kind] || 'Page');
 
 // Newest first, with each investigation listed under the page it came from.
 function nestPages(rows: any[]) {
@@ -551,17 +556,17 @@ function MemoryPage({ db, nav }: any) {
 	const runs = useSQLQuery(`
 		SELECT count(*) FILTER (WHERE kind = 'briefing') AS briefings, count(*) FILTER (WHERE kind <> 'briefing') AS pages,
 		       sum(TRY_CAST(json_extract(checks, '$.grounded') AS INTEGER)) AS grounded, sum(TRY_CAST(json_extract(checks, '$.checked') AS INTEGER)) AS checked
-		FROM ${T('gen_runs')} WHERE status = 'ready'`);
-	const fb = useSQLQuery(`SELECT count(*) AS events FROM ${T('feedback')}`);
+		FROM ${T('gen_runs')} WHERE status = 'ready' AND ${ON_BOARD}`);
+	const fb = useSQLQuery(`SELECT count(*) AS events FROM ${T('feedback')} WHERE ${ON_BOARD}`);
 	const ins = useSQLQuery(`
 		SELECT strftime(as_of, '%Y-%m-%d') AS as_of, title, body, tone, coalesce(continuity, 'new') AS continuity, times_seen
-		FROM ${T('insights')} WHERE kind = 'briefing' ORDER BY as_of DESC, rank LIMIT 40`);
+		FROM ${T('insights')} WHERE kind = 'briefing' AND ${ON_BOARD} ORDER BY as_of DESC, rank LIMIT 40`);
 	const qs = useSQLQuery(`
 		SELECT prompt, count(*) AS asked, strftime(max(created_at), '%Y-%m-%d') AS last_asked
-		FROM ${T('gen_runs')} WHERE kind = 'question' AND status = 'ready' GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8`);
+		FROM ${T('gen_runs')} WHERE kind = 'question' AND status = 'ready' AND ${ON_BOARD} GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8`);
 	const prefs = useSQLQuery(`
 		SELECT event, target, value, count(*) AS n FROM ${T('feedback')}
-		WHERE event IN ('variant', 'hide', 'rate_insight', 'rate_page', 'investigate') GROUP BY ALL ORDER BY n DESC LIMIT 10`);
+		WHERE event IN ('variant', 'hide', 'rate_insight', 'rate_page', 'investigate') AND ${ON_BOARD} GROUP BY ALL ORDER BY n DESC LIMIT 10`);
 	const versions = useSQLQuery(`
 		SELECT r.prompt_version, r.model, count(DISTINCT r.run_id) AS runs, round(avg(r.duration_s), 1) AS seconds,
 		       sum(TRY_CAST(json_extract(r.checks, '$.grounded') AS INTEGER)) / nullif(sum(TRY_CAST(json_extract(r.checks, '$.checked') AS INTEGER)), 0) AS grounded,
@@ -570,7 +575,7 @@ function MemoryPage({ db, nav }: any) {
 		FROM ${T('gen_runs')} r LEFT JOIN ${T('feedback')} f ON f.spec_id = r.run_id AND f.event IN ('rate_page', 'rate_insight')
 		LEFT JOIN (SELECT prompt_version, model, avg(plan_score) AS plan_score, avg(grounded) AS eval_grounded FROM ${T('evals')} GROUP BY ALL) e
 		  ON e.prompt_version = r.prompt_version AND e.model = r.model
-		WHERE r.status = 'ready' GROUP BY 1, 2 ORDER BY max(r.created_at) DESC LIMIT 6`);
+		WHERE r.status = 'ready' AND ${onBoard('r.')} GROUP BY 1, 2 ORDER BY max(r.created_at) DESC LIMIT 6`);
 	const rows = (q: any) => (Array.isArray(q.data) ? q.data : []);
 	const r0 = rows(runs)[0] || {};
 	const kpi = {
@@ -761,7 +766,7 @@ function SpecPage({ spec, arrange, onDraft, nav }: any) {
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: t.muted }}>
 					<span className="inline-flex items-center gap-1" style={{ color: t.text, fontWeight: 600 }}>
 						{KIND_ICON(spec.kind)}
-						{KIND_LABEL[spec.kind] || 'Page'}
+						{pageLabel(spec)}
 					</span>
 					{spec.kind === 'briefing' && nav?.briefAsOf ? (
 						// Pick a date to generate the briefing as it would have read that day.
@@ -916,7 +921,7 @@ export default function GenerativeBriefing() {
 	};
 	const sendFeedback = (extra: any[]) => {
 		try {
-			feedbackRun.run({ MODE: 'feedback', FEEDBACK: takeSignals(extra), PROMPT: '', REQUEST_ID: newRequestId(), PARENT: '', AS_OF: '' });
+			feedbackRun.run({ MODE: 'feedback', FEEDBACK: takeSignals(extra), PROMPT: '', REQUEST_ID: newRequestId(), PARENT: '', AS_OF: '', BOARD });
 		} catch {
 			/* viewers without run access still see the page */
 		}
@@ -929,6 +934,7 @@ export default function GenerativeBriefing() {
 		       strftime(as_of, '%Y-%m-%d') AS as_of,
 		       coalesce(json_extract_string(spec, '$.parent'), '') AS parent
 		FROM ${SPECS}
+		WHERE ${ON_BOARD}
 		ORDER BY created_at DESC
 		LIMIT 40
 	`);
@@ -959,7 +965,7 @@ export default function GenerativeBriefing() {
 	}, [specQ.data]);
 
 	// Chart types viewers chose at least 3 times for a block type become its default.
-	const learnedQ = useSQLQuery(`SELECT target, value, count(*) AS n FROM "${APP.db}"."main"."feedback" WHERE event = 'variant' GROUP BY ALL HAVING count(*) >= 3 ORDER BY n DESC`);
+	const learnedQ = useSQLQuery(`SELECT target, value, count(*) AS n FROM "${APP.db}"."main"."feedback" WHERE event = 'variant' AND ${ON_BOARD} GROUP BY ALL HAVING count(*) >= 3 ORDER BY n DESC`);
 	const learned = useMemo(() => {
 		const out: Record<string, string> = {};
 		(Array.isArray(learnedQ.data) ? learnedQ.data : []).forEach((r: any) => {
@@ -1015,7 +1021,7 @@ export default function GenerativeBriefing() {
 		if (!spec) return;
 		const clip = (s: any, n: number) => String(s || '').slice(0, n);
 		setContext({
-			page: KIND_LABEL[spec.kind] || 'Page',
+			page: pageLabel(spec),
 			question: clip(spec.kind === 'briefing' ? spec.title : spec.prompt, 200),
 			parent: spec.parent_title ? clip(spec.parent_title, 120) : undefined,
 			as_of: spec.as_of,
@@ -1082,6 +1088,22 @@ export default function GenerativeBriefing() {
 								{APP.tagline}
 							</span>
 						</div>
+						{(APP.boards || []).length > 1 && (
+							// The recipe's boards: dashboards for other audiences on the same data and Flight.
+							<nav className="flex items-center gap-3 text-sm" aria-label="Boards">
+								{APP.boards.map((b: any) =>
+									b.key === BOARD ? (
+										<span key={b.key} style={{ color: t.text, fontWeight: 600, borderBottom: `2px solid ${t.mono ? t.text : t.accent}` }}>
+											{b.label}
+										</span>
+									) : b.url ? (
+										<a key={b.key} href={b.url} target="_blank" rel="noopener noreferrer" style={{ color: t.muted, textDecoration: 'none' }}>
+											{b.label}
+										</a>
+									) : null,
+								)}
+							</nav>
+						)}
 						<span className="flex-1" />
 						{rows.length > 0 && <PagesMenu rows={rows} selected={currentId} onSelect={(id: string) => { setView('page'); setSpecId(id); }} />}
 						<Segmented options={themeOptions.map(([k, v]: any) => ({ value: k, label: v.name, icon: !t.flat && k === themeKey ? <Palette size={11} /> : null }))} value={themeKey} onChange={setThemeKey} />

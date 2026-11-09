@@ -22,6 +22,7 @@ Config (strings; the Dive sends them through useRunFlight):
     MODE        briefing | ask | investigate | refresh | feedback
     PROMPT      the question, for MODE=ask and MODE=investigate
     PARENT      MODE=investigate: id of the spec whose insight is being investigated
+    BOARD       which board the run is for (a key of BOARDS); a scheduled briefing without it writes every board
     REQUEST_ID  opaque id from the Dive, so it can open the spec it asked for
     AS_OF       analysis date; empty means the recipe's AS_OF_DEFAULT
     MODEL       prompt() model
@@ -75,7 +76,7 @@ SPECS_DDL = f"""
 CREATE TABLE IF NOT EXISTS "{DB}".main.dive_specs (
     id VARCHAR, request_id VARCHAR, kind VARCHAR, prompt VARCHAR, title VARCHAR,
     created_at TIMESTAMP, as_of DATE, model VARCHAR, status VARCHAR, error VARCHAR,
-    duration_s DOUBLE, spec VARCHAR
+    duration_s DOUBLE, spec VARCHAR, board VARCHAR
 )"""
 
 
@@ -104,7 +105,7 @@ def build_marts(con, force, refresh_ok=True):
 
 ALL_MEASURES = [f"{d}.{m}" for d, spec in CATALOG.items() for m in spec["measures"]]
 ALL_DIMS = sorted({dim for spec in CATALOG.values() for dim in spec["dims"]})
-WINDOWS = ["last_7_days", "last_28_days", "last_30_days", "last_90_days", "last_6_months", "last_12_months", "all_time"]
+WINDOWS = ["last_7_days", "last_28_days", "last_30_days", "last_90_days", "last_6_months", "last_12_months", "last_full_month", "last_12_full_months", "all_time"]
 BLOCK_TYPES = [c["type"] for c in COMPONENTS if c.get("plan_rule")] + list(CUSTOM_COMPONENTS)
 COMPONENT_RULES = "\n".join(f"- {c['plan_rule']}" for c in COMPONENTS if c.get("plan_rule")) + "".join(f"\n- {v['plan_rule']}" for v in CUSTOM_COMPONENTS.values())
 ONE_MEASURE = {"drivers", "heatmap", "sankey", "treemap"}
@@ -143,7 +144,24 @@ def catalog_text(con):
 # --------------------------------------------------------------------------
 
 
+def month_end(d):
+    return (d.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
+
+
+def add_months(d, n):
+    y, m = divmod(d.month - 1 + n, 12)
+    return dt.date(d.year + y, m + 1, 1)
+
+
+def last_full_month_end(as_of):
+    """The last day of the last complete calendar month on or before as_of."""
+    return as_of if as_of == month_end(as_of) else as_of.replace(day=1) - dt.timedelta(days=1)
+
+
 def window_bounds(window, as_of, first_day):
+    if window in ("last_full_month", "last_12_full_months"):
+        end = last_full_month_end(as_of)
+        return add_months(end.replace(day=1), -11 if window == "last_12_full_months" else 0), end
     days = {"last_7_days": 7, "last_28_days": 28, "last_30_days": 30, "last_90_days": 90, "last_6_months": 182, "last_12_months": 365}
     if window == "all_time":
         return first_day, as_of
@@ -152,6 +170,11 @@ def window_bounds(window, as_of, first_day):
 
 def shift(bounds, compare):
     start, end = bounds
+    if start.day == 1 and end == month_end(end):
+        # Calendar months compare with calendar months: October with September, or with last October.
+        months = (end.year - start.year) * 12 + end.month - start.month + 1
+        n = 12 if compare == "previous_year" else months
+        return add_months(start, -n), month_end(add_months(end.replace(day=1), -n))
     if compare == "previous_year":
         return start - dt.timedelta(days=364), end - dt.timedelta(days=364)
     length = (end - start).days + 1
@@ -693,7 +716,10 @@ def fmt_range(a, b):
 
 def shifts_for_model(changes):
     """The change scan as the model should read it: only the shifts the page shows, with
-    self-describing fields, so the step's before and after are not mistaken for the period."""
+    self-describing fields, so the step's before and after are not mistaken for the period.
+    A monthly board compares months and doesn't show the weekly scan, so it gets none."""
+    if CADENCE == "monthly":
+        return []
     return [
         {
             "metric": c["metric"], "label": c["label"], "format": c["format"], "better_when": c["good"],
@@ -1027,20 +1053,20 @@ LOG_DDL = [
         run_id VARCHAR, request_id VARCHAR, mode VARCHAR, kind VARCHAR, parent VARCHAR, prompt VARCHAR,
         as_of DATE, model VARCHAR, prompt_version VARCHAR, created_at TIMESTAMP, status VARCHAR, error VARCHAR,
         duration_s DOUBLE, steps VARCHAR, plan VARCHAR, probes VARCHAR, narrative VARCHAR, checks VARCHAR,
-        context VARCHAR)""",
+        context VARCHAR, board VARCHAR)""",
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.llm_calls (
         run_id VARCHAR, step VARCHAR, model VARCHAR, prompt_version VARCHAR, input_chars INTEGER,
         output_chars INTEGER, latency_ms INTEGER, ok BOOLEAN, error VARCHAR, created_at TIMESTAMP)""",
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.insights (
         insight_id VARCHAR, run_id VARCHAR, kind VARCHAR, as_of DATE, created_at TIMESTAMP, rank INTEGER,
         tone VARCHAR, title VARCHAR, body VARCHAR, question VARCHAR, block_id VARCHAR, continuity VARCHAR,
-        refers_to VARCHAR, first_seen DATE, times_seen INTEGER)""",
+        refers_to VARCHAR, first_seen DATE, times_seen INTEGER, board VARCHAR)""",
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.evals (
         run_at TIMESTAMP, prompt_version VARCHAR, model VARCHAR, narrate BOOLEAN, question VARCHAR,
         plan_score DOUBLE, grounded DOUBLE, seconds DOUBLE, detail VARCHAR)""",
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.feedback (
         created_at TIMESTAMP, recorded_by VARCHAR, spec_id VARCHAR, event VARCHAR, target VARCHAR,
-        value VARCHAR, detail VARCHAR)""",
+        value VARCHAR, detail VARCHAR, board VARCHAR)""",
     f"""CREATE TABLE IF NOT EXISTS "{DB}".main.annotations (
         annotation_id VARCHAR, created_at TIMESTAMP, recorded_by VARCHAR, spec_id VARCHAR, kind VARCHAR, x VARCHAR,
         grain VARCHAR, dimension VARCHAR, value VARCHAR, category VARCHAR, note VARCHAR, question VARCHAR, active BOOLEAN)""",
@@ -1055,6 +1081,34 @@ MEMORY_GUIDE = globals().get("MEMORY_GUIDE", True)
 MEMORY_TOPIC = f"briefings/{DB}"
 MEMORY_TITLE = f"What the {DB} briefing has learned"
 DEFAULT_MODEL = globals().get("DEFAULT_MODEL", "gpt-6-luna")
+
+# Boards: dashboards for different audiences on the same data and Flight. Each board
+# overrides some of these settings; the first board is the default. A recipe without
+# BOARDS has one board, "main".
+BOARD_KEYS = ("AUDIENCE", "BRIEFING_QUESTION", "BRIEFING_PLAN", "WATCH", "PLANNER_HINTS", "DEFAULT_COMPARE", "CADENCE", "LABEL")
+CADENCE = globals().get("CADENCE", "daily")
+LABEL = globals().get("LABEL", "")
+BOARDS = dict(globals().get("BOARDS") or {"main": {}})
+DEFAULT_BOARD = next(iter(BOARDS))
+BOARD = DEFAULT_BOARD
+_BASE = {k: globals().get(k) for k in BOARD_KEYS}
+
+
+def memory_title(board):
+    """The default board keeps the original memory Guide title, so its history carries on."""
+    if board == DEFAULT_BOARD:
+        return f"What the {DB} briefing has learned"
+    return f"What the {DB} {BOARDS[board].get('LABEL') or board} briefing has learned"
+
+
+def use_board(board):
+    """Switch the module settings to one board's: its audience, question, plan, watch list."""
+    global BOARD, MEMORY_TITLE
+    g = globals()
+    g.update(_BASE)
+    g.update({k: v for k, v in BOARDS[board].items() if k in BOARD_KEYS})
+    BOARD = board
+    MEMORY_TITLE = memory_title(board)
 
 # Changes when any instruction or schema changes, so results can be compared per prompt version.
 PROMPT_VERSION = hashlib.sha1(
@@ -1146,7 +1200,7 @@ def record_feedback(con, raw, recorded_by):
     if notes:
         con.executemany(f'INSERT INTO "{DB}".main.annotations VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)', notes)
     if rows:
-        con.executemany(f'INSERT INTO "{DB}".main.feedback VALUES (?::TIMESTAMP, ?, ?, ?, ?, ?, ?)', rows)
+        con.executemany(f'INSERT INTO "{DB}".main.feedback VALUES (?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)', [r + [BOARD] for r in rows])
     return len(rows)
 
 
@@ -1160,8 +1214,8 @@ def load_memory(con, as_of):
     q = lambda sql, p=None: con.execute(sql, p or []).fetchall()
     briefings = q(f"""SELECT run_id, as_of FROM (
             SELECT run_id, as_of, row_number() OVER (PARTITION BY as_of ORDER BY created_at DESC) AS n
-            FROM "{DB}".main.gen_runs WHERE kind = 'briefing' AND status = 'ready' AND as_of < ?)
-        WHERE n = 1 ORDER BY as_of DESC LIMIT 3""", [as_of.isoformat()])
+            FROM "{DB}".main.gen_runs WHERE kind = 'briefing' AND status = 'ready' AND as_of < ? AND board = ?)
+        WHERE n = 1 ORDER BY as_of DESC LIMIT 3""", [as_of.isoformat(), BOARD])
     m["briefings_remembered"] = len(briefings)
     for run_id, b_as_of in briefings:
         for title, body, tone, cont, first, times in q(
@@ -1169,12 +1223,12 @@ def load_memory(con, as_of):
         ):
             m["previous_insights"].append({"briefing_as_of": str(b_as_of), "title": title, "body": body, "tone": tone, "continuity": cont, "first_seen": str(first), "times_seen": times})
     for title, value in q(f"""SELECT i.title, f.value FROM "{DB}".main.feedback f JOIN "{DB}".main.insights i
-            ON i.run_id = f.spec_id AND i.title = f.target WHERE f.event = 'rate_insight' ORDER BY f.created_at DESC LIMIT 20"""):
+            ON i.run_id = f.spec_id AND i.title = f.target WHERE f.event = 'rate_insight' AND f.board = ? ORDER BY f.created_at DESC LIMIT 20""", [BOARD]):
         m["rated_useful" if value == "up" else "rated_not_useful"].append(title)
-    m["frequent_questions"] = [r[0] for r in q(f"""SELECT prompt FROM "{DB}".main.gen_runs WHERE kind = 'question' AND status = 'ready'
-            GROUP BY prompt ORDER BY count(*) DESC, max(created_at) DESC LIMIT 8""")]
+    m["frequent_questions"] = [r[0] for r in q(f"""SELECT prompt FROM "{DB}".main.gen_runs WHERE kind = 'question' AND status = 'ready' AND board = ?
+            GROUP BY prompt ORDER BY count(*) DESC, max(created_at) DESC LIMIT 8""", [BOARD])]
     for event, target, value, n in q(f"""SELECT event, target, value, count(*) AS n FROM "{DB}".main.feedback
-            WHERE event IN ('variant', 'hide') GROUP BY ALL HAVING count(*) >= 2 ORDER BY n DESC LIMIT 8"""):
+            WHERE event IN ('variant', 'hide') AND board = ? GROUP BY ALL HAVING count(*) >= 2 ORDER BY n DESC LIMIT 8""", [BOARD]):
         m["viewer_preferences"].append(f"viewers switched {target} blocks to {value} {n} times" if event == "variant" else f"viewers hid {target} blocks {n} times")
     for kind, x, grain, dim, val, cat, note, created in q(f"""SELECT kind, x, grain, dimension, value, category, note, strftime(created_at, '%Y-%m-%d')
             FROM "{DB}".main.annotations WHERE active ORDER BY created_at DESC LIMIT 40"""):
@@ -1183,7 +1237,7 @@ def load_memory(con, as_of):
     # Questions the last briefings asked that nobody has answered yet stay open.
     seen = set()
     for (qs,) in q(f"""SELECT json_extract(narrative, '$.viewer_questions') FROM "{DB}".main.gen_runs
-            WHERE kind = 'briefing' AND status = 'ready' AND as_of <= ? ORDER BY created_at DESC LIMIT 3""", [as_of.isoformat()]):
+            WHERE kind = 'briefing' AND status = 'ready' AND as_of <= ? AND board = ? ORDER BY created_at DESC LIMIT 3""", [as_of.isoformat(), BOARD]):
         try:
             items = [v for v in json.loads(qs or "[]") if isinstance(v, dict) and v.get("question") and v.get("kind") in ("date", "topic")]
         except (TypeError, ValueError):
@@ -1262,9 +1316,12 @@ def read_guides(con):
             rows = con.execute("SELECT id, title FROM MD_LIST_GUIDES(topic = ?) LIMIT 6", [topic]).fetchall()
         except Exception:
             return "", []
+        others = {memory_title(b) for b in BOARDS if b != BOARD}
         for gid, title in rows:
             if budget <= 0:
                 break
+            if title in others:
+                continue
             content = con.execute("SELECT content FROM MD_GET_GUIDE(id = ?::UUID)", [str(gid)]).fetchone()[0] or ""
             content = content[: min(3500, budget)]
             budget -= len(content)
@@ -1303,7 +1360,7 @@ def write_memory_guide(con, memory, insights, as_of):
         else:
             con.execute(
                 "SELECT * FROM MD_CREATE_GUIDE(topic = ?, title = ?, content = ?, description = ?, access = 'user')",
-                [MEMORY_TOPIC, MEMORY_TITLE, content, f"Recurring insights, viewer questions and preferences the {DB} briefing has learned"],
+                [MEMORY_TOPIC, MEMORY_TITLE, content, f"Recurring insights, viewer questions and preferences the {DB} {BOARDS[BOARD].get('LABEL') or ''} briefing has learned".replace("  ", " ")],
             )
         return MEMORY_TITLE
     except Exception as e:  # Guides are optional: the run still publishes
@@ -1422,6 +1479,10 @@ def connect():
     con.execute(SPECS_DDL)
     for ddl in LOG_DDL:
         con.execute(ddl)
+    # Pages, runs, insights and viewer events belong to a board; notes and evals are shared.
+    for table in ("dive_specs", "gen_runs", "insights", "feedback"):
+        con.execute(f'ALTER TABLE "{DB}".main.{table} ADD COLUMN IF NOT EXISTS board VARCHAR')
+        con.execute(f'UPDATE "{DB}".main.{table} SET board = ? WHERE board IS NULL', [DEFAULT_BOARD])
     return con
 
 
@@ -1598,7 +1659,7 @@ def generate(con, run, mode, question, parent, as_of):
     run.start("compile")
     blocks, problems = compile_plan(compiler, plan, mode)
     changes = detect_changes(con, as_of)
-    if mode in ("briefing", "refresh"):
+    if mode in ("briefing", "refresh") and CADENCE != "monthly":  # a monthly board stays high level
         blocks.insert(1, changes_block(changes, len(blocks) + 1))
     if not blocks:
         raise RuntimeError("no component compiled: " + "; ".join(problems))
@@ -1674,6 +1735,9 @@ def main():
     request_id = re.sub(r"[^A-Za-z0-9_-]", "", os.environ.get("REQUEST_ID") or "")[:64] or str(uuid.uuid4())
     model = os.environ.get("MODEL") or DEFAULT_MODEL
     parent_id = (os.environ.get("PARENT") or "").strip()
+    board_env = (os.environ.get("BOARD") or "").strip()
+    if board_env and board_env not in BOARDS:
+        raise SystemExit(f"unknown BOARD {board_env!r}; this recipe has {', '.join(BOARDS)}")
     if mode not in ("briefing", "ask", "investigate", "refresh", "feedback"):
         raise SystemExit(f"unknown MODE {mode!r}")
     if mode in ("ask", "investigate") and not prompt_text:
@@ -1683,6 +1747,7 @@ def main():
 
     mark("@flight", "running")
     con = connect()
+    use_board(board_env or DEFAULT_BOARD)
     spec_id = str(uuid.uuid4())
     events = record_feedback(con, os.environ.get("FEEDBACK"), spec_id)
     if mode == "feedback":
@@ -1694,8 +1759,34 @@ def main():
     mark("marts", "running")
     built = build_marts(con, force=mode == "refresh", refresh_ok=mode in ("briefing", "refresh"))
     mark("marts", "ok", rows=built)
-    as_of = resolve_as_of(con, (os.environ.get("AS_OF") or "").strip())
+    as_of_env = (os.environ.get("AS_OF") or "").strip()
+    data_as_of = resolve_as_of(con, as_of_env)
+    # A scheduled briefing (no BOARD) writes every board; a request writes its own board.
+    boards = list(BOARDS) if mode == "briefing" and not board_env else [board_env or DEFAULT_BOARD]
+    failed = False
+    for board in boards:
+        use_board(board)
+        as_of = data_as_of
+        if mode == "briefing" and CADENCE == "monthly":
+            as_of = last_full_month_end(data_as_of)  # a monthly board reports on the last complete month
+            if not board_env and not as_of_env and con.execute(
+                f'SELECT 1 FROM "{DB}".main.gen_runs WHERE board = ? AND kind = \'briefing\' AND status = \'ready\' AND as_of = ?',
+                [board, as_of.isoformat()],
+            ).fetchone():
+                print(json.dumps({"board": board, "status": "skipped", "reason": f"the {as_of:%B %Y} briefing exists"}))
+                continue
+        rid = request_id if len(boards) == 1 else f"{request_id}-{board}"[:64]
+        failed |= not run_one(con, board, mode, prompt_text, rid, model, parent_id, as_of, t0 if len(boards) == 1 else None)
+    if failed:
+        mark("@flight", "failed")
+        raise SystemExit(1)
+    mark("@flight", "ok")
 
+
+def run_one(con, board, mode, prompt_text, request_id, model, parent_id, as_of, t0):
+    """Generate, publish and learn for one board. Returns True when the page is ready."""
+    t0 = time.time() if t0 is None else t0
+    spec_id = str(uuid.uuid4())
     kind = {"ask": "question", "investigate": "investigation"}.get(mode, "briefing")
     question = prompt_text if mode in ("ask", "investigate") else BRIEFING_QUESTION
     parent = None
@@ -1717,19 +1808,20 @@ def main():
         traceback.print_exc()
         spec = {"version": SPEC_VERSION, "id": spec_id, "kind": kind, "prompt": question, "as_of": as_of.isoformat(), "title": "Generation failed", "blocks": [], **({"parent": parent["id"], "parent_title": parent["title"]} if parent else {})}
         status, error = "failed", str(e)[:500]
+    spec["board"], spec["cadence"] = board, CADENCE
 
     mark("publish", "running")
     now = utc_now()
     duration = round(time.time() - t0, 1)
     con.execute(
-        f'INSERT INTO "{DB}".main.dive_specs VALUES (?, ?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?)',
-        [spec_id, request_id, kind, question, spec.get("title"), now, as_of, model, status, error, duration, json.dumps(spec, default=str)],
+        f'INSERT INTO "{DB}".main.dive_specs VALUES (?, ?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)',
+        [spec_id, request_id, kind, question, spec.get("title"), now, as_of, model, status, error, duration, json.dumps(spec, default=str), board],
     )
     con.execute(
-        f'INSERT INTO "{DB}".main.gen_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        f'INSERT INTO "{DB}".main.gen_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [spec_id, request_id, mode, kind, parent_id or None, question, as_of, model, PROMPT_VERSION, now, status, error, duration,
          json.dumps(run.steps), json.dumps(plan, default=str), json.dumps(probes, default=str), json.dumps(nar, default=str),
-         json.dumps(spec.get("checks"), default=str), json.dumps(spec.get("context"), default=str)],
+         json.dumps(spec.get("checks"), default=str), json.dumps(spec.get("context"), default=str), board],
     )
     if run.calls:
         con.executemany(
@@ -1738,20 +1830,17 @@ def main():
         )
     if callouts:
         con.executemany(
-            f'INSERT INTO "{DB}".main.insights VALUES (?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            f'INSERT INTO "{DB}".main.insights VALUES (?, ?, ?, ?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [[str(uuid.uuid4()), spec_id, kind, as_of, now, r, c.get("tone"), c.get("title"), c.get("body"), c.get("question"), c.get("block_id"),
-              c.get("continuity"), c.get("refers_to") or None, c.get("first_seen"), c.get("times_seen")] for r, c in enumerate(callouts)],
+              c.get("continuity"), c.get("refers_to") or None, c.get("first_seen"), c.get("times_seen"), board] for r, c in enumerate(callouts)],
         )
     mark("publish", "ok", effect=f"table:{DB}.main.dive_specs")
     if status == "ready" and kind == "briefing" and memory is not None:
         mark("learn", "running")
         guide = write_memory_guide(con, memory, callouts, as_of)
         mark("learn", "ok", effect=f"guide:{MEMORY_TOPIC}" if guide else "")
-    print(json.dumps({"spec_id": spec_id, "request_id": request_id, "status": status, "error": error, "seconds": duration, "prompt_version": PROMPT_VERSION, "checks": spec.get("checks"), "context": spec.get("context")}, default=str))
-    if status != "ready":
-        mark("@flight", "failed")
-        raise SystemExit(1)
-    mark("@flight", "ok")
+    print(json.dumps({"board": board, "spec_id": spec_id, "request_id": request_id, "status": status, "error": error, "seconds": duration, "prompt_version": PROMPT_VERSION, "checks": spec.get("checks"), "context": spec.get("context")}, default=str))
+    return status == "ready"
 
 
 if __name__ == "__main__":
