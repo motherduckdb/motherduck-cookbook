@@ -1,0 +1,19 @@
+{
+	"brand": "NYC 311",
+	"tagline": "Service requests briefing",
+	"placeholder": "Ask about 311 requests…",
+	"theme": "motherduck",
+	"db": "nyc_311_briefing",
+	"flightId": "",
+	"flight": {
+		"name": "nyc-311-generative-dive",
+		"schedule": "0 6 * * *",
+		"maxRuntimeSec": 600
+	},
+	"examples": [
+		"Which complaint types grew the most this winter, and where?",
+		"Which agencies take longest to close requests?",
+		"How do people report noise complaints: phone, online or the app?",
+		"Why are heat and hot water complaints so high in Brooklyn?"
+	]
+}

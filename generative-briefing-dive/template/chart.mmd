@@ -1,0 +1,5 @@
+flowchart TD
+  marts[Build curated marts from the sources]:::load --> plan{Briefing plan, question or investigation?}:::switch
+  plan --> compile[Validate plan against the catalog, compile and run SQL]:::query
+  compile --> narrate[prompt writes headline, insights, captions, annotations]:::transform
+  narrate --> publish[Write spec row to dive_specs]:::load
