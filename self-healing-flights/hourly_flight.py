@@ -5,8 +5,6 @@ import os
 import duckdb
 import requests
 
-TARGET_DB = os.environ.get("TARGET_DB", "heal_demo")  # the fixer points this at a sandbox clone
-SANDBOX = os.environ.get("HEAL_SANDBOX") == "1"
 STATIONS = {"seattle": "SEW/125,68", "denver": "BOU/62,60"}
 HEADERS = {"User-Agent": "motherduck-self-healing-demo/1.0 (https://motherduck.com)"}
 # Simulates the NWS rolling out a new payload shape (set NWS_FEATURE_FLAGS=forecast_temperature_qv in the Flight config).
@@ -22,16 +20,13 @@ try:
         for p in periods[:24]:
             temp_f = float(p["temperature"]) if p["temperatureUnit"] == "F" else float(p["temperature"]) * 9 / 5 + 32
             hours.append((station, p["startTime"], round(temp_f, 1)))
-    con.execute(f"CREATE SCHEMA IF NOT EXISTS {TARGET_DB}.weather")
-    con.execute(f"CREATE OR REPLACE TABLE {TARGET_DB}.weather.hourly (station VARCHAR, hour TIMESTAMPTZ, temp_f DOUBLE)")
-    con.executemany(f"INSERT INTO {TARGET_DB}.weather.hourly VALUES (?, ?, ?)", hours)
+    con.execute("CREATE DATABASE IF NOT EXISTS heal_demo")
+    con.execute("CREATE SCHEMA IF NOT EXISTS heal_demo.weather")
+    con.execute("CREATE OR REPLACE TEMP TABLE stg (station VARCHAR, hour TIMESTAMPTZ, temp_f DOUBLE)")
+    con.executemany("INSERT INTO stg VALUES (?, ?, ?)", hours)
+    con.execute("CREATE OR REPLACE TABLE heal_demo.weather.hourly AS SELECT *, now() AS loaded_at FROM stg")
     print(f"hourly: loaded {len(hours)} hours", flush=True)
 except Exception as e:
-    # Tell the checker what went wrong (sandbox runs stay quiet so they never look like real failures).
-    msg = f"{type(e).__name__}: {e}"
-    print(f"HEAL_EVENT {json.dumps({'error_type': type(e).__name__, 'message': msg})}", flush=True)
-    if not SANDBOX:
-        con.execute("""INSERT INTO heal.main.pipeline_events (pipeline, flight_id, run_number, severity, error_type, message)
-                       VALUES ('hourly', ?::UUID, ?, 'error', ?, ?)""",
-                    [os.environ.get("MOTHERDUCK_FLIGHT_ID"), os.environ.get("MOTHERDUCK_FLIGHT_RUN_NUMBER"), type(e).__name__, msg[:2000]])
+    # One line the healer reads from the run's log. That is the pipeline's whole contract with the healer.
+    print(f"HEAL_EVENT {json.dumps({'error_type': type(e).__name__, 'message': f'{type(e).__name__}: {e}'[:2000]})}", flush=True)
     raise

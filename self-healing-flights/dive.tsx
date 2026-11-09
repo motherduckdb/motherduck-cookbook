@@ -1,6 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSQLQuery, useDiveState } from '@motherduck/react-sql-query';
-import { BookOpen, Bot, Clock, CloudSun, Database, Eye, FileCode, HeartPulse, KeyRound, LayoutDashboard, Rocket, Search, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
+import { useSQLQuery, useDiveState, useFlightRun, useRunFlight } from '@motherduck/react-sql-query';
+import {
+	Bell,
+	BookOpen,
+	Bot,
+	Clock,
+	CloudSun,
+	Database,
+	Eye,
+	FileCode,
+	FlaskConical,
+	GitMerge,
+	HeartPulse,
+	Inbox,
+	KeyRound,
+	LayoutDashboard,
+	Lock,
+	Rocket,
+	Search,
+	ShieldCheck,
+	Sparkles,
+	UserCheck,
+	Users,
+	Wrench,
+} from 'lucide-react';
 
 export const REQUIRED_DATABASES = [
 	{ type: 'database', path: 'md:heal', alias: 'heal_board' },
@@ -29,9 +52,10 @@ const T = {
 };
 
 const H = '"heal_board"."main"';
-const GH = 'https://github.com/Alex-Monahan/self-healing-pipelines';
-// Expected heartbeat intervals in minutes (red when older than 2x)
-const HB_EXPECTED_MIN: Record<string, number> = { checker: 5, watchdog: 15 };
+// The healer Flight that the Approve, Reject and Retry buttons run (deploy.py writes its id here).
+const HEALER_FLIGHT_ID = '__HEALER_FLIGHT_ID__';
+// The healer runs every 5 minutes and beats every 30 seconds while it works: red when silent for 2x the schedule.
+const HB_EXPECTED_MIN = 5;
 
 type Row = Record<string, unknown>;
 const N = (v: unknown): number => (v == null ? 0 : Number(v));
@@ -208,11 +232,13 @@ SELECT
   (SELECT count(*) FROM inc WHERE status = 'resolved')::INT AS n_res,
   (SELECT count(*) FROM inc)::INT AS n_all,
   (SELECT epoch_ms(max(ts))::DOUBLE FROM hb WHERE component IN ('healer', 'checker')) AS checker_ms,
-  (SELECT epoch_ms(max(ts))::DOUBLE FROM hb WHERE component = 'watchdog') AS watchdog_ms,
   (SELECT any_value(value) FROM ctl WHERE key = 'kill_switch') AS kill_switch,
-  (SELECT any_value(value) FROM ctl WHERE key = 'dispatch_paused') AS dispatch_paused,
-  (SELECT any_value(value) FROM ctl WHERE key = 'autonomy_cap') AS autonomy_cap,
+  (SELECT any_value(autonomy) FROM ${H}."pipeline_registry" WHERE kind = 'pipeline') AS autonomy,
   (SELECT any_value(value) FROM ctl WHERE key = 'daily_spend_cap_usd') AS spend_cap,
+  (SELECT count(*) FROM ${H}."proposals" WHERE status = 'pending')::INT AS n_pending,
+  (SELECT count(*) FROM ${H}."agent_accounts")::INT AS n_agents,
+  (SELECT count(*) FROM ${H}."leases" WHERE name LIKE 'agent:%' AND holder IS NOT NULL AND expires_at > now())::INT AS n_agents_busy,
+  (SELECT count(*) FROM ${H}."alerts" WHERE ts > now() - INTERVAL 24 HOUR AND severity <> 'info')::INT AS n_alerts,
   (SELECT coalesce(sum(cost_usd), 0) FROM ${H}."fixer_runs"
      WHERE (started_at AT TIME ZONE 'UTC')::DATE = (now() AT TIME ZONE 'UTC')::DATE)::DOUBLE AS spend_today,
   (SELECT count(*) FROM "heal_board"."eval"."scenario_runs")::INT AS n_eval,
@@ -339,17 +365,41 @@ FROM "heal_board"."eval"."scenario_runs"
 QUALIFY row_number() OVER (PARTITION BY scenario, level ORDER BY started_at DESC) = 1
 ORDER BY scenario, level`;
 
+const ALERTS_SQL = `
+SELECT alert_id::DOUBLE AS id, epoch_ms(ts)::DOUBLE AS ts_ms, kind, severity, message, incident_id::DOUBLE AS incident_id, webhook_status
+FROM ${H}."alerts" WHERE ts > now() - INTERVAL 7 DAY ORDER BY ts DESC LIMIT 50`;
+
+const PROPOSALS_SQL = `
+SELECT p.proposal_id::DOUBLE AS id, p.incident_id::DOUBLE AS incident_id, p.status, p.base_version::DOUBLE AS base_version,
+  p.shipped_version::DOUBLE AS shipped_version, p.diff, p.note, i.pipeline, i.title,
+  p.summary->>'root_cause' AS root_cause, p.summary->>'fix' AS fix, p.summary->>'tests' AS tests,
+  p.summary->'test_review'->>'verdict' AS test_verdict, p.summary->'test_review'->>'notes' AS test_notes,
+  p.summary->>'approver_notes' AS approver_notes, (p.summary->'drift')::VARCHAR AS drift, (p.summary->'checks')::VARCHAR AS checks,
+  (p.summary->'risk')::VARCHAR AS risk, (p.summary->'unseen_failures')::VARCHAR AS unseen, p.decided_by,
+  epoch_ms(p.created_at)::DOUBLE AS created_ms, epoch_ms(p.decided_at)::DOUBLE AS decided_ms
+FROM ${H}."proposals" p LEFT JOIN ${H}."incidents" i USING (incident_id)
+ORDER BY (p.status = 'pending') DESC, p.created_at DESC LIMIT 30`;
+
+const AGENTS_SQL = `
+SELECT a.username, a.role, l.holder, l.run_number::DOUBLE AS run_number, epoch_ms(l.acquired_at)::DOUBLE AS since_ms,
+  (l.holder IS NOT NULL AND l.expires_at > now()) AS busy,
+  (SELECT string_agg(database_name || ' (' || share_name || ')', ', ') FROM ${H}."agent_shares") AS shares
+FROM ${H}."agent_accounts" a LEFT JOIN ${H}."leases" l ON l.name = 'agent:' || a.username
+ORDER BY a.username`;
+
 // ---------- healing DAG derivation ----------
-type Phase = 'repro' | 'investigate' | 'edit' | 'verify' | 'submit' | 'guard' | 'approver' | 'outcome';
-const PHASES: Phase[] = ['repro', 'investigate', 'edit', 'verify', 'submit', 'guard', 'approver', 'outcome'];
+type Phase = 'repro' | 'investigate' | 'edit' | 'verify' | 'submit' | 'guard' | 'tests' | 'approver' | 'sync' | 'outcome';
+const PHASES: Phase[] = ['repro', 'investigate', 'edit', 'verify', 'submit', 'guard', 'tests', 'approver', 'sync', 'outcome'];
 const PHASE_LABEL: Record<Phase, string> = {
 	repro: 'Reproduce',
 	investigate: 'Investigate',
 	edit: 'Edit',
 	verify: 'Verify',
 	submit: 'Submit',
-	guard: 'Guard',
+	guard: 'Checks',
+	tests: 'Test review',
 	approver: 'Approver',
+	sync: 'Sync',
 	outcome: 'Outcome',
 };
 type Action = {
@@ -398,34 +448,37 @@ function subagentOf(cmd: string): string {
 function classify(a: Action): Phase | 'echo' | 'chip' | null {
 	const low = a.command.trim().toLowerCase();
 	if (a.kind === 'run') return /repro/.test(low) ? 'repro' : 'verify';
-	if (a.kind === 'submit') return 'submit';
+	if (a.kind === 'submit') return null; // a proposal or a shipped version: the Outcome node shows it
 	if (a.kind === 'guard') return 'guard';
+	if (a.kind === 'test-review') return 'tests';
+	if (a.kind === 'sync') return 'sync';
 	if (a.kind === 'approver') return low.startsWith('command check') ? 'chip' : 'approver';
+	if (a.kind === 'notice') return 'chip';
 	if (a.kind === 'guide' || a.kind === 'mdsql') return 'investigate';
-	if (a.kind === 'note') return null;
+	if (a.kind === 'note' || a.kind === 'agent') return null;
 	if (a.kind === 'tool') {
-		if (/^bash:\s*heal (repro|verify|submit)\b/.test(low)) return 'echo';
+		if (/^(bash|shell):\s*(heal (repro|verify|submit)|verify)\b/.test(low)) return 'echo';
 		if (low.startsWith('task:')) return 'chip';
 		const t = toolName(low);
-		if (['edit', 'write', 'patch', 'multiedit', 'apply_patch'].includes(t)) return /heal_result\.json/.test(low) ? 'submit' : 'edit';
+		if (['edit', 'write', 'patch', 'multiedit', 'apply_patch'].includes(t)) return /result\.json/.test(low) ? 'submit' : 'edit';
 		return 'investigate';
 	}
 	return 'investigate';
 }
-const BAD_VERDICTS = new Set(['failed', 'rejected', 'violations', 'deny', 'error', 'blocked', 'denied_by_approver']);
+const BAD_VERDICTS = new Set(['failed', 'rejected', 'violations', 'deny', 'error', 'blocked', 'denied_by_approver', 'conflict']);
+const DECISIVE = ['run', 'guard', 'test-review', 'approver', 'sync'];
 function stepVerdict(st: Step): string {
-	const d = st.actions.filter((a) => ['run', 'submit', 'guard', 'approver'].includes(a.kind) && !a.command.toLowerCase().startsWith('command check'));
+	const d = st.actions.filter((a) => DECISIVE.includes(a.kind) && !a.command.toLowerCase().startsWith('command check'));
 	return d.length ? d[d.length - 1].verdict : '';
 }
 function loopReason(st: Step, to: Phase): { fix: boolean; reason: string } {
 	const v = stepVerdict(st);
-	const last = [...st.actions].reverse().find((a) => ['run', 'submit', 'guard', 'approver'].includes(a.kind));
+	const last = [...st.actions].reverse().find((a) => DECISIVE.includes(a.kind));
 	if (st.phase === 'verify' && v === 'failed') return { fix: true, reason: `verify failed${last?.exits ? ` (exits ${last.exits})` : ''}` };
 	if (st.phase === 'submit' && v === 'rejected') return { fix: true, reason: `submit rejected: ${parseList(last?.errors).join('; ') || 'validation errors'}` };
-	if (st.phase === 'guard' && v === 'violations') {
-		const vs = [...parseList(last?.violations), ...parseList(last?.l2_blocks).map((x) => `L2 block: ${x}`)];
-		return { fix: true, reason: `guard: ${vs.join('; ') || 'violations'}` };
-	}
+	if (st.phase === 'guard' && (v === 'violations' || v === 'rejected')) return { fix: true, reason: `healer checks: ${parseList(last?.errors).join('; ') || 'failed'}` };
+	if (st.phase === 'tests' && v === 'deny') return { fix: true, reason: `test reviewer deny: ${S(last?.feedback) || 'no reason'}` };
+	if (st.phase === 'sync') return { fix: v === 'conflict', reason: v === 'conflict' ? 'pipeline changed upstream: merge conflict for the agent' : 'pipeline changed upstream: merged, retesting' };
 	if (st.phase === 'approver' && v === 'deny') return { fix: true, reason: `approver deny: ${S(last?.feedback) || 'no feedback'}` };
 	if (to === 'repro') return { fix: false, reason: 're-ran repro' };
 	return { fix: false, reason: `back to ${PHASE_LABEL[to].toLowerCase()}` };
@@ -438,7 +491,7 @@ function buildHealing(actions: Action[], endMs: number | null): Healing {
 		const cur = steps[steps.length - 1];
 		if (c === 'echo' || c === null || c === 'chip') {
 			if (c === 'chip') {
-				const name = a.kind === 'approver' ? 'command check' : subagentOf(a.command);
+				const name = a.kind === 'approver' ? 'command check' : a.kind === 'notice' ? 'notice' : subagentOf(a.command);
 				const ph: Phase | null = /verif/.test(name) ? 'verify' : /local/.test(name) ? 'investigate' : cur?.phase ?? 'investigate';
 				chips.push({ phase: ph, name });
 			}
@@ -1038,26 +1091,18 @@ function Gantt({
 // ---------- views ----------
 function HealthStrip({ q, now }: { q: ReturnType<typeof useSQLQuery>; now: number }) {
 	const r = rowsOf(q)[0] ?? {};
-	const hb = (k: 'checker' | 'watchdog') => {
-		const ms = NN(r[`${k}_ms`]);
-		const stale = ms == null || now - ms > 2 * HB_EXPECTED_MIN[k] * 60e3;
-		return { text: ms == null ? 'no heartbeat' : ago(ms, now), stale };
-	};
-	const ck = hb('checker');
+	const hbMs = NN(r.checker_ms);
+	const hbStale = hbMs == null || now - hbMs > 2 * HB_EXPECTED_MIN * 60e3;
 	const kill = S(r.kill_switch);
-	const paused = S(r.dispatch_paused);
+	const auto = S(r.autonomy);
 	const tiles: { label: string; value: string; color?: string; sub?: string }[] = [
-		{ label: 'Open', value: String(N(r.n_open)), color: N(r.n_open) ? T.red : undefined },
-		{ label: 'Investigating', value: String(N(r.n_inv)), color: N(r.n_inv) ? T.blue : undefined },
-		{ label: 'Verifying', value: String(N(r.n_ver)), color: N(r.n_ver) ? T.teal : undefined, sub: N(r.n_prop) ? `${N(r.n_prop)} proposed` : undefined },
-		{ label: 'Escalated', value: String(N(r.n_esc)), color: N(r.n_esc) ? T.orange : undefined, sub: `${N(r.n_res)} resolved of ${N(r.n_all)}` },
-		{ label: 'Healer heartbeat', value: ck.text, color: ck.stale ? T.red : T.green, sub: `every run, ≤ ${HB_EXPECTED_MIN.checker}m apart` },
-		{
-			label: 'Kill switch',
-			value: kill || '–',
-			color: kill && kill !== 'off' ? T.red : T.green,
-			sub: `dispatch ${paused === 'on' || paused === 'true' ? 'paused' : paused || '–'} · cap ${S(r.autonomy_cap) || '–'}`,
-		},
+		{ label: 'Open', value: String(N(r.n_open)), color: N(r.n_open) ? T.red : undefined, sub: `${N(r.n_inv)} being fixed now` },
+		{ label: 'Waiting for approval', value: String(N(r.n_pending)), color: N(r.n_pending) ? T.purple : undefined, sub: auto === 'L1' ? 'autonomy L1: fixes ship on their own' : 'autonomy L3: a human approves each fix' },
+		{ label: 'Verifying', value: String(N(r.n_ver)), color: N(r.n_ver) ? T.teal : undefined, sub: `${N(r.n_res)} resolved of ${N(r.n_all)}` },
+		{ label: 'Escalated', value: String(N(r.n_esc)), color: N(r.n_esc) ? T.orange : undefined, sub: 'need a human (Retry in the incident)' },
+		{ label: 'Healer heartbeat', value: hbMs == null ? 'no heartbeat' : ago(hbMs, now), color: hbStale ? T.red : T.green, sub: hbStale ? `silent for over ${2 * HB_EXPECTED_MIN} min: is the schedule on?` : 'runs every 5 min; checks every minute while fixing' },
+		{ label: 'Agent accounts busy', value: `${N(r.n_agents_busy)} / ${N(r.n_agents) || '–'}`, color: N(r.n_agents_busy) ? T.blue : undefined, sub: 'one fix per service account' },
+		{ label: 'Alerts, last 24 h', value: String(N(r.n_alerts)), color: N(r.n_alerts) ? T.red : T.green, sub: kill && kill !== 'off' ? `kill switch ${kill}` : 'kill switch off' },
 		{ label: 'Fixer spend today', value: usd(N(r.spend_today)), sub: r.spend_cap ? `cap $${S(r.spend_cap)} (UTC day)` : 'UTC day' },
 	];
 	return (
@@ -1080,7 +1125,7 @@ function IncidentTable({ rows, selected, onSelect, now, limit }: { rows: Row[]; 
 			<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 				<thead>
 					<tr>
-						{['#', 'Status', 'Incident', 'Category', 'Lvl', 'Pipelines', 'Ev', 'Att', 'Cost', 'GitHub', 'Created'].map((h) => (
+						{['#', 'Status', 'Incident', 'Category', 'Lvl', 'Pipelines', 'Ev', 'Att', 'Cost', 'Fix', 'Created'].map((h) => (
 							<th key={h} style={th}>
 								{h}
 							</th>
@@ -1121,10 +1166,7 @@ function IncidentTable({ rows, selected, onSelect, now, limit }: { rows: Row[]; 
 								<td style={td}>{N(r.attempts)}</td>
 								<td style={{ ...td, whiteSpace: 'nowrap' }}>{usd(N(r.cost))}</td>
 								<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11 }} onClick={(e) => e.stopPropagation()}>
-									{NN(r.gh_issue) ? <Ext href={`${GH}/issues/${N(r.gh_issue)}`}>#{N(r.gh_issue)}</Ext> : null}
-									{NN(r.gh_issue) && NN(r.gh_pr) ? ' · ' : null}
-									{NN(r.gh_pr) ? <Ext href={`${GH}/pull/${N(r.gh_pr)}`}>PR {N(r.gh_pr)}</Ext> : null}
-									{!NN(r.gh_issue) && !NN(r.gh_pr) ? <span style={{ color: T.faint }}>–</span> : null}
+									{S(r.fix_sha) ? <span style={{ fontFamily: T.mono }}>{S(r.fix_sha).replace('flight-', '')}</span> : <span style={{ color: T.faint }}>–</span>}
 								</td>
 								<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11, color: T.muted }} title={stamp(NN(r.created_ms))}>
 									{ago(NN(r.created_ms), now)}
@@ -1246,7 +1288,6 @@ function AttemptCard({
 				<span style={{ color: T.muted }}>
 					{fmtDur(total)} · {usd(N(fr.cost))} · approver rounds {NN(fr.approver_rounds) ?? '–'} · {fixLoops} fix loop{fixLoops === 1 ? '' : 's'}
 				</span>
-				{pr && !example ? <Ext href={`${GH}/pull/${pr}`}>PR #{pr}</Ext> : null}
 				{S(fr.branch) && !pr ? <span style={{ fontSize: 11, color: T.muted }}>{S(fr.branch)}</span> : null}
 				{S(fr.model) ? (
 					<span style={{ fontSize: 10, color: T.faint }}>
@@ -1303,13 +1344,247 @@ function SummaryBlock({ fr }: { fr: Row }) {
 	);
 }
 
-function IncidentDetail({ inc, now, onGuides }: { inc: Row; now: number; onGuides: () => void }) {
+// ---------- actions: buttons that run the healer Flight ----------
+const DEPLOYED = !HEALER_FLIGHT_ID.startsWith('__');
+function HealerButton({ label, config, onDone, kind = 'normal' }: { label: string; config: Record<string, string>; onDone?: () => void; kind?: 'primary' | 'danger' | 'normal' }) {
+	const start = useRunFlight(HEALER_FLIGHT_ID);
+	const latest = useFlightRun(HEALER_FLIGHT_ID, start.data?.runNumber, {
+		onFinished: (run: { status?: string }) => {
+			if (run.status === 'SUCCEEDED') onDone?.();
+		},
+	});
+	const busy = start.isPending || latest.isChecking;
+	const color = kind === 'primary' ? T.green : kind === 'danger' ? T.red : T.blue;
+	if (!DEPLOYED) return <span style={{ fontSize: 10, color: T.muted }}>({label}: deploy with deploy.py to enable)</span>;
+	return (
+		<span className="inline-flex flex-wrap items-center" style={{ gap: 6 }}>
+			<button
+				disabled={busy}
+				onClick={() => start.run(config)}
+				style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 4, cursor: busy ? 'wait' : 'pointer', border: `1px solid ${color}`, background: busy ? T.grid : color, color: busy ? T.muted : '#fff' }}
+			>
+				{busy ? `${label}…` : label}
+			</button>
+			{latest.status ? (
+				<span style={{ fontSize: 10, color: latest.isFinished ? (latest.status === 'SUCCEEDED' ? T.green : T.red) : T.muted }}>
+					{latest.isFinished ? (latest.status === 'SUCCEEDED' ? 'done' : `healer run ${S(latest.status).toLowerCase()}`) : S(latest.status).toLowerCase()}
+				</span>
+			) : null}
+			{start.error ? <span style={{ fontSize: 10, color: T.red }}>Could not start it: {start.error.message}. Only the healer's owner, or someone given run access, can.</span> : null}
+			{latest.error ? <span style={{ fontSize: 10, color: T.red }}>Could not check the run: {latest.error.message}</span> : null}
+		</span>
+	);
+}
+
+const SEV_COLOR: Record<string, string> = { error: T.red, warn: T.orange, info: T.blue };
+function AlertsPanel({ now, onIncident }: { now: number; onIncident: (id: number) => void }) {
+	const q = useSQLQuery(ALERTS_SQL);
+	const [all, setAll] = useState(false);
+	const rows = rowsOf(q);
+	const recent = rows.filter((r) => now - N(r.ts_ms) < 86400e3);
+	const list = all ? rows : recent.slice(0, 5);
+	return (
+		<Section>
+			<SectionTitle
+				note={
+					<span>
+						heal.main.alerts · also posted to the heal_webhook secret's URL when set ·{' '}
+						<span style={linkStyle} onClick={() => setAll(!all)}>
+							{all ? 'last 24 h only' : `all ${rows.length} from 7 days`}
+						</span>
+					</span>
+				}
+			>
+				Alerts
+			</SectionTitle>
+			{q.isLoading && !q.data ? (
+				<Skeleton h={40} />
+			) : q.isError ? (
+				<ErrorLine error={q.error} />
+			) : !list.length ? (
+				<Empty>No alerts in the last 24 hours. Stuck or crashed healer runs, escalations and fixes waiting for approval show up here.</Empty>
+			) : (
+				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+					<tbody>
+						{list.map((r) => (
+							<tr key={N(r.id)}>
+								<td style={{ ...td, width: 90, whiteSpace: 'nowrap', fontSize: 11, color: T.muted }} title={stamp(NN(r.ts_ms))}>
+									{ago(NN(r.ts_ms), now)}
+								</td>
+								<td style={{ ...td, width: 120 }}>
+									<Pill label={S(r.kind).replace('_', ' ')} color={SEV_COLOR[S(r.severity)] ?? T.gray} />
+								</td>
+								<td style={{ ...td, fontSize: 11 }}>
+									{S(r.message)}
+									{NN(r.incident_id) ? (
+										<span style={{ ...linkStyle, marginLeft: 6 }} onClick={() => onIncident(N(r.incident_id))}>
+											#{N(r.incident_id)}
+										</span>
+									) : null}
+								</td>
+								<td style={{ ...td, width: 90, fontSize: 10, color: T.faint }} title="webhook delivery">
+									{S(r.webhook_status)}
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			)}
+		</Section>
+	);
+}
+
+function DiffBlock({ diff }: { diff: string }) {
+	return (
+		<pre style={{ fontFamily: T.mono, fontSize: 10.5, lineHeight: '14px', background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, padding: 8, overflowX: 'auto', maxHeight: 360, margin: '6px 0 0' }}>
+			{diff.split('\n').map((l, i) => (
+				<div key={i} style={{ color: l.startsWith('+') && !l.startsWith('+++') ? T.green : l.startsWith('-') && !l.startsWith('---') ? T.red : l.startsWith('@@') ? T.purple : T.text }}>
+					{l || ' '}
+				</div>
+			))}
+		</pre>
+	);
+}
+
+const PROP_COLOR: Record<string, string> = { pending: T.purple, shipped: T.green, rejected: T.gray, stale: T.orange };
+function ProposalCard({ p, now, onDone, onIncident }: { p: Row; now: number; onDone: () => void; onIncident: (id: number) => void }) {
+	const pending = S(p.status) === 'pending';
+	const drift = parseList(p.drift);
+	return (
+		<div style={{ borderLeft: `3px solid ${PROP_COLOR[S(p.status)] ?? T.line}`, paddingLeft: 10, marginBottom: 16 }}>
+			<div className="flex flex-wrap items-center" style={{ gap: 8 }}>
+				<b style={{ fontSize: 13 }}>Proposal #{N(p.id)}</b>
+				<Pill label={S(p.status)} color={PROP_COLOR[S(p.status)] ?? T.gray} />
+				<span style={{ fontSize: 11, color: T.muted }}>
+					{S(p.pipeline)} · built on Flight version {N(p.base_version)} · {ago(NN(p.created_ms), now)}
+					{NN(p.shipped_version) ? ` · shipped as v${N(p.shipped_version)}` : ''}
+				</span>
+				<span style={{ ...linkStyle, fontSize: 11 }} onClick={() => onIncident(N(p.incident_id))}>
+					incident #{N(p.incident_id)}
+				</span>
+			</div>
+			<div style={{ fontSize: 12, marginTop: 2 }}>{S(p.title)}</div>
+			{S(p.note) ? <div style={{ fontSize: 11, color: T.muted }}>{S(p.note)}</div> : null}
+			{pending && parseList(p.risk).length ? (
+				<div style={{ fontSize: 11, color: T.red, marginTop: 4 }}>
+					<b>Needs a human whatever the autonomy:</b> the fix adds {parseList(p.risk).join(', ')}. Check that each is needed.
+				</div>
+			) : null}
+			{pending && parseList(p.unseen).length ? (
+				<div style={{ fontSize: 11, color: T.orange, marginTop: 4 }}>
+					<b>Failures the agent did not see:</b> {parseList(p.unseen).map((u) => trunc(u, 160)).join(' · ')}
+				</div>
+			) : null}
+			{pending ? (
+				<>
+					<div className="grid grid-cols-2" style={{ gap: '4px 20px', fontSize: 11, lineHeight: '16px', marginTop: 6 }}>
+						<div>
+							<b>Root cause:</b> {S(p.root_cause) || '–'}
+						</div>
+						<div>
+							<b>Fix:</b> {S(p.fix) || '–'}
+						</div>
+						<div>
+							<b>Tests:</b> {S(p.tests) || '–'} · <b>independent test reviewer:</b> <span style={{ color: S(p.test_verdict) === 'approve' ? T.green : T.red }}>{S(p.test_verdict) || '–'}</span>
+							{S(p.test_notes) ? <span style={{ color: T.muted }}> ({trunc(S(p.test_notes), 220)})</span> : null}
+						</div>
+						<div>
+							<b>Approver:</b> {trunc(S(p.approver_notes), 260) || '–'}
+						</div>
+						<div>
+							<b>Healer checks passed:</b> {parseList(p.checks).join(' · ') || '–'}
+						</div>
+						<div>
+							<b>Output drift vs production:</b> {drift.length ? <span style={{ color: T.orange }}>{drift.join('; ')}</span> : 'none beyond tolerance'}
+						</div>
+					</div>
+					<DiffBlock diff={S(p.diff)} />
+					<div className="flex flex-wrap items-center" style={{ gap: 12, marginTop: 8 }}>
+						<HealerButton label="Approve and ship" kind="primary" config={{ ACTION: 'approve', PROPOSAL_ID: String(N(p.id)) }} onDone={onDone} />
+						<HealerButton label="Reject" kind="danger" config={{ ACTION: 'reject', PROPOSAL_ID: String(N(p.id)) }} onDone={onDone} />
+						<span style={{ fontSize: 10, color: T.muted }}>If the pipeline changed since this fix was tested, Approve does not ship it: the healer redoes it on the new version, runs every check and review again, and proposes it again.</span>
+					</div>
+				</>
+			) : null}
+		</div>
+	);
+}
+
+function ApprovalsView({ now, onIncident, onChange }: { now: number; onIncident: (id: number) => void; onChange: () => void }) {
+	const q = useSQLQuery(PROPOSALS_SQL);
+	const rows = rowsOf(q);
+	const done = () => {
+		q.refetch();
+		onChange();
+	};
+	return (
+		<Section>
+			<SectionTitle note="heal.main.proposals · a fix that passed every check and review, waiting for a human (autonomy L3)">Fixes waiting for approval</SectionTitle>
+			{q.isLoading && !q.data ? (
+				<Skeleton h={120} />
+			) : q.isError ? (
+				<ErrorLine error={q.error} />
+			) : !rows.length ? (
+				<Empty>No proposals. With AUTONOMY=L3 (the default) every fix waits here for a human; this recipe's demo Flights run at L1, so their fixes ship on their own.</Empty>
+			) : (
+				rows.map((p) => <ProposalCard key={N(p.id)} p={p} now={now} onDone={done} onIncident={onIncident} />)
+			)}
+		</Section>
+	);
+}
+
+function AgentsPanel({ now }: { now: number }) {
+	const q = useSQLQuery(AGENTS_SQL);
+	const rows = rowsOf(q);
+	return (
+		<Section>
+			<SectionTitle note={rows.length ? `share${S(rows[0].shares).includes(',') ? 's' : ''}: ${S(rows[0].shares) || '–'}` : undefined}>Agent accounts</SectionTitle>
+			{q.isLoading && !q.data ? (
+				<Skeleton h={40} />
+			) : q.isError ? (
+				<ErrorLine error={q.error} />
+			) : !rows.length ? (
+				<Empty>No agent accounts yet. The healer creates them (and the restricted shares they read) the first time it fixes something.</Empty>
+			) : (
+				<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+					<thead>
+						<tr>
+							{['Service account', 'Role', 'Now'].map((h) => (
+								<th key={h} style={th}>
+									{h}
+								</th>
+							))}
+						</tr>
+					</thead>
+					<tbody>
+						{rows.map((r) => (
+							<tr key={S(r.username)}>
+								<td style={{ ...td, fontFamily: T.mono, fontSize: 11 }}>{S(r.username)}</td>
+								<td style={{ ...td, fontFamily: T.mono, fontSize: 11 }}>{S(r.role)}</td>
+								<td style={{ ...td, fontSize: 11 }}>{B(r.busy) ? <span style={{ color: T.blue }}>fixing for healer run {N(r.run_number)} · {ago(NN(r.since_ms), now)}</span> : <span style={{ color: T.muted }}>free</span>}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			)}
+		</Section>
+	);
+}
+
+const incProposalsSQL = (id: number) => `
+SELECT proposal_id::DOUBLE AS id, status, base_version::DOUBLE AS base_version, shipped_version::DOUBLE AS shipped_version, note
+FROM ${H}."proposals" WHERE incident_id = ${id} ORDER BY proposal_id DESC`;
+
+function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Row; now: number; onGuides: () => void; onApprovals: () => void; onChange: () => void }) {
 	const id = N(inc.id);
 	const transQ = useSQLQuery(transSQL(id));
 	const eventsQ = useSQLQuery(eventsSQL(id));
 	const fixQ = useSQLQuery(fixerSQL(id));
 	const actQ = useSQLQuery(actionsSQL(id));
 	const gQ = useSQLQuery(incGuidesSQL(id));
+	const pQ = useSQLQuery(incProposalsSQL(id));
+	const props = rowsOf(pQ);
+	const status = S(inc.status);
 	const fixers = rowsOf(fixQ);
 	const actRows = rowsOf(actQ);
 	const byRun = useMemo(() => {
@@ -1338,16 +1613,36 @@ function IncidentDetail({ inc, now, onGuides }: { inc: Row; now: number; onGuide
 				<span>
 					pipelines: <b style={{ color: T.text }}>{S(inc.pipelines) || S(inc.pipeline)}</b>
 				</span>
-				{NN(inc.gh_issue) ? <Ext href={`${GH}/issues/${N(inc.gh_issue)}`}>issue #{N(inc.gh_issue)}</Ext> : <span>no issue</span>}
-				{NN(inc.gh_pr) ? <Ext href={`${GH}/pull/${N(inc.gh_pr)}`}>PR #{N(inc.gh_pr)}</Ext> : <span>no PR</span>}
-				{S(inc.fix_sha) ? <span style={{ fontFamily: T.mono }}>fix {S(inc.fix_sha).startsWith('direct:') ? S(inc.fix_sha) : S(inc.fix_sha).slice(0, 10)}</span> : null}
-				<span>
-					green runs {N(inc.green_runs)} · red runs {N(inc.red_runs)}
-				</span>
-				{S(inc.resource) ? <span>resource {S(inc.resource)}</span> : null}
+				{S(inc.fix_sha) ? <span style={{ fontFamily: T.mono }}>fix shipped as {S(inc.fix_sha)}</span> : null}
+				<span>green runs since the fix {N(inc.green_runs)}</span>
+				{NN(inc.root_id) ? <span>waits behind the fix for #{N(inc.root_id)}</span> : null}
 				<span>opened {stamp(NN(inc.created_ms))}</span>
 				{NN(inc.resolved_ms) ? <span>resolved in {fmtDur(N(inc.resolved_ms) - N(inc.created_ms))}</span> : null}
 			</div>
+			{props.length || ['escalated', 'rejected', 'watching'].includes(status) ? (
+				<div className="flex flex-wrap items-center" style={{ gap: 10, fontSize: 11, marginTop: 6 }}>
+					{props.map((p) => (
+						<span key={N(p.id)}>
+							proposal #{N(p.id)} <Pill label={S(p.status)} color={PROP_COLOR[S(p.status)] ?? T.gray} /> {S(p.note) ? <span style={{ color: T.muted }}>{trunc(S(p.note), 120)}</span> : null}
+							{S(p.status) === 'pending' ? (
+								<span style={{ ...linkStyle, marginLeft: 6 }} onClick={onApprovals}>
+									review and approve
+								</span>
+							) : null}
+						</span>
+					))}
+					{['escalated', 'rejected', 'watching'].includes(status) ? (
+						<HealerButton
+							label="Retry the fix"
+							config={{ ACTION: 'retry', INCIDENT_ID: String(id) }}
+							onDone={() => {
+								transQ.refetch();
+								onChange();
+							}}
+						/>
+					) : null}
+				</div>
+			) : null}
 
 			<Section>
 				<SectionTitle note="incident_transitions">Lifecycle</SectionTitle>
@@ -1884,9 +2179,9 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const miles: { m: number; t: string; l1: string; l2?: string; fill: string; icon?: React.ElementType; mark?: 'x' | 'check' }[] = [
 		{ m: 0, t: '2:00', l1: 'a run fails', fill: A.coral, mark: 'x' },
 		{ m: 5, t: '2:05', l1: 'healer opens', l2: 'an incident', fill: A.yellow, icon: Search },
-		{ m: 7, t: '2:07', l1: 'fix ships', l2: '(~2 min)', fill: A.orange, icon: Rocket },
-		{ m: 8.5, t: '2:08', l1: '2 green runs', fill: A.tealSoft, mark: 'check' },
-		{ m: 11, t: '2:11', l1: 'resolved,', l2: 'Guide saved', fill: A.teal, icon: BookOpen },
+		{ m: 6.8, t: '2:07', l1: 'fix passes', l2: 'every review', fill: A.orange, icon: UserCheck },
+		{ m: 8.9, t: '2:08', l1: 'ships (L1) or', l2: 'you approve (L3)', fill: A.tealSoft, icon: Rocket },
+		{ m: 11, t: '2:11', l1: '2 green runs:', l2: 'resolved, Guide', fill: A.teal, icon: BookOpen },
 	];
 	return (
 		<>
@@ -1896,7 +2191,7 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				sub="Follow one failure from left to right until it is fixed and remembered."
 				live={<LiveChip q={q} value={(r) => (N(r.n_res) ? String(N(r.n_res)) : null)} label="incidents resolved so far" />}
 			/>
-			<Fig n="A1" title="The cast: three Flights and a Dive" h={360} caption="Two pipeline Flights load weather data; the healer Flight watches their runs, ships fixes back to them and logs every step for this Dive.">
+			<Fig n="A1" title="The cast: three Flights, a pool of agent accounts and a Dive" h={410} caption="Two pipeline Flights load weather data. The healer Flight watches their runs; for each failure it leases an agent service account that can read production only through a restricted share. Fixes go back to the pipelines as new Flight versions (or wait for your approval), and every step is logged for this Dive.">
 				<Defs p="a1" />
 				<Card x={30} y={50} w={210} h={190} />
 				<Tx x={135} y={88} s={20}>
@@ -1923,12 +2218,33 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Card x={380} y={50} w={200} h={190} fill={A.yellow} />
 				<circle cx={480} cy={118} r={46} fill="none" stroke={A.ink} strokeWidth={2} className="ax-ring" />
 				<Duck x={484} y={116} s={0.95} />
-				<Tx x={480} y={200} s={22}>
+				<Tx x={480} y={192} s={22}>
 					Healer
 				</Tx>
-				<Tx x={480} y={222} s={14} w={400} f="sans">
-					wakes every 5 min
+				<Tx x={480} y={212} s={12} w={400} f="sans">
+					every 5 min, and every
 				</Tx>
+				<Tx x={480} y={228} s={12} w={400} f="sans">
+					minute while fixing
+				</Tx>
+
+				<Card x={370} y={300} w={220} h={88} fill={A.tealSoft} />
+				<Ic I={Users} x={404} y={330} s={26} />
+				<Tx x={496} y={336} s={16}>
+					agent accounts
+				</Tx>
+				<Tx x={480} y={362} s={10.5} w={400} f="sans">
+					role self_healing_pipeline_agent
+				</Tx>
+				<Edge p="a1" d="M480 246 L480 294" />
+				<Tx x={490} y={274} s={12} w={500} f="sans" a="start">
+					one per fix
+				</Tx>
+				<Edge p="a1" d="M212 318 C 280 330, 300 345, 364 345" dash />
+				<Tx x={292} y={372} s={12} w={500} f="sans">
+					restricted share
+				</Tx>
+				<Tok d="M212 318 C 280 330, 300 345, 364 345" c={A.sky} dur={2.6} />
 
 				<Edge p="a1" d="M246 100 L372 100" />
 				<Tx x={309} y={88} s={13} w={500} f="sans">
@@ -1947,58 +2263,63 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 					This Dive
 				</Tx>
 				<Tx x={825} y={202} s={13} w={400} f="sans">
-					shows every step
+					every step · Approve
 				</Tx>
-				<Cyl cx={825} cy={312} w={150} h={50} fill={A.white} />
-				<Tx x={825} y={325} s={14}>
+				<Cyl cx={825} cy={322} w={150} h={50} fill={A.white} />
+				<Tx x={825} y={335} s={14}>
 					heal
 				</Tx>
-				<Edge p="a1" d="M825 272 L825 252" />
-				<Edge p="a1" d="M586 160 C 660 160, 640 312, 742 312" />
-				<Tx x={636} y={268} s={13} w={500} f="sans" a="end">
+				<Edge p="a1" d="M825 282 L825 252" />
+				<Edge p="a1" d="M586 160 C 660 160, 640 322, 742 322" />
+				<Tx x={636} y={278} s={13} w={500} f="sans" a="end">
 					logs it all
 				</Tx>
-				<Tok d="M586 160 C 660 160, 640 312, 742 312" c={A.sky} dur={3} delay={0.8} />
+				<Tok d="M586 160 C 660 160, 640 322, 742 322" c={A.sky} dur={3} delay={0.8} />
+				<Edge p="a1" d="M714 90 L590 90" dash />
+				<Tx x={652} y={80} s={12} w={500} f="sans">
+					Approve, Retry
+				</Tx>
 			</Fig>
 
 			<Fig n="A2" title="What one healer Flight does" h={290}>
 				<Defs p="a2" />
 				{[
-					{ I: ShieldCheck, n: 'Guard', a: 'one healer', b: 'at a time' },
-					{ I: Search, n: 'Check', a: 'find failed', b: 'pipeline runs' },
-					{ I: Sparkles, n: 'Classify', a: 'Jev: new incident', b: 'or ongoing one?' },
-					{ I: Wrench, n: 'Fix', a: 'one subagent per', b: 'incident, in parallel' },
-					{ I: Rocket, n: 'Ship', a: 'new Flight', b: 'version' },
-					{ I: BookOpen, n: 'Learn', a: 'write or update', b: 'a Guide' },
+					{ I: Lock, n: 'Lease', a: 'one coordinator', b: 'run at a time' },
+					{ I: Search, n: 'Check', a: 'every minute,', b: 'even mid-fix' },
+					{ I: Sparkles, n: 'Classify', a: 'Jev: new or', b: 'known incident?' },
+					{ I: Wrench, n: 'Fix', a: 'an agent account', b: 'per incident' },
+					{ I: UserCheck, n: 'Review', a: 'checks, tests,', b: 'approver' },
+					{ I: Rocket, n: 'Ship', a: 'merge, retest,', b: 'propose or ship' },
+					{ I: BookOpen, n: 'Learn', a: 'a Guide with', b: 'a code snippet' },
 				].map((s, i, all) => {
-					// Six equal boxes across the 900px row, 18px apart
-					const x = 45 + i * 153;
+					// Seven equal boxes across the 900px row, 13px apart
+					const x = 45 + i * 128;
 					return (
 						<g key={s.n}>
-							<Card x={x} y={40} w={135} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 1.333)} />
-							<Ic I={s.I} x={x + 67.5} y={82} s={32} />
-							<Tx x={x + 67.5} y={136} s={19}>
+							<Card x={x} y={40} w={115} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 1.14)} />
+							<Ic I={s.I} x={x + 57.5} y={82} s={30} />
+							<Tx x={x + 57.5} y={136} s={18}>
 								{s.n}
 							</Tx>
-							<Tx x={x + 67.5} y={160} s={12} w={400} f="sans">
+							<Tx x={x + 57.5} y={160} s={11.5} w={400} f="sans">
 								{s.a}
 							</Tx>
-							<Tx x={x + 67.5} y={177} s={12} w={400} f="sans">
+							<Tx x={x + 57.5} y={177} s={11.5} w={400} f="sans">
 								{s.b}
 							</Tx>
-							{i < all.length - 1 ? <Edge p="a2" d={`M${x + 139} 120 L${x + 151} 120`} /> : null}
+							{i < all.length - 1 ? <Edge p="a2" d={`M${x + 119} 120 L${x + 126} 120`} /> : null}
 						</g>
 					);
 				})}
 				<path d="M45 232 L945 232 Q 960 232 960 248 L960 256 Q 960 272 945 272 L60 272 Q 45 272 45 256 L45 232" fill="none" stroke={A.ink} strokeWidth={2} className="ax-march" opacity={0.5} />
-				<rect x={380} y={260} width={200} height={24} fill={A.paper} />
+				<rect x={270} y={260} width={420} height={24} fill={A.paper} />
 				<Tx x={480} y={277} s={13} w={500} f="sans">
-					again in 5 minutes
+					a new run every 5 minutes · a check every minute while fixing
 				</Tx>
 				<Tok d="M45 232 L945 232" c={A.yellow} dur={8} r={9} />
 			</Fig>
 
-			<Fig n="A3" title="Two breaks, fixed side by side" y0={45} h={315} caption="A cheap coordinator model starts one Claude fixer per incident at the same moment; each works on its own zero-copy sandbox, and an independent approver reviews every fix.">
+			<Fig n="A3" title="Two breaks, fixed side by side" y0={20} h={340} caption="The healer itself (plain code, no coordinator model) starts one Claude fixer per incident at once, each as its own agent service account on its own zero-copy clone. A new failure reaches a running fixer as at most one short notice a minute, and every fix passes the healer's checks, an independent test reviewer and an approver.">
 				<Defs p="a3" />
 				{[70, 250].map((y, i) => (
 					<g key={y}>
@@ -2014,32 +2335,39 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Edge p="a3" d="M206 110 Q 250 110 268 160" />
 				<Edge p="a3" d="M206 290 Q 250 290 268 240" />
 				<circle cx={325} cy={200} r={64} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
-				<Ic I={Sparkles} x={325} y={176} s={28} />
-				<Tx x={325} y={212} s={14}>
-					coordinator
+				<Duck x={327} y={180} s={0.42} />
+				<Tx x={325} y={222} s={14}>
+					healer
 				</Tx>
-				<Tx x={325} y={232} s={12} w={400} f="sans">
-					cheap model
+				<Tx x={325} y={240} s={12} w={400} f="sans">
+					plain code
 				</Tx>
+				<rect x={262} y={44} width={150} height={34} rx={17} fill={A.white} stroke={A.ink} strokeWidth={2} />
+				<Ic I={Inbox} x={282} y={61} s={18} />
+				<Tx x={346} y={66} s={12} w={600} f="sans">
+					≤ 1 notice / min
+				</Tx>
+				<Edge p="a3" d="M412 61 C 430 61, 440 66, 446 74" />
+				<Tok d="M412 61 C 430 61, 440 66, 446 74" c={A.coral} dur={2} />
 				<Tx x={325} y={300} s={13} w={500} f="sans">
 					fixers start
 				</Tx>
 				<Tx x={325} y={318} s={13} w={500} f="sans">
-					~55 ms apart
+					at the same moment
 				</Tx>
 				{[105, 295].map((y, i) => {
 					const d = i ? 'M386 212 C 420 212, 412 295, 444 295' : 'M386 188 C 420 188, 412 105, 444 105';
 					return (
 						<g key={y}>
 							<Edge p="a3" d={d} />
-							<Tok d={d} c={A.yellow} dur={2.4} delay={i * 0.055} />
+							<Tok d={d} c={A.yellow} dur={2.4} delay={i * 0.05} />
 							<Card x={450} y={y - 45} w={160} h={90} fill={A.yellow} />
 							<Ic I={Bot} x={482} y={y} s={30} />
 							<Tx x={556} y={y - 2} s={17}>
 								fixer
 							</Tx>
 							<Tx x={556} y={y + 20} s={12} w={400} f="sans">
-								Claude
+								{`agent account ${i + 1}`}
 							</Tx>
 							<path d={`M618 ${y} L668 ${y}`} stroke={A.ink} strokeWidth={2.5} className="ax-march" fill="none" />
 							<Tx x={643} y={y - 12} s={12} w={500} f="sans">
@@ -2047,29 +2375,29 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 							</Tx>
 							<Cyl cx={730} cy={y} w={120} h={64} />
 							<Tx x={730} y={y + 10} s={14}>
-								sandbox
+								clone
 							</Tx>
 							<Edge p="a3" d={i ? `M792 ${y} Q 830 ${y} 848 255` : `M792 ${y} Q 830 ${y} 848 145`} />
 						</g>
 					);
 				})}
 				<Tx x={730} y={190} s={12} w={400} f="sans" c={A.muted}>
-					zero-copy clones
+					zero-copy, inside
 				</Tx>
 				<Tx x={730} y={208} s={12} w={400} f="sans" c={A.muted}>
-					of heal_demo
+					each agent account
 				</Tx>
 				<Card x={830} y={150} w={115} h={100} fill={A.tealSoft} />
-				<Ic I={ShieldCheck} x={887} y={182} s={28} />
-				<Tx x={887} y={220} s={14}>
-					approver
+				<Ic I={UserCheck} x={887} y={180} s={28} />
+				<Tx x={887} y={216} s={14}>
+					reviews
 				</Tx>
-				<Tx x={887} y={238} s={12} w={400} f="sans">
-					GPT
+				<Tx x={887} y={236} s={11.5} w={400} f="sans">
+					tests · approver
 				</Tx>
 			</Fig>
 
-			<Fig n="A4" title="2 a.m., start to finish" h={250} caption="On the 5-minute schedule an incident usually goes from open to resolved in 4 to 9 minutes; the fix itself takes about 2 (times illustrative).">
+			<Fig n="A4" title="2 a.m., start to finish" h={250} caption="On the 5-minute schedule an incident usually goes from open to a fully reviewed fix in 4 to 9 minutes; the fix itself takes about 2. At autonomy L1 it ships at once; at L3, the default, it waits for your Approve in this Dive (times illustrative).">
 				<line x1={70} y1={110} x2={900} y2={110} stroke={A.paper3} strokeWidth={10} strokeLinecap="round" />
 				<line x1={70} y1={110} x2={900} y2={110} stroke={A.teal} strokeWidth={10} strokeLinecap="round" className="ax-grow" />
 				{miles.map((mi) => (
@@ -2103,12 +2431,13 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 // ----- Option B: zoom from the system to the fix loop -----
 function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const cols = [
-		{ I: ShieldCheck, n: 'Guard', chips: ['exit if one is busy', 'cancel a stuck run', 'send heartbeats'] },
-		{ I: Search, n: 'Check', chips: ['read new runs', 'spot failed runs', 'read error logs'] },
-		{ I: Sparkles, n: 'Classify', chips: ['fingerprint errors', 'ask Jev the class', 'open an incident'] },
-		{ I: Wrench, n: 'Fix', chips: ['clone a sandbox', 'recall past Guides', 'fix in parallel'] },
-		{ I: Rocket, n: 'Ship', chips: ['get GPT approval', 'publish new version', 'verify 2 green runs'] },
-		{ I: BookOpen, n: 'Learn', chips: ['write a Guide', 'link helpful Guides', 'reuse next time'] },
+		{ I: Lock, n: 'Lease', chips: ['one coordinator', 'cancel stuck runs', 'heartbeat'] },
+		{ I: Search, n: 'Check', chips: ['every minute', 'each run once', 'park bad runs'] },
+		{ I: Sparkles, n: 'Classify', chips: ['fingerprint', 'ask Jev the class', 'open or attach'] },
+		{ I: Wrench, n: 'Fix', chips: ['agent account', 'clone a share', 'forward failures'] },
+		{ I: UserCheck, n: 'Review', chips: ['healer checks', 'test reviewer', 'approver'] },
+		{ I: Rocket, n: 'Ship', chips: ['merge if moved', 'retest, recheck', 'propose or ship'] },
+		{ I: BookOpen, n: 'Learn', chips: ['write a Guide', 'with a snippet', 'recall it later'] },
 	];
 	const loop = 'M120 190 A240 130 0 0 1 600 190 A240 130 0 0 1 120 190';
 	return (
@@ -2119,11 +2448,11 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				sub="The whole system, then inside the healer Flight, then the fix loop at its heart."
 				live={<LiveChip q={q} value={(r) => (NN(r.fix_cost) != null ? `$${N(r.fix_cost).toFixed(2)}` : null)} label="median cost of a shipped fix" />}
 			/>
-			<Fig n="B1" title="Level 1 · the system" h={380} caption="Everything except the weather API and the model APIs lives in your MotherDuck account: two databases, three Flights and this Dive.">
+			<Fig n="B1" title="Level 1 · the system" h={440} caption="Everything except the weather API, the model APIs and an optional alert webhook lives in your MotherDuck organization: two databases, three Flights, this Dive, and a pool of agent service accounts that can read production only through a restricted share granted to their role.">
 				<Defs p="b1" />
-				<rect x={150} y={20} width={660} height={340} rx={26} fill={A.paper2} stroke={A.ink} strokeWidth={2} strokeDasharray="8 6" />
+				<rect x={150} y={20} width={660} height={400} rx={26} fill={A.paper2} stroke={A.ink} strokeWidth={2} strokeDasharray="8 6" />
 				<Tx x={176} y={52} s={13} a="start">
-					YOUR MOTHERDUCK ACCOUNT
+					YOUR MOTHERDUCK ORGANIZATION
 				</Tx>
 				<Card x={10} y={110} w={115} h={80} r={40} shadow={0} />
 				<Ic I={CloudSun} x={67} y={136} s={26} />
@@ -2134,6 +2463,11 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Ic I={Sparkles} x={892} y={136} s={26} />
 				<Tx x={892} y={174} s={13}>
 					LLM APIs
+				</Tx>
+				<Card x={835} y={14} w={115} h={80} r={40} shadow={0} />
+				<Ic I={Bell} x={892} y={40} s={24} />
+				<Tx x={892} y={78} s={13}>
+					webhook
 				</Tx>
 
 				<Card x={185} y={80} w={170} h={100} />
@@ -2166,6 +2500,14 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Tx x={725} y={276} s={16}>
 					Dive
 				</Tx>
+				<Card x={330} y={340} w={240} h={60} fill={A.tealSoft} />
+				<Ic I={Users} x={360} y={370} s={24} />
+				<Tx x={466} y={366} s={15}>
+					agent accounts ×3
+				</Tx>
+				<Tx x={466} y={386} s={11.5} w={400} f="sans">
+					own clones, read-only share
+				</Tx>
 
 				<Edge p="b1" d="M125 150 L179 150" />
 				<Tok d="M125 150 L179 150" c={A.sky} dur={2} />
@@ -2178,16 +2520,26 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Tok d="M510 186 L510 236" c={A.yellow} dur={2} delay={0.5} />
 				<Edge p="b1" d="M588 282 L654 260" />
 				<Edge p="b1" d="M606 128 L829 146" dash both />
-				<Edge p="b1" d="M346 262 Q 400 220 446 188" dash c={A.ink} />
-				<Tx x={380} y={238} s={12} w={500} f="sans" a="end">
-					zero-copy clone
+				<Edge p="b1" d="M606 96 C 700 90, 760 60, 829 56" dash />
+				<Edge p="b1" d="M654 214 L606 172" dash />
+				<Tx x={668} y={190} s={11.5} w={500} f="sans" a="start">
+					Approve, Retry
+				</Tx>
+				<Edge p="b1" d="M270 324 C 270 360, 290 370, 324 370" dash />
+				<Tx x={200} y={384} s={12} w={500} f="sans">
+					restricted share
+				</Tx>
+				<Tok d="M270 324 C 270 360, 290 370, 324 370" c={A.sky} dur={2.4} delay={0.6} />
+				<Edge p="b1" d="M430 186 C 400 240, 400 300, 418 334" dash />
+				<Tx x={394} y={226} s={11.5} w={500} f="sans" a="end">
+					leases one
 				</Tx>
 				<Tx x={510} y={60} s={12} c={A.orange}>
 					zoom in ↓
 				</Tx>
 			</Fig>
 
-			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="Each 5-minute run passes through six stages, left to right; a heartbeat keeps a long run visibly alive so the next run knows to wait.">
+			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="A run takes the healer lease, or exits because a live run holds it. It checks for failures every minute, even while fixes run, and hands each incident to a worker with its own agent account. A heartbeat renews the lease only while the run makes progress, so a stuck run is cancelled by the next one and an alert goes out.">
 				<Defs p="b2" />
 				<Card x={20} y={36} w={920} h={344} r={22} />
 				<rect x={20} y={12} width={250} height={34} rx={10} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
@@ -2195,27 +2547,27 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 					heal-demo-healer
 				</Tx>
 				{cols.map((c, i) => {
-					// Six stage boxes, 135px wide and 14px apart, each wrapping its own pills
-					const x = 40 + i * 149;
+					// Seven stage boxes, 118px wide and 10px apart, each wrapping its own pills
+					const x = 36 + i * 128;
 					return (
 						<g key={c.n}>
-							<rect x={x} y={62} width={135} height={240} rx={16} fill={A.paper2} stroke={A.ink} strokeWidth={2.5} className="ax-lit" style={lit(A.paper2, i * 1.333)} />
-							<Ic I={c.I} x={x + 26} y={88} s={22} />
-							<Tx x={x + 44} y={94} s={16} a="start">
+							<rect x={x} y={62} width={118} height={240} rx={16} fill={A.paper2} stroke={A.ink} strokeWidth={2.5} className="ax-lit" style={lit(A.paper2, i * 1.14)} />
+							<Ic I={c.I} x={x + 20} y={88} s={20} />
+							<Tx x={x + 36} y={94} s={15} a="start">
 								{c.n}
 							</Tx>
-							{i < cols.length - 1 ? <Edge p="b2" d={`M${x + 137} 88 L${x + 147} 88`} w={2} /> : null}
+							{i < cols.length - 1 ? <Edge p="b2" d={`M${x + 120} 88 L${x + 126} 88`} w={2} /> : null}
 							{c.chips.map((t, j) => {
-								const beat = c.n === 'Guard' && j === 2;
+								const beat = c.n === 'Lease' && j === 2;
 								return (
 									<g key={t}>
-										<rect x={x + 6} y={118 + j * 58} width={123} height={44} rx={22} fill={A.paper} stroke={A.ink} strokeWidth={1.5} />
+										<rect x={x + 6} y={118 + j * 58} width={106} height={44} rx={22} fill={A.paper} stroke={A.ink} strokeWidth={1.5} />
 										{beat ? (
 											<g className="ax-beat">
-												<Ic I={HeartPulse} x={x + 19} y={140 + j * 58} s={14} c={A.coral} />
+												<Ic I={HeartPulse} x={x + 22} y={140 + j * 58} s={14} c={A.coral} />
 											</g>
 										) : null}
-										<Tx x={x + (beat ? 78 : 67.5)} y={145 + j * 58} s={11.5} w={500} f="sans">
+										<Tx x={x + (beat ? 66 : 59)} y={145 + j * 58} s={11} w={500} f="sans">
 											{t}
 										</Tx>
 									</g>
@@ -2225,112 +2577,137 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 					);
 				})}
 				<path d="M50 340 L910 340" stroke={A.sky} strokeWidth={3} className="ax-march" fill="none" />
-				<rect x={300} y={326} width={360} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
-				<Ic I={Database} x={322} y={340} s={16} />
+				<rect x={240} y={326} width={480} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
+				<Ic I={Database} x={262} y={340} s={16} />
 				<Tx x={490} y={345} s={13} w={500} f="sans">
-					every step is written to the heal database
+					every step, alert and proposal is written to heal
 				</Tx>
 			</Fig>
 
-			<Fig n="B3" title="Level 3 · the fix loop" h={380} caption="A fixer edits its copy of the pipeline and verifies it in the sandbox; deterministic checks and an independent approver must agree, and a denial sends feedback back at most twice.">
+			<Fig n="B3" title="Level 3 · the fix loop" h={390} caption="A fixer edits its copy and verifies it against a fresh clone in its agent account. The healer's own checks and contract, an independent test reviewer and an approver that sees only the evidence must all agree; a denial or a merge conflict goes back to the fixer, at most twice. Before it ships, the healer merges onto any newer version of the pipeline, retests, and checks again.">
 				<Defs p="b3" />
 				<path d={loop} fill="none" stroke={A.ink} strokeWidth={3} className="ax-march" />
 				<path d="M360 320 A240 130 0 0 1 120 190" fill="none" stroke={A.coral} strokeWidth={3.5} strokeDasharray="9 7" />
 				<Tok d={loop} c={A.yellow} dur={7} r={10} />
 				{[
 					{ cx: 120, cy: 190, I: Bot, a: 'edit code', b: 'Claude fixer', f: A.yellow },
-					{ cx: 360, cy: 60, I: Database, a: 'verify', b: 'run in sandbox', f: A.skyPale },
-					{ cx: 600, cy: 190, I: ShieldCheck, a: 'checks', b: 'tests kept, real change', f: A.white },
-					{ cx: 360, cy: 320, I: Eye, a: 'approver', b: 'independent GPT', f: A.white },
+					{ cx: 360, cy: 60, I: Database, a: 'verify', b: 'fresh clone, as nobody', f: A.skyPale },
+					{ cx: 600, cy: 190, I: FlaskConical, a: 'checks', b: 'contract, test review', f: A.white },
+					{ cx: 360, cy: 320, I: Eye, a: 'approver', b: 'sees evidence only', f: A.white },
 				].map((n) => (
 					<g key={n.a}>
-						<Card x={n.cx - 95} y={n.cy - 34} w={190} h={68} fill={n.f} />
-						<Ic I={n.I} x={n.cx - 64} y={n.cy} s={26} />
-						<Tx x={n.cx - 42} y={n.cy - 4} s={16} a="start">
+						<Card x={n.cx - 105} y={n.cy - 34} w={210} h={68} fill={n.f} />
+						<Ic I={n.I} x={n.cx - 74} y={n.cy} s={26} />
+						<Tx x={n.cx - 52} y={n.cy - 4} s={16} a="start">
 							{n.a}
 						</Tx>
-						<Tx x={n.cx - 42} y={n.cy + 16} s={11.5} w={400} f="sans" a="start">
+						<Tx x={n.cx - 52} y={n.cy + 16} s={11.5} w={400} f="sans" a="start">
 							{n.b}
 						</Tx>
 					</g>
 				))}
+				<rect x={0} y={34} width={176} height={32} rx={16} fill={A.white} stroke={A.ink} strokeWidth={2} />
+				<Ic I={Inbox} x={20} y={50} s={17} />
+				<Tx x={98} y={55} s={11.5} w={600} f="sans">
+					new failures: notices
+				</Tx>
+				<Edge p="b3" d="M88 70 L104 150" />
 				<Tx x={360} y={182} s={24}>
 					≤ 2 rounds
 				</Tx>
 				<Tx x={360} y={208} s={13} w={400} f="sans">
-					a denial comes back as feedback
+					a denial or a conflict comes back
 				</Tx>
 				<Tx x={150} y={300} s={13} w={500} f="sans" c={A.coral}>
 					denied
 				</Tx>
-				<Edge p="b3" d="M460 320 C 640 320, 700 300, 752 248" />
-				<Tok d="M460 320 C 640 320, 700 300, 752 248" c={A.teal} dur={3} delay={1} />
+				<Edge p="b3" d="M470 320 C 640 320, 700 300, 752 262" />
+				<Tok d="M470 320 C 640 320, 700 300, 752 262" c={A.teal} dur={3} delay={1} />
 				<Tx x={640} y={344} s={13} w={500} f="sans" c={A.teal}>
 					approved
 				</Tx>
-				<Card x={760} y={150} w={180} h={100} fill={A.tealSoft} />
-				<Ic I={Rocket} x={850} y={180} s={28} />
-				<Tx x={850} y={216} s={18}>
-					ship
+				<Card x={760} y={150} w={180} h={120} fill={A.tealSoft} />
+				<Ic I={GitMerge} x={850} y={180} s={28} />
+				<Tx x={850} y={214} s={18}>
+					sync & ship
 				</Tx>
 				<Tx x={850} y={236} s={12} w={400} f="sans">
-					new Flight version
+					merge, retest, recheck,
+				</Tx>
+				<Tx x={850} y={254} s={12} w={400} f="sans">
+					then propose or ship
 				</Tx>
 			</Fig>
 
-			<Fig n="B4" title="Level 3 · who holds the keys" h={340} caption="The agents never hold a MotherDuck token: their only tool, verify, goes through a small broker inside the healer that runs their code against a zero-copy clone.">
+			<Fig n="B4" title="Level 3 · who holds the keys" h={360} caption="The fixer holds no token: it can edit its own directory and run verify and inbox, nothing else. verify asks a broker inside the healer, which runs the fixer's code as the unprivileged nobody user with a short-lived token for an agent service account. That account reads production only through a restricted share granted to its role, and writes only to its own zero-copy clone. The owner's token never leaves the healer process.">
 				<Defs p="b4" />
-				<rect x={30} y={40} width={360} height={260} rx={22} fill={A.paper2} stroke={A.coral} strokeWidth={3} strokeDasharray="10 7" />
-				<Tx x={50} y={72} s={13} a="start">
+				<rect x={20} y={40} width={300} height={260} rx={22} fill={A.paper2} stroke={A.coral} strokeWidth={3} strokeDasharray="10 7" />
+				<Tx x={38} y={70} s={13} a="start">
 					AGENT WORKSPACE · NO TOKEN
 				</Tx>
-				<Card x={55} y={100} w={140} h={90} fill={A.yellow} />
-				<Ic I={Bot} x={125} y={130} s={28} />
-				<Tx x={125} y={172} s={15}>
+				<Card x={40} y={96} w={120} h={90} fill={A.yellow} />
+				<Ic I={Bot} x={100} y={126} s={28} />
+				<Tx x={100} y={168} s={15}>
 					fixer
 				</Tx>
-				<Card x={225} y={100} w={140} h={90} />
-				<Ic I={FileCode} x={295} y={130} s={28} />
-				<Tx x={295} y={170} s={13}>
-					pipeline code
+				<Card x={182} y={96} w={120} h={90} />
+				<Ic I={FileCode} x={242} y={126} s={28} />
+				<Tx x={242} y={168} s={13}>
+					pipeline.py
 				</Tx>
-				<Edge p="b4" d="M199 145 L219 145" />
-				<path d="M295 198 L295 236 L372 236" fill="none" stroke={A.ink} strokeWidth={2.5} />
-				<rect x={372} y={212} width={36} height={48} rx={8} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
-				<Tx x={414} y={196} s={14} a="start">
-					verify
+				<Edge p="b4" d="M164 141 L176 141" />
+				<rect x={40} y={218} width={262} height={46} rx={23} fill={A.white} stroke={A.ink} strokeWidth={2} />
+				<Tx x={171} y={246} s={13} w={600} f="sans">
+					only commands: verify, inbox
 				</Tx>
-				<Tx x={414} y={212} s={11.5} w={400} f="sans" a="start">
-					its only tool
-				</Tx>
-				<Edge p="b4" d="M410 236 L484 236" />
-				<rect x={475} y={160} width={200} height={150} rx={20} fill="none" stroke={A.orange} strokeWidth={2} strokeDasharray="6 6" />
-				<Tx x={575} y={152} s={11.5} w={500} f="sans" c={A.orange}>
+				<Edge p="b4" d="M306 241 L374 241" />
+				<rect x={360} y={150} width={210} height={170} rx={20} fill="none" stroke={A.orange} strokeWidth={2} strokeDasharray="6 6" />
+				<Tx x={465} y={142} s={11.5} w={500} f="sans" c={A.orange}>
 					inside the healer Flight
 				</Tx>
-				<Card x={490} y={186} w={170} h={100} fill={A.yellow} />
-				<Ic I={KeyRound} x={575} y={214} s={26} />
-				<Tx x={575} y={252} s={17}>
+				<Card x={380} y={186} w={170} h={100} fill={A.yellow} />
+				<Ic I={KeyRound} x={465} y={214} s={26} />
+				<Tx x={465} y={252} s={17}>
 					broker
 				</Tx>
-				<Tx x={575} y={272} s={12} w={400} f="sans">
-					holds the token
+				<Tx x={465} y={272} s={12} w={400} f="sans">
+					runs it as nobody
 				</Tx>
-				<Edge p="b4" d="M666 236 L718 236" />
-				<Cyl cx={805} cy={236} w={170} h={80} />
-				<Tx x={805} y={244} s={16}>
-					sandbox
+				<Ic I={Lock} x={398} y={306} s={16} c={A.orange} />
+				<Tx x={412} y={311} s={11} w={500} f="sans" a="start" c={A.orange}>
+					owner token stays here
 				</Tx>
-				<Cyl cx={805} cy={80} w={150} h={50} fill={A.white} />
-				<Tx x={805} y={92} s={14}>
+				<Cyl cx={465} cy={70} w={150} h={50} fill={A.white} />
+				<Tx x={465} y={82} s={14}>
 					heal_demo
 				</Tx>
-				<Edge p="b4" d="M805 118 L805 180" dash />
-				<Tx x={817} y={156} s={12} w={500} f="sans" a="start">
+				<rect x={600} y={40} width={340} height={280} rx={22} fill={A.paper2} stroke={A.teal} strokeWidth={3} strokeDasharray="10 7" />
+				<Tx x={618} y={70} s={13} a="start">
+					AGENT SERVICE ACCOUNT
+				</Tx>
+				<rect x={630} y={88} width={290} height={44} rx={22} fill={A.white} stroke={A.ink} strokeWidth={2} />
+				<Ic I={Lock} x={652} y={110} s={18} />
+				<Tx x={785} y={115} s={12} w={600} f="sans">
+					restricted share, read-only
+				</Tx>
+				<Edge p="b4" d="M544 76 C 580 76, 600 100, 624 106" />
+				<Tx x={592} y={132} s={11} w={500} f="sans" a="end">
+					granted to the role
+				</Tx>
+				<Edge p="b4" d="M775 136 L775 182" dash />
+				<Tx x={787} y={164} s={11.5} w={500} f="sans" a="start">
 					zero-copy clone
 				</Tx>
-				<Tok d="M295 198 L295 236 L484 236" c={A.yellow} dur={2.6} />
-				<Tok d="M666 236 L718 236" c={A.sky} dur={1.3} delay={1.3} />
+				<Cyl cx={775} cy={238} w={180} h={70} />
+				<Tx x={775} y={246} s={14}>
+					heal_demo (clone)
+				</Tx>
+				<Edge p="b4" d="M556 236 L679 236" />
+				<Tx x={775} y={300} s={11.5} w={500} f="sans">
+					written with a short-lived token
+				</Tx>
+				<Tok d="M306 241 L374 241" c={A.yellow} dur={2.6} />
+				<Tok d="M556 236 L679 236" c={A.sky} dur={1.3} delay={1.3} />
 			</Fig>
 		</>
 	);
@@ -2339,13 +2716,15 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 // ----- Option C: states and time -----
 function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const gx = (t: number) => 210 + t * 5.9;
-	const lanes = ['guard', 'check', 'fixer 1', 'fixer 2', 'approver', 'ship'];
+	const lanes = ['lease', 'check', 'fixer 1', 'fixer 2', 'reviews', 'ship'];
 	const ly = (i: number) => 50 + i * 42;
 	const bars: { lane: number; a: number; b: number; c: string; t?: string; dots?: number[] }[] = [
 		{ lane: 0, a: 0, b: 3, c: A.yellow },
 		{ lane: 1, a: 3, b: 12, c: A.yellow },
-		{ lane: 2, a: 14, b: 90, c: A.orange, t: 'Claude subagent · incident 1', dots: [56, 70, 84] },
-		{ lane: 3, a: 14.1, b: 76, c: A.orange, t: 'incident 2 (+55 ms)', dots: [52, 68] },
+		{ lane: 1, a: 60, b: 63, c: A.yellow },
+		{ lane: 1, a: 117, b: 120, c: A.yellow },
+		{ lane: 2, a: 14, b: 90, c: A.orange, t: 'fixer · agent account 1', dots: [56, 70, 84] },
+		{ lane: 3, a: 14.1, b: 76, c: A.orange, t: 'fixer · agent account 2', dots: [52, 68] },
 		{ lane: 4, a: 76, b: 86, c: A.tealSoft },
 		{ lane: 4, a: 90, b: 102, c: A.tealSoft },
 		{ lane: 5, a: 86, b: 92, c: A.sky },
@@ -2372,7 +2751,7 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				sub="An incident as a state machine, a healer run as a timeline, and how it all adds up over time."
 				live={<LiveChip q={q} value={(r) => (N(r.n_guides) ? String(N(r.n_guides)) : null)} label="Guides written to memory" />}
 			/>
-			<Fig n="C1" title="Every incident is a little state machine" h={410} caption="Most incidents walk the middle path; blips are only watched, some wait for or go to a human, and a failure after a fix reopens the incident.">
+			<Fig n="C1" title="Every incident is a little state machine" h={410} caption="Most incidents walk the middle path. Blips are only watched; at autonomy L3 a reviewed fix waits as proposed until you approve it; an escalated incident waits for a human, who can Retry it from the Dive; and a failure after a fix reopens the incident.">
 				<Defs p="c1" />
 				<Tok d="M110 190 L900 190" c={A.white} r={9} dur={8} />
 				{[
@@ -2412,10 +2791,10 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Edge p="c1" d="M380 220 L466 280" />
 				<Edge p="c1" d="M540 282 L578 222" />
 				<Tx x={250} y={356} s={12} w={500} f="sans">
-					needs a human
+					needs a human · Retry
 				</Tx>
 				<Tx x={500} y={356} s={12} w={500} f="sans">
-					fix waits for an OK
+					L3: waits for Approve
 				</Tx>
 
 				<path d="M860 220 L860 380 Q 860 395 845 395 L 95 395 Q 80 395 80 380 L80 228" fill="none" stroke={A.coral} strokeWidth={2.5} strokeDasharray="7 7" markerEnd="url(#c1-ah)" />
@@ -2425,7 +2804,8 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				</Tx>
 			</Fig>
 
-			<Fig n="C2" title="One healer run, second by second" y0={25} h={310} caption="One healer run fixed two broken pipelines in about two minutes; the two fixers overlap, which is 1.7–2× faster than fixing them one after another.">
+			<Fig n="C2" title="One healer run, second by second" y0={25} h={310} caption="One healer run fixes two broken pipelines in about two minutes. It checks for new failures every minute while the fixers work, and one that matters to fixer 1 reaches it as a short notice. The fixers overlap, so both take about as long as the slower one.">
+				<Defs p="c2" />
 				{[0, 30, 60, 90, 120].map((t) => (
 					<g key={t}>
 						<line x1={gx(t)} y1={40} x2={gx(t)} y2={300} stroke={A.ink} strokeOpacity={0.12} strokeWidth={1.5} />
@@ -2452,8 +2832,12 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 						))}
 					</g>
 				))}
-				<Tx x={gx(62)} y={ly(1) + 22} s={12} w={400} f="sans" c={A.muted}>
+				<Tx x={gx(30)} y={ly(1) + 22} s={12} w={400} f="sans" c={A.muted}>
 					○ = a verify call
+				</Tx>
+				<path d={`M${gx(63)} ${ly(1) + 30} L${gx(64)} ${ly(2) + 4}`} stroke={A.coral} strokeWidth={2.5} markerEnd="url(#c2-ah)" />
+				<Tx x={gx(66)} y={ly(1) + 22} s={11.5} w={600} f="sans" a="start" c={A.coral}>
+					new failure → notice
 				</Tx>
 				<rect x={205} y={38} width={725} height={264} fill={A.paper} className="ax-curtain ax-fast" />
 				<line x1={0} y1={38} x2={0} y2={302} stroke={A.ink} strokeWidth={2.5} className="ax-play ax-fast" style={{ offsetPath: `path('M${gx(0)} 0 L${gx(120)} 0')` } as CSSV} />
@@ -2595,7 +2979,7 @@ export default function SelfHealingBoard() {
 	}, [reg, runs]);
 	const selectedInc = incs.find((r) => N(r.id) === incSel) ?? incs[0];
 	const nEval = N(health.n_eval);
-	const tabs = ['overview', 'runs', 'incidents', 'memory', ...(nEval ? ['eval'] : []), 'archA', 'archB', 'archC'];
+	const tabs = ['overview', 'approvals', 'runs', 'incidents', 'memory', ...(nEval ? ['eval'] : []), 'archA', 'archB', 'archC'];
 	const openIncident = (id: number) => {
 		setIncSel(id);
 		setTab('incidents');
@@ -2645,6 +3029,7 @@ export default function SelfHealingBoard() {
 						{ARCH_SUB[t] ? `Architecture ${t.slice(4)}` : t}
 						{ARCH_SUB[t] ? <span style={{ color: T.faint, fontWeight: 400, textTransform: 'none' }}> · {ARCH_SUB[t]}</span> : null}
 						{t === 'incidents' && N(health.n_all) ? <span style={{ color: T.faint, fontWeight: 400 }}> {N(health.n_all)}</span> : null}
+						{t === 'approvals' && N(health.n_pending) ? <span style={{ color: T.purple, fontWeight: 700 }}> {N(health.n_pending)}</span> : null}
 					</button>
 				))}
 			</nav>
@@ -2656,6 +3041,17 @@ export default function SelfHealingBoard() {
 					<div style={{ marginTop: 14 }}>
 						<HealthStrip q={healthQ} now={now} />
 					</div>
+					{N(health.n_pending) ? (
+						<div style={{ marginTop: 12, padding: '8px 12px', borderLeft: `3px solid ${T.purple}`, background: '#f4effa', fontSize: 12 }}>
+							<b>
+								{N(health.n_pending)} fix{N(health.n_pending) > 1 ? 'es' : ''} passed every check and review and wait{N(health.n_pending) > 1 ? '' : 's'} for your approval.
+							</b>{' '}
+							<span style={linkStyle} onClick={() => setTab('approvals')}>
+								Review them
+							</span>
+						</div>
+					) : null}
+					<AlertsPanel now={now} onIncident={openIncident} />
 					<Section>
 						<SectionTitle note="click a node for its runs · badge = active incident (filled = root, outline = downstream symptom)">Pipeline DAG</SectionTitle>
 						{(regQ.isLoading && !regQ.data) || (runsQ.isLoading && !runsQ.data) ? (
@@ -2686,13 +3082,16 @@ export default function SelfHealingBoard() {
 						) : incQ.isError ? (
 							<ErrorLine error={incQ.error} />
 						) : !incs.length ? (
-							<Empty>No incidents yet. Failed runs become incidents on the next checker tick.</Empty>
+							<Empty>No incidents yet. Failed runs become incidents on the healer's next check (every 5 minutes, or every minute while it is fixing).</Empty>
 						) : (
 							<IncidentTable rows={incs} selected={-1} onSelect={openIncident} now={now} limit={5} />
 						)}
 					</Section>
+					<AgentsPanel now={now} />
 				</>
 			) : null}
+
+			{tab === 'approvals' ? <ApprovalsView now={now} onIncident={openIncident} onChange={refresh} /> : null}
 
 			{tab === 'runs' ? (
 				<>
@@ -2830,14 +3229,14 @@ export default function SelfHealingBoard() {
 						) : incQ.isError ? (
 							<ErrorLine error={incQ.error} />
 						) : !incs.length ? (
-							<Empty>No incidents yet. Failed runs become incidents on the next checker tick. Tick "Show example loop" to see how a healing DAG renders.</Empty>
+							<Empty>No incidents yet. Failed runs become incidents on the healer's next check (every 5 minutes, or every minute while it is fixing). Tick "Show example loop" to see how a healing DAG renders.</Empty>
 						) : (
 							<IncidentTable rows={incs} selected={N(selectedInc?.id)} onSelect={setIncSel} now={now} />
 						)}
 					</Section>
 					{selectedInc ? (
 						<Section>
-							<IncidentDetail key={N(selectedInc.id)} inc={selectedInc} now={now} onGuides={() => setTab('memory')} />
+							<IncidentDetail key={N(selectedInc.id)} inc={selectedInc} now={now} onGuides={() => setTab('memory')} onApprovals={() => setTab('approvals')} onChange={refresh} />
 						</Section>
 					) : null}
 				</>
