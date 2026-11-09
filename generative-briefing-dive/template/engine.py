@@ -691,6 +691,21 @@ def fmt_range(a, b):
     return f"{m[da.month - 1]} {da.year % 100:02d}-{m[db.month - 1]} {db.year % 100:02d}"
 
 
+def shifts_for_model(changes):
+    """The change scan as the model should read it: only the shifts the page shows, with
+    self-describing fields, so the step's before and after are not mistaken for the period."""
+    return [
+        {
+            "metric": c["metric"], "label": c["label"], "format": c["format"], "better_when": c["good"],
+            "last_4_weeks_avg": c["latest_4w"],
+            f"baseline_avg_{c['baseline_from']}_to_{c['baseline_to'][:10]}": c["baseline"],
+            "last_4_weeks_vs_baseline_pct": c["change_vs_baseline_pct"],
+            "largest_step": {"week": c["changed_week"][:10], "avg_8_weeks_before": c["before"], "avg_4_weeks_after": c["after"]},
+        }
+        for c in changes if c["strength"] >= 3
+    ][:7]
+
+
 def changes_block(changes, idx):
     base_label = fmt_range(changes[0]["baseline_from"], changes[0]["baseline_to"]) if changes else "Baseline"
     rows = [
@@ -863,6 +878,7 @@ NARRATE_INSTRUCTIONS = """You are writing the narrative layer of an analytical p
 Rules: state what the data shows, with specific numbers; percentages for rates. Do not invent numbers: every number you write must come from the data, the probes or memory. Use only x values that appear in the data for highlight and annotations. Keep the headline under 25 words and each caption to one short sentence.
 On an investigation page, the headline answers why, and the callouts separate what the data shows from what still needs checking.
 Probes are follow-up queries an analyst ran to test why things moved. Use their results as evidence, but refer to them by what they show ("a follow-up query shows ..."), never by id. List in promote the ids (at most 2) of probes a reader should see.
+detected_shifts compare the last 4 weeks with the start of the history; largest_step is the biggest step anywhere in that history, not the current period. Neither is the previous-period comparison the components use: when they point different ways, say which comparison you mean instead of calling it a conflict.
 Memory holds earlier briefings' insights and what viewers did with them. Set each callout's continuity against it: new, ongoing (still true, similar size), worsening, improving, or resolved (an earlier insight that no longer holds; at most one, with tone positive). Set refers_to to the earlier title when continuing it, and say how long an ongoing issue has lasted. Do not repeat an earlier insight unchanged unless it is critical. Avoid insights similar to ones viewers rated not useful.
 Business context from the recipe's Guides (definitions, targets, known events) decides what matters: cite a target when the data crosses it.
 Known context about {domain} (use only when the data supports it): {context}
@@ -898,7 +914,7 @@ PROBE_SCHEMA = {
 }
 
 PROBE_INSTRUCTIONS = """You are a data analyst checking a page draft for a {audience} before it is written up. Below are the page's components with their data, the shifts a change detector found, and earlier briefings' insights.
-Propose up to {n} follow-up queries that would best explain WHY the most important numbers moved: which segment drives a change, whether a shift is concentrated in one value, whether an earlier insight still holds. Do not repeat what a component already shows. Use only catalog ids, and filter values that appear in the data or the catalog, matching case exactly. Return no probes when nothing needs explaining.
+Propose up to {n} follow-up queries that would best explain WHY the most important numbers moved: which segment drives a change, whether a shift is concentrated in one value, whether an earlier insight still holds. Do not repeat what a component already shows. Use only catalog ids, and filter values that appear in the data or the catalog, matching case exactly. Return no probes when nothing needs explaining. detected_shifts come from a weekly scan that compares the last 4 weeks with the start of the history; largest_step is the biggest step anywhere in that history, not the current period. Neither is the previous-period comparison the components use. When they point different ways, say which comparison you mean; do not call it a conflict.
 Business context from Guides:
 {guides}
 Catalog:
@@ -1348,7 +1364,7 @@ def about(block):
 def run_probes(con, run, compiler, blocks, changes, memory, guides_text, n_existing):
     if ANALYST_PROBES <= 0:
         return [], []
-    payload = json.dumps({"components": [compact(b) for b in blocks], "detected_shifts": changes[:7], "earlier_insights": memory["previous_insights"][:8]}, default=str)
+    payload = json.dumps({"components": [compact(b) for b in blocks], "detected_shifts": shifts_for_model(changes), "earlier_insights": memory["previous_insights"][:8]}, default=str)
     out = run.llm(con, "probe", PROBE_INSTRUCTIONS.format(audience=AUDIENCE, n=ANALYST_PROBES, guides=guides_text[:3000] or "(none)", catalog=catalog_text(con)), payload, "dive_probes", PROBE_SCHEMA)
     probes, results = out.get("probes", [])[:ANALYST_PROBES], []
     for i, p in enumerate(probes):
@@ -1366,7 +1382,7 @@ def narrate(con, run, spec, blocks, probe_blocks, changes, memory, guides_text, 
     payload = json.dumps({
         "components": [compact(b) for b in blocks],
         "probes": [compact(b) for b in probe_blocks],
-        "detected_shifts": changes[:7],
+        "detected_shifts": shifts_for_model(changes),
         "memory": {k: memory[k] for k in ("previous_insights", "rated_useful", "rated_not_useful", "viewer_preferences")},
     }, default=str)
     instructions = NARRATE_INSTRUCTIONS.format(audience=AUDIENCE, domain=DOMAIN_DESCRIPTION, context=DOMAIN_CONTEXT, guides=guides_text[:5000] or "(none)", question=question, as_of=as_of.isoformat())

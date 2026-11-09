@@ -105,10 +105,10 @@ The components live in `dive-components/`: KPI rows, metric cards, gauges, line,
 export MOTHERDUCK_TOKEN=...
 python3 build.py recipes/nyc-311                      # writes recipes/nyc-311/flight/main.py and dive/index.tsx
 cd recipes/nyc-311/flight
-MODE=briefing REQUEST_ID=t1 uv run --with duckdb python main.py
-MODE=ask PROMPT="Which agencies take longest to close requests?" REQUEST_ID=t2 uv run --with duckdb python main.py
+MODE=briefing REQUEST_ID=t1 uv run --with duckdb==1.5.6 python main.py
+MODE=ask PROMPT="Which agencies take longest to close requests?" REQUEST_ID=t2 uv run --with duckdb==1.5.6 python main.py
 cd ../../..
-uv run --with duckdb python eval.py recipes/nyc-311 --out baseline.json
+uv run --with duckdb==1.5.6 python eval.py recipes/nyc-311 --out baseline.json
 ```
 
 Run the business-context Guide once (`business-context.sql`), and run several briefings with consecutive `AS_OF=YYYY-MM-DD` dates to see insights continue across weeks.
@@ -116,8 +116,8 @@ Run the business-context Guide once (`business-context.sql`), and run several br
 Deploy the Flight and the Dive:
 
 ```bash
-uv run --with duckdb python deploy.py recipes/nyc-311 --dry-run   # shows what it will create or update
-uv run --with duckdb python deploy.py recipes/nyc-311
+uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311 --dry-run   # shows what it will create or update
+uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311
 ```
 
 `deploy.py` creates or updates the Flight with `MD_CREATE_FLIGHT` or `MD_UPDATE_FLIGHT`, finding it by name in `MD_LIST_FLIGHTS()`. It writes the Flight id into `app.json`, rebuilds, and creates the Dive or adds a version with `MD_CREATE_DIVE` or `MD_UPDATE_DIVE_CONTENT`. Then run the briefing once (`SELECT * FROM MD_RUN_FLIGHT(flight_id := '<id>')`) and open the Dive.

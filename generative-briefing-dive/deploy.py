@@ -1,6 +1,6 @@
 """Deploy a recipe's Flight and Dive to MotherDuck with the Flight and Dive SQL functions.
 
-    MOTHERDUCK_TOKEN=... uv run --with duckdb python deploy.py recipes/nyc-311 [--dry-run] [--no-schedule]
+    MOTHERDUCK_TOKEN=... uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311 [--dry-run] [--no-schedule]
 
 1. Builds the recipe (build.py).
 2. Creates the Flight, or updates it when a Flight with the same name exists (MD_LIST_FLIGHTS):
@@ -62,7 +62,8 @@ def main():
         )
         if existing:
             flight_id = str(existing[0])
-            con.execute(f"CALL MD_UPDATE_FLIGHT(flight_id := '{flight_id}', schedule_cron := '{schedule}', {args})")
+            cron = f"schedule_cron := '{schedule}', " if schedule else ""  # an empty cron on a Flight without a schedule is an error
+            con.execute(f"CALL MD_UPDATE_FLIGHT(flight_id := '{flight_id}', {cron}{args})")
         else:
             cron = f"schedule_cron := '{schedule}', " if schedule else ""
             flight_id = str(con.execute(f"SELECT flight_id FROM MD_CREATE_FLIGHT(name := '{flight_name}', {cron}{args})").fetchone()[0])
