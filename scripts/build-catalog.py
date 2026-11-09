@@ -7,7 +7,8 @@
 
 Every catalog entry is a README.md with YAML front matter holding nine
 keys: title, id, description, type, category, features, tags, prompt,
-published_date, plus an optional boolean `featured`. Running this script with
+published_date, plus an optional boolean `featured` and an optional `refs`
+list (see REF_KEYS). Running this script with
 no output path validates the front matter across the repo (non-zero exit on the first problem). Pass --output to
 also write catalog.json.
 """
@@ -120,6 +121,18 @@ ALLOWED_KEYS = {
     "tags",
     "published_date",
     "featured",
+    "refs",
+}
+# What a README may declare under `refs`: things the recipe uses that links in
+# its body don't capture, such as a dataset queried in SQL. Per kind, the
+# required keys, then the optional ones. The Library API in motherduck-docs
+# resolves these (api/README.md, "Declared refs").
+REF_KEYS: dict[str, tuple[list[str], list[str]]] = {
+    "dataset": (["database"], ["tables", "attach", "title", "docs", "url"]),
+    "doc": (["path"], ["title"]),
+    "url": (["url"], ["title"]),
+    "skill": (["id"], []),
+    "recipe": (["id"], []),
 }
 REQUIRED_KEYS = {
     "title",
@@ -318,6 +331,61 @@ def assert_optional_bool(
     return value
 
 
+def _non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def assert_refs(data: dict[str, Any], readme_path: Path) -> list[dict[str, Any]]:
+    """Validate the optional `refs` list and return it with strings stripped."""
+    value = data.get("refs")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise CatalogError(f"{readme_path}: refs must be a list")
+
+    refs: list[dict[str, Any]] = []
+    for index, entry in enumerate(value):
+        where = f"{readme_path}: refs[{index}]"
+        if not isinstance(entry, dict):
+            raise CatalogError(f"{where} must be a mapping with a kind")
+        kind = entry.get("kind")
+        if kind not in REF_KEYS:
+            raise CatalogError(f"{where}: kind must be one of {sorted(REF_KEYS)}")
+        required, optional = REF_KEYS[kind]
+        unknown = set(entry) - {"kind", *required, *optional}
+        if unknown:
+            raise CatalogError(
+                f"{where}: unknown keys {sorted(unknown)} for kind {kind!r}; "
+                f"allowed keys are {sorted(required + optional)}"
+            )
+        missing = [key for key in required if key not in entry]
+        if missing:
+            raise CatalogError(f"{where}: kind {kind!r} needs {missing}")
+
+        ref: dict[str, Any] = {"kind": kind}
+        for key in required + optional:
+            if key not in entry:
+                continue
+            item = entry[key]
+            if key == "tables":
+                if not isinstance(item, list) or not all(_non_empty_string(t) for t in item):
+                    raise CatalogError(f"{where}: tables must be a list of non-empty strings")
+                ref[key] = [t.strip() for t in item]
+                continue
+            if not _non_empty_string(item):
+                raise CatalogError(f"{where}: {key} must be a non-empty string")
+            ref[key] = item.strip()
+            if key == "url" and not ref[key].startswith(("https://", "http://")):
+                raise CatalogError(f"{where}: url must start with https:// or http://")
+
+        if kind == "dataset" and "docs" not in ref and "url" not in ref:
+            raise CatalogError(
+                f"{where}: a dataset needs docs (a docs page path) or url to point at"
+            )
+        refs.append(ref)
+    return refs
+
+
 def build_item(
     repo_root: Path, readme_path: Path, frontmatter: dict[str, Any], repo: str, ref: str
 ) -> dict[str, Any] | None:
@@ -374,6 +442,7 @@ def build_item(
     prompt = assert_string(frontmatter, readme_path, "prompt")
     published_date = assert_date(frontmatter, readme_path, "published_date")
     featured = assert_optional_bool(frontmatter, readme_path, "featured")
+    refs = assert_refs(frontmatter, readme_path)
 
     relative_dir = readme_path.parent.relative_to(repo_root).as_posix()
     under_flight_plans = relative_dir == FLIGHT_PLANS_DIR or relative_dir.startswith(
@@ -407,6 +476,7 @@ def build_item(
         "path": relative_dir,
         "urls": build_urls(repo=repo, ref=ref, path=relative_dir),
         "files": list_item_files(repo_root, readme_path.parent),
+        **({"refs": refs} if refs else {}),
     }
 
 
@@ -446,6 +516,15 @@ def build_catalog(
         if item["id"] in seen_ids:
             raise CatalogError(f"duplicate id {item['id']!r}")
         seen_ids.add(item["id"])
+
+    # Skill ids live in another repo, so only recipe refs can be checked here.
+    for item in items:
+        for ref_entry in item.get("refs", []):
+            if ref_entry["kind"] == "recipe" and ref_entry["id"] not in seen_ids:
+                raise CatalogError(
+                    f"{item['path']}/README.md: refs names recipe {ref_entry['id']!r}, "
+                    "which is not in the catalog"
+                )
 
     return {
         "$schema": schema_url,

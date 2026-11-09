@@ -165,8 +165,73 @@
           "items": {
             "$ref": "#/$defs/catalog_file"
           }
+        },
+        "refs": {
+          "type": "array",
+          "description": "Refs the README declares in front matter. Absent when it declares none.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/catalog_ref"
+          }
         }
       }
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "http_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    },
+    "catalog_ref": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "database"],
+          "anyOf": [{ "required": ["docs"] }, { "required": ["url"] }],
+          "properties": {
+            "kind": { "const": "dataset" },
+            "database": { "$ref": "#/$defs/text" },
+            "tables": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+            "attach": { "$ref": "#/$defs/text" },
+            "title": { "$ref": "#/$defs/text" },
+            "docs": { "$ref": "#/$defs/text" },
+            "url": { "$ref": "#/$defs/http_url" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "doc" },
+            "path": { "$ref": "#/$defs/text" },
+            "title": { "$ref": "#/$defs/text" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "url"],
+          "properties": {
+            "kind": { "const": "url" },
+            "url": { "$ref": "#/$defs/http_url" },
+            "title": { "$ref": "#/$defs/text" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "enum": ["skill", "recipe"] },
+            "id": { "$ref": "#/$defs/slug" }
+          }
+        }
+      ]
     },
     "catalog_file": {
       "type": "object",
