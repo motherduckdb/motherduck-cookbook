@@ -381,8 +381,8 @@ td.m { font-family: var(--mono); font-size: 12.5px; font-weight: 500; white-spac
 				<table>
 					<thead><tr><th>Trigger</th><th>Started by</th><th>Config it sends</th><th>Mode</th></tr></thead>
 					<tbody>
-						<tr><td>Morning briefing</td><td>The Flight's schedule, <code>0 6 * * *</code></td><td>The Flight's own defaults</td><td class="m">briefing</td></tr>
-						<tr><td>Ask bar</td><td>The Dive, with <code>useRunFlight</code></td><td><code>PROMPT</code>, <code>REQUEST_ID</code>, queued <code>FEEDBACK</code></td><td class="m">ask</td></tr>
+						<tr><td>Morning briefing</td><td>The Flight's schedule, <code>0 6 * * *</code></td><td>The Flight's own defaults</td><td class="m">briefing, every board</td></tr>
+						<tr><td>Ask bar</td><td>The Dive, with <code>useRunFlight</code></td><td><code>PROMPT</code>, <code>REQUEST_ID</code>, <code>BOARD</code>, queued <code>FEEDBACK</code></td><td class="m">ask</td></tr>
 						<tr><td>Investigate button</td><td>The Dive</td><td><code>PROMPT</code> (the insight's question), <code>PARENT</code> (its page id)</td><td class="m">investigate</td></tr>
 						<tr><td>Data as of a date</td><td>The Dive's date picker</td><td><code>AS_OF</code></td><td class="m">briefing</td></tr>
 						<tr><td>Rating, answer or note</td><td>The Dive, straight away</td><td><code>FEEDBACK</code>: a JSON list of events</td><td class="m">feedback</td></tr>
@@ -393,20 +393,20 @@ td.m { font-family: var(--mono); font-size: 12.5px; font-weight: 500; white-spac
 			</div>
 			<p class="muted" style="margin-top:14px">Config sent with a run overrides the Flight's config for that run only. The Flight checks every value a caller can pass: a known mode, id formats, a 600-character prompt, ISO dates and the shape of each event. <code>MODEL</code> picks the <code>prompt()</code> model. The Dive follows a run with <code>useFlightRun</code> and finds the new page by its <code>REQUEST_ID</code>. <code>eval.py</code> runs the same engine on your machine, outside the schedule.</p>
 
-			<h3 style="font-size:15px;margin:22px 0 4px">One Flight for several Dives</h3>
-			<p class="muted">Any number of Dives can read one output database today, for example the same briefing in a different theme or embedded elsewhere. They share every page, note and rating. Different dashboards on the same data, each with its own audience and morning page, would need boards. This is a proposal and isn't built yet:</p>
+			<h3 style="font-size:15px;margin:22px 0 4px">One Flight, several boards</h3>
+			<p class="muted">A board is a dashboard for one audience on the same data. NYC 311 has two: <b>Operations</b>, a daily briefing on the last 28 days, and <b>Leadership</b>, a monthly briefing on the last complete month against the same month a year earlier. Each board has its own morning page, memory and Dive, and the Dives link to each other.</p>
 			<div class="scroll">
 				<table>
 					<thead><tr><th>Part</th><th>Shared by every board</th><th>Per board</th></tr></thead>
 					<tbody>
-						<tr><td>Recipe</td><td>Sources, marts, catalog</td><td><code>BOARDS = {"exec": {plan, audience, watch}, …}</code></td></tr>
-						<tr><td>Flight</td><td>One Flight, token and grant</td><td>A <code>BOARD</code> config key; the 06:00 briefing writes every board in one run</td></tr>
+						<tr><td>Recipe</td><td>Sources, marts, catalog</td><td><code>BOARDS = {"leadership": {"CADENCE": "monthly", "BRIEFING_PLAN": …}}</code></td></tr>
+						<tr><td>Flight</td><td>One Flight, token and grant</td><td>A <code>BOARD</code> config key; the 06:00 briefing writes every board, a monthly board once a month</td></tr>
 						<tr><td>Tables</td><td><code>annotations</code>: a note on one board shows on all</td><td>A <code>board</code> column on <code>dive_specs</code>, <code>gen_runs</code>, <code>insights</code> and <code>feedback</code></td></tr>
 						<tr><td>Dive</td><td>The component kit</td><td><code>board</code> in <code>app.json</code>; every query filters on it</td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="muted" style="margin-top:14px">Data from different domains, such as docs analytics and sales, belongs in separate Flights. Each keeps its own schedule, output database, run grant and 600-second limit.</p>
+			<p class="muted" style="margin-top:14px">Monthly boards use the windows <code>last_full_month</code> and <code>last_12_full_months</code>, which compare calendar months: a month against the month before, or against the same month a year earlier. Data from different domains, such as docs analytics and sales, belongs in separate Flights. Each keeps its own schedule, output database, run grant and 600-second limit.</p>
 		</div>
 	</section>
 
