@@ -46,6 +46,8 @@ The example uses NYC 311 service requests from MotherDuck's public `sample_data`
 
 ## How it works
 
+For a visual walkthrough, open [`explainer.html`](explainer.html) in a browser after cloning the repository. It shows every step from the components to the learning loop, how the Flight is triggered, which tables it writes, and where a viewer's answer goes.
+
 ```
 Dive ──useRunFlight({ MODE, PROMPT, PARENT, FEEDBACK, … })──► Flight
   marts     curated tables from your sources
@@ -146,6 +148,7 @@ To let others use it:
 | `eval.py` | Scores a recipe's planner and narrator |
 | `deploy.py` | Creates or updates the Flight and the Dive |
 | `business-context.sql` | The interview answers as a Guide |
+| `explainer.html` | A visual walkthrough of the whole flow; open it in a browser |
 | `LEARNING.md` | The log tables, memory, feedback, the number check and evals in detail |
 
 ## Learn more
