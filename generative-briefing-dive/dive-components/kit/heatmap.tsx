@@ -91,12 +91,17 @@ function CalendarHeatmap({ days, format, label }: any) {
 	const start = first - ((new Date(first).getUTCDay() + 6) % 7) * DAY_MS; // the Monday on or before
 	const weeks = Math.ceil((last - start + DAY_MS) / (7 * DAY_MS));
 	const gap = t.flat ? 2 : 3;
-	const cell = Math.max(9, Math.min(15, Math.floor((width - 34) / weeks) - gap));
+	// Cells widen to fill the card; height stops at 22px so a wide card doesn't grow tall.
+	// Below 9px wide the calendar keeps 9px cells and scrolls instead.
+	const cw = Math.max(9, (width - 34) / weeks - gap);
+	const cell = Math.min(cw, 22);
 	const total = days.reduce((s: number, d: any) => s + (d.v || 0), 0);
 	const months: { col: number; label: string }[] = [];
 	for (let w = 0; w < weeks; w++) {
 		const m = new Date(start + (w * 7 + 6) * DAY_MS).getUTCMonth();
-		if (w === 0 || m !== new Date(start + (w * 7 - 1) * DAY_MS).getUTCMonth()) months.push({ col: w, label: MONTHS[m] });
+		const isNew = w === 0 || m !== new Date(start + (w * 7 - 1) * DAY_MS).getUTCMonth();
+		const prev = months[months.length - 1];
+		if (isNew && (!prev || (w - prev.col) * (cw + gap) >= 26)) months.push({ col: w, label: MONTHS[m] });
 	}
 	return (
 		<div ref={ref} style={{ position: 'relative' }}>
@@ -110,9 +115,9 @@ function CalendarHeatmap({ days, format, label }: any) {
 				<HeatLegend steps={steps} />
 			</div>
 			<div ref={scroller} style={{ overflowX: 'auto' }} onMouseLeave={() => setTip(null)}>
-				<svg width={34 + weeks * (cell + gap)} height={16 + 7 * (cell + gap)} role="img" aria-label={`${humanize(label || '')} by day`}>
+				<svg width={34 + weeks * (cw + gap)} height={16 + 7 * (cell + gap)} role="img" aria-label={`${humanize(label || '')} by day`}>
 					{months.map((m) => (
-						<text key={m.col} x={34 + m.col * (cell + gap)} y={10} fontSize={10} fill={t.muted}>
+						<text key={m.col} x={34 + m.col * (cw + gap)} y={10} fontSize={10} fill={t.muted}>
 							{m.label}
 						</text>
 					))}
@@ -126,18 +131,18 @@ function CalendarHeatmap({ days, format, label }: any) {
 						if (ms < first || ms > last) return null;
 						const iso = isoDay(ms);
 						const v = byDay[iso] ?? 0;
-						const x = 34 + Math.floor(i / 7) * (cell + gap);
+						const x = 34 + Math.floor(i / 7) * (cw + gap);
 						const y = 16 + (i % 7) * (cell + gap);
 						return (
 							<rect
 								key={iso}
 								x={x}
 								y={y}
-								width={cell}
+								width={cw}
 								height={cell}
 								rx={t.flat ? 0 : 2}
 								fill={color(v)}
-								onMouseEnter={() => setTip({ x: x + cell / 2 - (scroller.current?.scrollLeft || 0), y: y + 22, text: `${WEEKDAYS[i % 7]} ${fmtPeriod(iso)}: ${fmt(v, format)}` })}
+								onMouseEnter={() => setTip({ x: x + cw / 2 - (scroller.current?.scrollLeft || 0), y: y + 22, text: `${WEEKDAYS[i % 7]} ${fmtPeriod(iso)}: ${fmt(v, format)}` })}
 							/>
 						);
 					})}
