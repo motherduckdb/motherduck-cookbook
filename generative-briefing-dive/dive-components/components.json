@@ -207,7 +207,7 @@
 			"file": "kit/notes.tsx",
 			"kind": "block",
 			"data": "{ items: [{ id, kind: date|topic, x, grain?, dimension?, value?, label, question, options: [string] }] }",
-			"when": "Questions the page asks its viewers about a date or a segment it cannot explain from the data. With nav.annotate and nav.noteFor, each item takes an answer (a category and a note). The same file has withNotes(block, notes), which pins saved notes to every block that shows that date or value, NotesLine, which renders them under a block, and NoteForm, built from the form fields in kit/field.tsx.",
+			"when": "Questions the page asks its viewers about a date or a segment it cannot explain from the data. With nav.annotate and nav.noteFor, each item takes an answer: a category (event, release, campaign, data_issue, expected, noise, other) and a note. The same file has withNotes(block, notes), which pins saved notes to every block that shows that date or value, NotesLine, which renders them under a block, and NoteForm, built from the form fields in kit/field.tsx.",
 			"requires": [
 				"form"
 			]

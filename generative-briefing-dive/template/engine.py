@@ -897,7 +897,7 @@ Probes are follow-up queries an analyst ran to test why things moved. Use their 
 detected_shifts compare the last 4 weeks with the start of the history; largest_step is the biggest step anywhere in that history, not the current period. Neither is the previous-period comparison the components use: when they point different ways, say which comparison you mean instead of calling it a conflict.
 Memory holds earlier briefings' insights and what viewers did with them. Set each callout's continuity against it: new, ongoing (still true, similar size), worsening, improving, or resolved (an earlier insight that no longer holds; at most one, with tone positive). Set refers_to to the earlier title when continuing it, and say how long an ongoing issue has lasted. Do not repeat an earlier insight unchanged unless it is critical. Avoid insights similar to ones viewers rated not useful.
 Business context from the recipe's Guides (definitions, targets, known events) decides what matters: cite a target when the data crosses it.
-Viewer notes in memory are what people who know the business said about a date or a segment. Use them as the explanation when the data moves there ("the spike in the week of 2 Nov follows the launch viewers noted"), treat periods noted as a data issue as unreliable, and do not report movements noted as not important unless they grow. A component's viewer_notes are notes on periods or values it shows: when a callout, caption or insight discusses that period or value, say what viewers noted.
+Viewer notes in memory are what people who know the business said about a date or a segment. Use them as the explanation when the data moves there ("the spike in the week of 2 Nov follows the launch viewers noted"), treat periods noted as a data issue as unreliable, and do not report movements noted as not important unless they grow. A note of kind other is what a viewer saw without a known cause: mention it as context, not as the explanation. A component's viewer_notes are notes on periods or values it shows: when a callout, caption or insight discusses that period or value, say what viewers noted.
 Ask viewer_questions when the data shows what moved but not why in business terms: a launch, campaign, partner mention, outage, tracking change or bot traffic that only a person would know. Ask about a sharp spike or drop in one period of a time chart (kind date) or about one segment that changed sharply, such as a single referrer, page or borough (kind topic). Prefer asking over guessing: when a movement drives an insight and nothing in the data, Guides or viewer notes explains its cause, ask one question. Never ask what a viewer note already answers or what open_questions already ask: those are still waiting for an answer. Offer 2-4 concrete likely explanations as options.
 Known context about {domain} (use only when the data supports it): {context}
 Business context from Guides:
@@ -1047,7 +1047,7 @@ LOG_DDL = [
 ]
 
 FEEDBACK_EVENTS = {"rate_page", "rate_insight", "variant", "hide", "show", "layout", "investigate", "ask", "open", "theme", "annotate", "unannotate"}
-NOTE_CATEGORIES = {"event", "release", "campaign", "data_issue", "expected", "noise"}
+NOTE_CATEGORIES = {"event", "release", "campaign", "data_issue", "expected", "noise", "other"}
 VIEWER_QUESTIONS = int(globals().get("VIEWER_QUESTIONS", 2))
 ANALYST_PROBES = int(globals().get("ANALYST_PROBES", 3))
 GUIDE_TOPICS = list(globals().get("GUIDE_TOPICS", []))
@@ -1104,7 +1104,7 @@ def llm(con, model, instructions, payload, name, schema):
 
 def clean_note(e):
     """A viewer note, validated: [kind, x, grain, dimension, value, category, note, question], or None."""
-    kind, cat = e.get("k"), e.get("cat") or "event"
+    kind, cat = e.get("k"), e.get("cat") or "other"
     if kind not in ("date", "topic") or cat not in NOTE_CATEGORIES:
         return None
     text = lambda v, n: re.sub(r"\s+", " ", str(v or "")).strip()[:n]

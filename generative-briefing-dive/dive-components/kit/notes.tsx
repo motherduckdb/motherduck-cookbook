@@ -21,6 +21,7 @@ const NOTE_CATEGORIES: { value: string; label: string }[] = [
 	{ value: 'data_issue', label: 'Data issue' },
 	{ value: 'expected', label: 'Expected' },
 	{ value: 'noise', label: 'Not important' },
+	{ value: 'other', label: 'Other or not sure' },
 ];
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(NOTE_CATEGORIES.map((c) => [c.value, c.label]));
 
@@ -93,7 +94,7 @@ function NoteForm({ targets, targetLabel = 'When', initial, options, onSave, onC
 	const missing = !category && !note.trim();
 	const save = () => {
 		setTried(true);
-		if (!missing) onSave({ target, category: category || 'event', note: note.trim().slice(0, 240) });
+		if (!missing) onSave({ target, category: category || 'other', note: note.trim().slice(0, 240) });
 	};
 	return (
 		<div className="mt-3">

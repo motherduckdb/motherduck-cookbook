@@ -67,7 +67,7 @@ The briefing asks its viewers about what the data can't explain, and remembers t
 
 - **Asking:** the narrator returns up to `VIEWER_QUESTIONS` (2) questions when the data shows what moved but not why in business terms. A question is about a date (a spike in one period of a time chart) or a topic (one value of a dimension, such as a referrer, page or borough). Each offers 2 to 4 likely explanations, such as "Partner referral" or "Bot traffic".
 - **Checking:** the engine keeps a question only when its `x` is in the block's data and its dimension is in the catalog. It drops questions an earlier note already answers, and questions asked in the last three briefings.
-- **Answering:** the page shows the questions under the insights. A viewer picks an explanation or writes one, chooses a kind (event, release, campaign, data issue, expected, not important) and answers. The answer goes to the Flight as an `annotate` event in a `MODE=feedback` run, and the Dive shows it at once while the run saves it.
+- **Answering:** the page shows the questions under the insights. A viewer picks an explanation or writes one, chooses a kind (event, release, campaign, data issue, expected, not important, or other when it is unclear what happened) and answers. The answer goes to the Flight as an `annotate` event in a `MODE=feedback` run, and the Dive shows it at once while the run saves it.
 - **Unprompted notes:** the pin on any time chart or category chart adds a note to one of its periods or values.
 - **Where notes show:**
   - **Charts:** every block that shows that date or value shows the note, as a marker on line and area charts and as a line under the block.
