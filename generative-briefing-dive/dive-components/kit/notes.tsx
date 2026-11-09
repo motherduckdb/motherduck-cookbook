@@ -83,59 +83,59 @@ function NotesLine({ block }: any) {
 	);
 }
 
-// Category and free text for one note. targets: [{ value, label }] when the viewer picks the date or value.
-function NoteForm({ targets, initial, options, onSave, onCancel, saveLabel = 'Save note' }: any) {
-	const t = useTheme();
+// Category and free text for one note, built from the kit's form fields (field.tsx).
+// targets: [{ value, label }] when the viewer picks the date or value; options: likely explanations.
+function NoteForm({ targets, targetLabel = 'When', initial, options, onSave, onCancel, saveLabel = 'Save note' }: any) {
 	const [target, setTarget] = useState(initial?.target ?? targets?.[0]?.value ?? '');
 	const [category, setCategory] = useState(initial?.category || '');
 	const [note, setNote] = useState(initial?.note || '');
-	const field = { border: `1px solid ${t.line}`, borderRadius: t.radius, background: t.panel, color: t.text, fontSize: 13, padding: '5px 8px' };
-	const save = () => (category || note.trim()) && onSave({ target, category: category || 'event', note: note.trim().slice(0, 240) });
+	const [tried, setTried] = useState(false);
+	const missing = !category && !note.trim();
+	const save = () => {
+		setTried(true);
+		if (!missing) onSave({ target, category: category || 'event', note: note.trim().slice(0, 240) });
+	};
 	return (
-		<div className="mt-2 space-y-2">
-			{options?.length > 0 && (
-				<div className="flex flex-wrap gap-1.5">
-					{options.map((o: string) => (
-						<Button key={o} size="sm" variant={note === o ? 'primary' : 'soft'} onClick={() => setNote(o)}>
-							{o}
-						</Button>
-					))}
+		<div className="mt-3">
+			<FieldGroup gap={14}>
+				{options?.length > 0 && (
+					<FieldSet>
+						<FieldLegend variant="label">Likely explanation</FieldLegend>
+						<ChoiceGroup layout="chips" options={options} value={options.includes(note) ? note : ''} onChange={(v: string) => setNote(v)} />
+					</FieldSet>
+				)}
+				<div className="flex flex-wrap items-end gap-3">
+					{targets?.length > 0 && (
+						<Field>
+							<FieldLabel>{targetLabel}</FieldLabel>
+							<Select value={target} options={targets} onChange={(e: any) => setTarget(e.target.value)} style={{ maxWidth: 220 }} />
+						</Field>
+					)}
+					<Field>
+						<FieldLabel>Kind of note</FieldLabel>
+						<Select value={category} options={NOTE_CATEGORIES} placeholder="Choose…" onChange={(e: any) => setCategory(e.target.value)} />
+					</Field>
+					<Field invalid={tried && missing} style={{ flex: '1 1 260px' }}>
+						<FieldLabel>What happened?</FieldLabel>
+						<Input value={note} invalid={tried && missing} placeholder="e.g. launch post, tracking outage" onChange={(e: any) => setNote(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && save()} />
+					</Field>
 				</div>
-			)}
-			<div className="flex flex-wrap items-center gap-2">
-				{targets?.length > 0 && (
-					<select value={target} onChange={(e: any) => setTarget(e.target.value)} style={{ ...field, maxWidth: 220 }}>
-						{targets.map((o: any) => (
-							<option key={o.value} value={o.value}>
-								{o.label}
-							</option>
-						))}
-					</select>
+				{tried && missing ? (
+					<FieldError>Pick a kind of note or say what happened.</FieldError>
+				) : (
+					<FieldDescription>The note appears on every chart that shows this date or value, and later briefings use it.</FieldDescription>
 				)}
-				<select value={category} onChange={(e: any) => setCategory(e.target.value)} style={field} aria-label="Kind of note">
-					<option value="">Kind of note…</option>
-					{NOTE_CATEGORIES.map((c) => (
-						<option key={c.value} value={c.value}>
-							{c.label}
-						</option>
-					))}
-				</select>
-				<input
-					value={note}
-					placeholder="What happened? e.g. launch post, tracking outage"
-					onChange={(e: any) => setNote(e.target.value)}
-					onKeyDown={(e: any) => e.key === 'Enter' && save()}
-					style={{ ...field, flex: '1 1 220px', minWidth: 0 }}
-				/>
-				<Button size="sm" variant="primary" disabled={!category && !note.trim()} onClick={save}>
-					{saveLabel}
-				</Button>
-				{onCancel && (
-					<Button size="sm" variant="ghost" onClick={onCancel}>
-						Cancel
+				<Field orientation="horizontal">
+					<Button size="sm" variant="primary" onClick={save}>
+						{saveLabel}
 					</Button>
-				)}
-			</div>
+					{onCancel && (
+						<Button size="sm" variant="ghost" onClick={onCancel}>
+							Cancel
+						</Button>
+					)}
+				</Field>
+			</FieldGroup>
 		</div>
 	);
 }

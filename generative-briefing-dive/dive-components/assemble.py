@@ -44,7 +44,11 @@ def split(text):
 
 def files_for(components=None):
     m = manifest()
-    chosen = [c for c in m["components"] if components is None or c["type"] in components]
+    wanted = set(components or [])
+    for c in m["components"]:  # a component's `requires` brings in the components it builds on
+        if c["type"] in wanted:
+            wanted |= set(c.get("requires", []))
+    chosen = [c for c in m["components"] if components is None or c["type"] in wanted]
     files = [m["files"]["core"]]
     if any(c["file"] == m["files"]["blocks"] for c in chosen) or components is None:
         files.append(m["files"]["blocks"])

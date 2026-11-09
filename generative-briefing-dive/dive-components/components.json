@@ -194,12 +194,23 @@
 			"when": "A short paragraph."
 		},
 		{
+			"type": "form",
+			"label": "Form",
+			"file": "kit/field.tsx",
+			"kind": "block",
+			"data": "{ title?, description?, fields: [{ id, kind: text|textarea|select|choice|multi, label, description?, placeholder?, options?: [string | { value, label, description? }], layout?: cards|chips, required? }], submit_label? }",
+			"when": "Questions with an answer: feedback forms, intake, a short survey on a page. nav.submit(blockId, values) receives the answers. The same file has the form-field primitives after shadcn/ui Field (FieldSet, FieldLegend, FieldGroup, Field with orientation vertical|horizontal|responsive and invalid, FieldLabel, FieldContent, FieldTitle, FieldDescription, FieldError, FieldSeparator) and the controls Input, Textarea, Select and ChoiceGroup (radio or checkbox choice cards, or chips). Use them for any input in a Dive."
+		},
+		{
 			"type": "questions",
 			"label": "Questions",
 			"file": "kit/notes.tsx",
 			"kind": "block",
 			"data": "{ items: [{ id, kind: date|topic, x, grain?, dimension?, value?, label, question, options: [string] }] }",
-			"when": "Questions the page asks its viewers about a date or a segment it cannot explain from the data. With nav.annotate and nav.noteFor, each item takes an answer (a category and a note). The same file has withNotes(block, notes), which pins saved notes to every block that shows that date or value, NotesLine, which renders them under a block, and NoteForm."
+			"when": "Questions the page asks its viewers about a date or a segment it cannot explain from the data. With nav.annotate and nav.noteFor, each item takes an answer (a category and a note). The same file has withNotes(block, notes), which pins saved notes to every block that shows that date or value, NotesLine, which renders them under a block, and NoteForm, built from the form fields in kit/field.tsx.",
+			"requires": [
+				"form"
+			]
 		},
 		{
 			"type": "datepicker",

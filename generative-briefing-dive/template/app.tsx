@@ -507,6 +507,7 @@ function BlockCard({ b, layout, arrange, flash, onDraft, jump, nav }: any) {
 			{!arrange && noting && targets && (
 				<NoteForm
 					targets={targets.options}
+					targetLabel={targets.kind === 'date' ? 'When' : 'Which'}
 					onCancel={() => setNoting(false)}
 					onSave={(v: any) => {
 						nav.annotate({ kind: targets.kind, x: v.target, grain: b.x?.grain, dimension: targets.kind === 'topic' ? b.source.dimension : '', value: targets.kind === 'topic' ? v.target : '', category: v.category, note: v.note });
