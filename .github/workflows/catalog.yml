@@ -268,3 +268,21 @@ jobs:
             --notes-file .catalog-release/release-notes.md \
             --target "${GITHUB_SHA}" \
             --latest
+
+      # motherduck-docs renders the cookbook pages from the latest catalog
+      # release at build time, so ask it to redeploy. Needs DOCS_DEPLOY_TOKEN:
+      # a token with Contents read and write on motherduckdb/motherduck-docs.
+      # Without it the docs still pick up the release on their daily deploy.
+      - name: Trigger docs deploy
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          TAG: ${{ steps.release-metadata.outputs.tag }}
+        run: |
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "::warning::DOCS_DEPLOY_TOKEN is not set; the docs pick up this release on their daily deploy."
+            exit 0
+          fi
+          gh api repos/motherduckdb/motherduck-docs/dispatches \
+            -f event_type=cookbook-release \
+            -f "client_payload[tag]=${TAG}" \
+            -f "client_payload[sha]=${GITHUB_SHA}"

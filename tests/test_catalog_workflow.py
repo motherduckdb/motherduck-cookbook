@@ -55,3 +55,14 @@ def test_main_push_publishes_catalog_release_instead_of_pages() -> None:
     assert '"./.catalog-release/catalog.json#catalog.json"' in publish_step["run"]
     assert '--target "${GITHUB_SHA}"' in publish_step["run"]
     assert "--latest" in publish_step["run"]
+
+
+def test_catalog_release_triggers_docs_deploy() -> None:
+    steps = load_workflow()["jobs"]["release"]["steps"]
+    names = [step["name"] for step in steps]
+    assert names.index("Trigger docs deploy") > names.index("Create catalog release")
+
+    trigger = steps[names.index("Trigger docs deploy")]
+    assert trigger["env"]["GH_TOKEN"] == "${{ secrets.DOCS_DEPLOY_TOKEN }}"
+    assert "repos/motherduckdb/motherduck-docs/dispatches" in trigger["run"]
+    assert "event_type=cookbook-release" in trigger["run"]
