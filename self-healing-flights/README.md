@@ -60,7 +60,9 @@ why `incidents` has no primary key (its sequence keeps ids unique) and `runs.con
 **Detection, even mid-fix.** The coordinator checks every finished pipeline run once per minute, also while
 fixes are running. A failure becomes an incident, or joins an open one with the same fingerprint (numbers,
 ids and hashes are masked first). `prompt_jev` classifies new incidents: fix, watch (a source outage) or
-escalate (credentials). A run that cannot be processed, for example because of a malformed `HEAL_EVENT`
+escalate (credentials). When Jev is unsure (confidence below 0.8) or fails, an LLM classifies instead, with the log text fenced as data. An
+LLM answer that is not one of the classes is ignored, and if neither answers, the incident is a `code_bug` and gets a
+fix attempt. The incident's first transition records which path decided. A run that cannot be processed, for example because of a malformed `HEAL_EVENT`
 line, is retried for 30 minutes and then parked with a `dead_letter` alert. It never blocks later runs.
 Floods are capped:
 - at most 10 new incidents per pipeline per pass
