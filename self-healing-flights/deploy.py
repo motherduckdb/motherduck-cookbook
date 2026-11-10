@@ -22,7 +22,7 @@ HEALER_CONFIG = {
     "MODEL": "~anthropic/claude-opus-latest", "APPROVER_MODEL": "~openai/gpt-sol-latest", "TEST_REVIEW_MODEL": "~openai/gpt-sol-latest",
     "CLASSIFIER_MODEL": "~openai/gpt-luna-latest",
     "CHECK_EVERY_S": "60", "NOTICE_EVERY_S": "60",
-    "ACTION": "", "PROPOSAL_ID": "", "INCIDENT_ID": "",  # set per run by the Dive's Approve, Reject and Retry buttons
+    "ACTION": "", "INCIDENT_ID": "",  # set per run by the Dive's Approve, Reject, Retry and test-alert buttons
 }
 FLIGHTS = {
     "heal-demo-weather": ("pipeline_flight.py", "0 * * * *", {"NWS_FEATURE_FLAGS": ""}, 600),

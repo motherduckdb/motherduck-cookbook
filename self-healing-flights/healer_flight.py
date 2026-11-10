@@ -11,7 +11,9 @@ run, and forwards relevant ones to the agent fixing that pipeline. Later schedul
            an independent test-reviewer agent and an approver model must all pass.
   ship     Re-read the pipeline's current source. If it changed, 3-way merge, retest, and check again (a loop).
            AUTONOMY=L3 (default) stores a proposal for a human; L1 ships it with MD_UPDATE_FLIGHT.
-  decide   ACTION=approve|reject with PROPOSAL_ID (the Dive's buttons) ships or rejects a proposal.
+  decide   ACTION=approve|reject with INCIDENT_ID (the Dive's buttons) ships or rejects the fix waiting on an incident.
+
+State: four tables in `heal` (schema.sql): incidents, an append-only log, runs, and leases.
 """
 import ctypes
 import difflib
@@ -88,7 +90,8 @@ WEBHOOK = E("heal_webhook_WEBHOOK_URL") or ""  # optional Slack-compatible incom
 WORK = E("HEAL_WORK") or "/tmp/heal"
 SELF_RUN = int(E("MOTHERDUCK_FLIGHT_RUN_NUMBER") or 0)
 HOLDER = f"run{SELF_RUN}-{secrets.token_hex(3)}"
-ACTION, PROPOSAL_ID, INCIDENT_ID = (E("ACTION") or "").strip().lower(), (E("PROPOSAL_ID") or "").strip(), (E("INCIDENT_ID") or "").strip()
+ACTION, INCIDENT_ID = (E("ACTION") or "").strip().lower(), (E("INCIDENT_ID") or "").strip()
+DAILY_CAP = float(E("DAILY_BUDGET_USD") or 20)  # all fixes together, per UTC day
 API = "https://api.motherduck.com/v1"
 HOW_USED = ("reused_fix", "same_root_cause", "pointed_to_location", "ruled_out_hypothesis")
 CLASSES = {
@@ -120,8 +123,28 @@ assert re.fullmatch(r"[a-z][a-z0-9_]*", PREFIX), f"AGENT_PREFIX must be a plain 
 AGENTS = [f"{PREFIX}{i}" for i in range(1, POOL + 1)]  # a fixed naming convention, so later runs never create more
 FLIGHTS = {r[1]: str(r[0]) for r in db("SELECT flight_id, flight_name FROM MD_LIST_FLIGHTS(owner_only := true)")}
 SELF_FID = E("MOTHERDUCK_FLIGHT_ID") or FLIGHTS.get(HEALER_FLIGHT)
-CTL = dict(db("SELECT key, value FROM heal.main.control"))
 STOP, STOP_WHY = threading.Event(), ["the kill switch is on"]  # stop fixing mid-run, and why
+
+
+def clip(v, n=4000):  # long strings (logs, diffs) are cut, so a log row stays small and its detail stays valid JSON
+    if isinstance(v, str):
+        return v if len(v) <= n else v[:n] + f"... ({len(v) - n} more chars)"
+    if isinstance(v, dict):
+        return {str(k): clip(x, n) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [clip(x, n) for x in v[:200]]
+    return v
+
+
+def log(kind, inc=None, verdict=None, message=None, detail=None, fix_id=None, ts=None):
+    # heal.main.log is append-only: one row per fact (a transition, a failure, a fix step, a cost, an alert, ...).
+    db("INSERT INTO heal.main.log VALUES (coalesce(to_timestamp(?), now()), ?, ?, ?, ?, ?, ?, ?::JSON::VARIANT)",
+       [ts, inc, fix_id, SELF_RUN, kind, None if verdict is None else str(verdict), (message or "")[:4000],
+        json.dumps(clip(detail or {}), default=str)])
+
+
+def killed():  # a human holds the kill_switch lease
+    return db("SELECT any_value(holder) FROM heal.main.leases WHERE name = 'kill_switch' AND holder IS NOT NULL")[0][0]
 
 
 def runs(flight_id):
@@ -164,13 +187,13 @@ def api(method, path, **kw):
 
 # ------------------------------------------------------------------------------------------------ alerts, leases, heartbeat
 def notify(kind, message, key=None, incident_id=None, severity="warn", cooldown_s=3600):
-    # Every alert lands in heal.main.alerts (the Dive shows them); with a heal_webhook secret it is also posted there.
+    # Every alert is a row in heal.main.log (the Dive shows them); with a heal_webhook secret it is also posted there.
     # Never raises: alerting must not be what takes the healer down.
     print(f"ALERT {severity} {kind}: {message}", flush=True)
     status = "not sent"
     try:
         key = key or f"{kind}:{incident_id}"
-        if db("SELECT 1 FROM heal.main.alerts WHERE dedupe_key = ? AND ts > now() - to_seconds(?)", [key, cooldown_s]):
+        if db("SELECT 1 FROM heal.main.log WHERE kind = 'alert' AND detail.dedupe::VARCHAR = ? AND ts > now() - to_seconds(?) LIMIT 1", [key, cooldown_s]):
             return "deduplicated"
         status = "no webhook"
         if WEBHOOK:
@@ -179,8 +202,7 @@ def notify(kind, message, key=None, incident_id=None, severity="warn", cooldown_
                 status = str(requests.post(WEBHOOK, json={"text": f"[self-healing {severity}] {safe}"}, timeout=10).status_code)
             except requests.RequestException as e:
                 status = f"error: {type(e).__name__}"
-        db("INSERT INTO heal.main.alerts (kind, severity, dedupe_key, message, incident_id, run_number, webhook_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-           [kind, severity, key, message[:2000], incident_id, SELF_RUN, status])
+        log("alert", incident_id, status, message[:2000], {"type": kind, "severity": severity, "dedupe": key})
     except Exception as e:
         print(f"could not record the alert: {type(e).__name__}: {e}", flush=True)
     return status
@@ -222,16 +244,12 @@ def still_coordinator():
     return not LOST.is_set() and bool(db("SELECT 1 FROM heal.main.leases WHERE name = 'healer' AND holder = ?", [HOLDER]))
 
 
-def beat(phase, **detail):
-    db("INSERT INTO heal.main.heartbeats (component, run_number, detail) VALUES ('healer', ?, ?::JSON)", [SELF_RUN, json.dumps({"phase": phase, **detail})])
-
-
 PROGRESS = [time.time()]
 
 
 def heartbeat_loop():
-    # Leases are renewed only while the coordinator loop makes progress. A hung run lets them expire; the next run
-    # cancels it. The run also reports itself.
+    # Leases are renewed only while the coordinator loop makes progress (the healer lease's renewed_at is the heartbeat).
+    # A hung run lets them expire; the next run cancels it. The run also reports itself.
     reported = False
     while True:
         time.sleep(30)
@@ -245,10 +263,8 @@ def heartbeat_loop():
                         print(f"lease {name} is no longer ours", flush=True)
                         if name == "healer":  # another run took over (we were too slow): stop, don't fight it
                             LOST.set()
-                beat("alive", workers=len(WORKERS))
             elif not reported:
                 reported = True
-                beat("stalled", idle_s=round(idle))
                 notify("stuck", f"healer run {SELF_RUN} has made no progress for {idle / 60:.0f} min; it stopped renewing its lease, "
                        "so the next scheduled run will cancel it", key=f"stalled:{SELF_RUN}", severity="error")
         except Exception as e:  # never let the heartbeat thread die
@@ -276,9 +292,12 @@ def take_over():
 
 # ------------------------------------------------------------------------------------------------ 1. check
 def transition(inc_id, to, reason, **fields):
+    # A dict field (the proposal) is stored as a VARIANT.
     frm = db("SELECT status FROM heal.main.incidents WHERE incident_id = ?", [inc_id])[0][0]
-    db(f"UPDATE heal.main.incidents SET status = ?, updated_at = now(){''.join(f', {k} = ?' for k in fields)} WHERE incident_id = ?", [to, *fields.values(), inc_id])
-    db("INSERT INTO heal.main.incident_transitions (incident_id, from_status, to_status, reason, actor) VALUES (?, ?, ?, ?, 'healer')", [inc_id, frm, to, reason])
+    sets = "".join(f", {k} = ?::JSON::VARIANT" if isinstance(v, dict) else f", {k} = ?" for k, v in fields.items())
+    db(f"UPDATE heal.main.incidents SET status = ?, updated_at = now(){sets} WHERE incident_id = ?",
+       [to, *(json.dumps(v, default=str) if isinstance(v, dict) else v for v in fields.values()), inc_id])
+    log("transition", inc_id, to, reason, {"prior": frm})
     print(f"incident {inc_id}: {frm} -> {to} ({reason})", flush=True)
 
 
@@ -358,7 +377,6 @@ def on_failure(pipeline, fid, rn):
                 notify("storm", f"{pipeline}: {recent}+ new kinds of failure within an hour; new ones join incident #{hit[0][0]}", key=f"storm:{pipeline}")
     if hit:
         inc_id = hit[0][0]
-        db("UPDATE heal.main.incidents SET event_count = event_count + 1, last_event_at = now() WHERE incident_id = ?", [inc_id])
         if hit[0][1] == "verifying" and reason == "fingerprint":  # the same failure after a fix shipped: the fix did not hold
             transition(inc_id, "open", f"failed again in run {rn} after the fix shipped: reopening", green_runs=0)
     else:
@@ -371,13 +389,13 @@ def on_failure(pipeline, fid, rn):
         active = db("SELECT min(incident_id) FROM heal.main.incidents WHERE pipeline = ? AND status IN ('investigating', 'proposed')", [pipeline])[0][0]
         why = f"new {cls} incident ({how}) -> {disposition}" + (f"; waits behind the fix for #{active}" if active else "")
         # Created as 'open' in one statement, so a failure after this point can never leave an orphan without a status.
-        inc_id = db("""INSERT INTO heal.main.incidents (status, pipeline, pipelines, class, category, disposition, severity, level, title, fingerprint, last_event_at, root_id)
-                       VALUES ('open', ?, [?], ?, ?, ?, 'high', ?, ?, ?, now(), ?) RETURNING incident_id""",
-                    [pipeline, pipeline, cls, category, disposition, AUTONOMY, f"{cls.replace('_', ' ')}: {norm[:90]}", fp, active])[0][0]
-        reason = None
-        db("INSERT INTO heal.main.incident_transitions (incident_id, from_status, to_status, reason, actor) VALUES (?, NULL, 'open', ?, 'healer')", [inc_id, why])
-        for vid, fix in db("SELECT incident_id, fix_sha FROM heal.main.incidents WHERE pipeline = ? AND status = 'verifying' AND incident_id <> ?", [pipeline, inc_id]):
-            notify("regression", f"{pipeline}: a new kind of failure (#{inc_id}) appeared after the fix for #{vid} shipped as {fix}; if it started then, "
+        inc_id = db("""INSERT INTO heal.main.incidents (status, pipeline, class, category, disposition, title, fingerprint, root_id)
+                       VALUES ('open', ?, ?, ?, ?, ?, ?, ?) RETURNING incident_id""",
+                    [pipeline, cls, category, disposition, f"{cls.replace('_', ' ')}: {norm[:90]}", fp, active])[0][0]
+        reason = "new"
+        log("transition", inc_id, "open", why, {"prior": None, "classified_by": how})
+        for vid, fix in db("SELECT incident_id, fixed_version FROM heal.main.incidents WHERE pipeline = ? AND status = 'verifying' AND incident_id <> ?", [pipeline, inc_id]):
+            notify("regression", f"{pipeline}: a new kind of failure (#{inc_id}) appeared after the fix for #{vid} shipped as Flight version {fix}; if it started then, "
                    f"roll {pipeline} back to the version before it", incident_id=inc_id)
         print(f"incident {inc_id}: new -> open ({why})", flush=True)
         if disposition == "watch":
@@ -385,15 +403,14 @@ def on_failure(pipeline, fid, rn):
         elif disposition == "escalate":
             transition(inc_id, "escalated", "credentials are a human's job")
             notify("escalated", f"{pipeline}: {cls} needs a human (incident #{inc_id}): {norm[:200]}", incident_id=inc_id)
-    db("INSERT INTO heal.main.events (pipeline, flight_id, run_number, error_class, norm_msg, fingerprint, incident_id, attach_reason) VALUES (?, ?::UUID, ?, ?, ?, ?, ?, ?)",
-       [pipeline, fid, rn, etype, norm, fp, inc_id, reason])
+    log("failure", inc_id, etype, norm, {"pipeline": pipeline, "flight_id": fid, "run_number": rn, "fingerprint": fp, "attach": reason})
     route(pipeline, inc_id, fp, f"{pipeline} run {rn}: {etype}: {msg[:1500]}")
 
 
 def on_green(pipeline, started, ended):
-    for inc_id, merged_at, greens, fixed in db("""SELECT incident_id, merged_at, green_runs, fix_sha IS NOT NULL FROM heal.main.incidents
+    for inc_id, shipped_at, greens, fixed in db("""SELECT incident_id, shipped_at, green_runs, fixed_version IS NOT NULL FROM heal.main.incidents
                                                   WHERE pipeline = ? AND status IN ('verifying', 'watching')""", [pipeline]):
-        if merged_at and started and started < merged_at:
+        if shipped_at and started and started < shipped_at:
             continue  # a run that began before the fix shipped says nothing about the fix
         if fixed:  # a green run only counts if production also passes the contract (a fix that hides errors goes green too)
             bad = [c["check"] for c in contract(pipeline, "1970-01-01 00:00:00+00", "prod", owner_sql) if not c["ok"]]
@@ -407,7 +424,7 @@ def on_green(pipeline, started, ended):
                 PASS["ran"].add(pipeline)
                 run_flight(pipeline)
         else:
-            transition(inc_id, "resolved", f"{greens + 1} green runs", green_runs=greens + 1, resolved_at=ended)
+            transition(inc_id, "resolved", f"{greens + 1} green runs", green_runs=greens + 1)
             if fixed:
                 write_guide(inc_id)
 
@@ -415,16 +432,19 @@ def on_green(pipeline, started, ended):
 def write_guide(inc_id):
     # Each resolved incident becomes a MotherDuck Guide under self-healing/incidents/<category>, with the reusable code
     # snippet the fixer wrote, and links to the Guides that helped.
-    title, category, cls, pipeline, fix_sha, cost = db("SELECT title, category, class, pipeline, fix_sha, cost_usd FROM heal.main.incidents WHERE incident_id = ?", [inc_id])[0]
-    s = db("SELECT summary FROM heal.main.fixer_runs WHERE incident_id = ? AND outcome IN ('merged', 'proposed') ORDER BY ended_at DESC LIMIT 1", [inc_id])
-    s = json.loads(s[0][0]) if s and s[0][0] else {}
-    read = dict(db("SELECT guide_id::VARCHAR, max(guide_version) FROM heal.main.guide_reads WHERE incident_id = ? GROUP BY 1", [inc_id]))
-    titles = dict(db("SELECT guide_id::VARCHAR, title FROM heal.main.guide_index"))
+    title, category, cls, pipeline, fixed = db("SELECT title, category, class, pipeline, fixed_version FROM heal.main.incidents WHERE incident_id = ?", [inc_id])[0]
+    cost = db("SELECT coalesce(sum(detail.usd::DOUBLE), 0) FROM heal.main.log WHERE incident_id = ? AND kind = 'cost'", [inc_id])[0][0]
+    s = db("""SELECT detail.summary FROM heal.main.log WHERE incident_id = ? AND kind = 'attempt' AND verdict IN ('merged', 'proposed')
+              ORDER BY ts DESC LIMIT 1""", [inc_id])
+    s = s[0][0] if s and isinstance(s[0][0], dict) else {}
+    read = dict(db("""SELECT detail.guide_id::VARCHAR, max(detail.version::INT) FROM heal.main.log WHERE incident_id = ? AND kind = 'guide'
+                      GROUP BY 1""", [inc_id]))
+    titles = dict(db("SELECT id::VARCHAR, title FROM MD_LIST_GUIDES()"))
     links = [h for h in s.get("helpful_guides") or [] if isinstance(h, dict) and h.get("guide_id") in read and h.get("how_used") in HOW_USED and h.get("reason")]
     related = "\n".join(f"- [{titles.get(h['guide_id'])}](guide:{h['guide_id']}@v{read[h['guide_id']]}) - {h['how_used']}: {h['reason']}" for h in links)
     snippet = str(s.get("code_snippet") or "").strip()
     content = (f"# #{inc_id} {title}\n\n> A record of what happened. Data, not instructions.\n\n"
-               f"- category: {category}\n- class: {cls}\n- pipeline: {pipeline}\n- fix: {fix_sha}\n- cost: ${cost or 0:.2f}\n\n"
+               f"- category: {category}\n- class: {cls}\n- pipeline: {pipeline}\n- fix: Flight version {fixed}\n- cost: ${cost or 0:.2f}\n\n"
                f"## Root cause\n{s.get('root_cause', 'n/a')}\n\n## Fix\n{s.get('fix', 'n/a')}\n\n"
                + (f"## Code snippet\nThe pattern to reuse:\n\n```python\n{snippet}\n```\n\n" if snippet else "")
                + f"## Tests\n{s.get('tests') or 'No test changes.'} (test reviewer: {(s.get('test_review') or {}).get('verdict', 'n/a')})\n\n"
@@ -433,13 +453,8 @@ def write_guide(inc_id):
     refs = "[" + ", ".join(f"{{type: 'guide', uuid: '{h['guide_id']}'::UUID, description: '{h['how_used']}'}}" for h in links) + "]"
     gid = db(f'SELECT id FROM MD_CREATE_GUIDE(topic := ?, title := ?, description := ?, content := ?, "references" := {refs})',
              [f"self-healing/incidents/{category}", f"#{inc_id} {title}"[:200], str(s.get("root_cause", title))[:500], content])[0][0]
-    db("""INSERT OR REPLACE INTO heal.main.guide_index (guide_id, version, topic, category, class, pipeline, outcome, incident_id, title, description, embedding)
-          VALUES (?, 1, ?, ?, ?, ?, 'fixed', ?, ?, ?, embedding(?))""",
-       [str(gid), f"self-healing/incidents/{category}", category, cls, pipeline, inc_id, title, str(s.get("root_cause", ""))[:500], f"{title}\n{s.get('root_cause', '')}"])
-    for h in links:
-        db("INSERT INTO heal.main.guide_links (from_guide_id, to_guide_id, to_version, how_used, reason, incident_id) VALUES (?, ?, ?, ?, ?, ?)",
-           [str(gid), h["guide_id"], read[h["guide_id"]], h["how_used"], h["reason"], inc_id])
-        db("UPDATE heal.main.guide_index SET helpful_count = helpful_count + 1 WHERE guide_id = ?", [h["guide_id"]])
+    for h in links:  # how often a Guide helped is counted from these rows
+        log("guide_link", inc_id, h["how_used"], h["reason"], {"from_guide": str(gid), "to_guide": h["guide_id"], "to_version": read[h["guide_id"]]})
     db("UPDATE heal.main.incidents SET guide_id = ? WHERE incident_id = ?", [str(gid), inc_id])
 
 
@@ -464,8 +479,8 @@ def process_once(fid, rn, label, fn, done):
         status, err = ("dead" if attempts >= 3 and old else "retry"), f"{type(e).__name__}: {e}"[:1000]
         if status == "dead":
             notify("dead_letter", f"{label} run {rn} could not be processed for 30 minutes and was skipped: {err}", key=f"dead:{fid}", severity="error", cooldown_s=1800)
-    db("""INSERT OR REPLACE INTO heal.main.run_checks (flight_id, run_number, status, attempts, error, updated_at, first_at)
-          VALUES (?::UUID, ?, ?, ?, ?, now(), coalesce(?, now()))""", [fid, rn, status, attempts, err, st[2] if st else None])
+    db("""UPDATE heal.main.runs SET checked = ?, check_attempts = ?, check_error = ?, first_checked_at = coalesce(first_checked_at, now())
+          WHERE flight_id = ?::UUID AND run_number = ?""", [status, attempts, err, fid, rn])
 
 
 def owner_sql(stmts):  # read-only checks as the owner (the production contract)
@@ -480,38 +495,40 @@ def owner_sql(stmts):  # read-only checks as the owner (the production contract)
 
 def sweep():
     # Nothing may stay parked while its pipeline keeps failing, and the books must balance.
-    for inc_id, pipeline, status, n in db("""SELECT i.incident_id, i.pipeline, i.status, count(*) FROM heal.main.incidents i JOIN heal.main.events e USING (incident_id)
-                                            WHERE i.status IN ('watching', 'escalated') AND e.ts > now() - INTERVAL 6 HOUR GROUP BY ALL HAVING count(*) >= 3"""):
+    for inc_id, pipeline, status, n in db("""SELECT i.incident_id, i.pipeline, i.status, count(*) FROM heal.main.incidents i JOIN heal.main.log e USING (incident_id)
+                                            WHERE e.kind = 'failure' AND i.status IN ('watching', 'escalated') AND e.ts > now() - INTERVAL 6 HOUR
+                                            GROUP BY ALL HAVING count(*) >= 3"""):
         if status == "watching":
             transition(inc_id, "escalated", f"still failing while watched ({n} failures in 6 hours): the source is not recovering, or the sandbox "
                        "cannot reproduce it (missing secrets or packages?)")
         notify("still_failing", f"{pipeline}: escalated incident #{inc_id} keeps failing ({n} failures in 6 hours)", incident_id=inc_id,
                key=f"still_failing:{inc_id}:{time.strftime('%Y-%m-%d')}", cooldown_s=86400)
-    for inc_id, pipeline in db("""SELECT incident_id, pipeline FROM heal.main.incidents i WHERE status = 'proposed' AND NOT EXISTS
-                                  (SELECT 1 FROM heal.main.proposals p WHERE p.incident_id = i.incident_id AND p.status IN ('pending', 'deciding'))"""):
+    for inc_id, pipeline in db("""SELECT incident_id, pipeline FROM heal.main.incidents
+                                  WHERE status = 'proposed' AND coalesce(proposal.status::VARCHAR, '') <> 'pending'"""):
         transition(inc_id, "open", "proposed, but no proposal is waiting: fixing again")
         notify("invariant", f"{pipeline}: incident #{inc_id} was 'proposed' without a pending proposal; fixing it again", incident_id=inc_id)
-    db("UPDATE heal.main.proposals SET status = 'pending', note = 'an approval run did not finish; approve again' WHERE status = 'deciding' AND updated_at < now() - INTERVAL 1 HOUR")
-    db("DELETE FROM heal.main.heartbeats WHERE ts < now() - INTERVAL 7 DAY")
+    for (inc_id,) in db("SELECT incident_id FROM heal.main.incidents WHERE status = 'deciding' AND updated_at < now() - INTERVAL 1 HOUR"):
+        transition(inc_id, "proposed", "an approval run did not finish; approve again")
+    db("DELETE FROM heal.main.log WHERE kind = 'alert' AND incident_id IS NULL AND ts < now() - INTERVAL 30 DAY")
 
 
 def check():
-    # Copy the registry and recent runs into heal for the Dive, and process each newly finished run once.
+    # Copy recent runs into heal.main.runs for the Dive, and process each newly finished run once.
     PASS.update(t0=time.time(), new={}, ran=set())
-    registry = {**PIPELINES, "healer": {"flight": HEALER_FLIGHT, "assets": [], "description": "Checks every minute, fixes in parallel, verifies"}}
-    for name, p in registry.items():
-        kind, fid = "healer" if name == "healer" else "pipeline", FLIGHTS.get(p["flight"])
-        db("INSERT OR REPLACE INTO heal.main.pipeline_registry VALUES (?, ?, ?, ?, ?, [], ?, [], NULL, now())",
-           [name, kind, p["flight"], p["description"], AUTONOMY if kind == "pipeline" else None, p["assets"]])
+    for name, flight in [*((n, p["flight"]) for n, p in PIPELINES.items()), ("healer", HEALER_FLIGHT)]:
+        kind, fid = "healer" if name == "healer" else "pipeline", FLIGHTS.get(flight)
         if not fid:
             continue
         window = runs(fid)
-        known = dict(db("SELECT run_number, status FROM heal.main.flight_runs WHERE flight_id = ?::UUID", [fid]))
-        done = {r[0]: (r[1], r[2], r[3]) for r in db("SELECT run_number, status, attempts, first_at FROM heal.main.run_checks WHERE flight_id = ?::UUID", [fid])}
-        for r in window:  # only write runs whose status changed
+        rows = db("SELECT run_number, status, checked, check_attempts, first_checked_at FROM heal.main.runs WHERE flight_id = ?::UUID", [fid])
+        known = {r[0]: r[1] for r in rows}
+        done = {r[0]: (r[2], r[3], r[4]) for r in rows if r[2]}
+        for r in window:  # only write runs whose status changed; the healer's own processing columns are kept
             if known.get(r[0]) != r[1]:
-                db("""INSERT OR REPLACE INTO heal.main.flight_runs (component, kind, flight_id, run_number, status, started_at, ended_at, is_scheduled, created_at, config, snapshot_at)
-                      VALUES (?, ?, ?::UUID, ?, ?, ?, ?, ?, ?, ?::JSON, now())""", [name, kind, fid, *r])
+                db("""INSERT INTO heal.main.runs (flight_id, run_number, pipeline, kind, status, started_at, ended_at, is_scheduled, created_at, config, updated_at)
+                      VALUES (?::UUID, ?, ?, ?, ?, ?, ?, ?, ?, ?::JSON::VARIANT, now())
+                      ON CONFLICT (flight_id, run_number) DO UPDATE SET status = excluded.status, started_at = excluded.started_at,
+                        ended_at = excluded.ended_at, config = excluded.config, updated_at = now()""", [fid, r[0], name, kind, *r[1:]])
         processed = [rn for rn, v in done.items() if v[0] in ("done", "dead")]
         if kind == "pipeline" and window and processed and min(r[0] for r in window) > max(processed) + 1:
             gap = f"{max(processed) + 1}-{min(r[0] for r in window) - 1}"
@@ -531,10 +548,10 @@ def check():
             else:
                 process_once(fid, rn, name, lambda name=name, fid=fid, rn=rn: on_failure(name, fid, rn), done)
     sweep()
-    for pid, inc_id, pipeline, age in db("""SELECT proposal_id, incident_id, i.pipeline, round(epoch(now() - p.created_at) / 3600) FROM heal.main.proposals p
-                                            JOIN heal.main.incidents i USING (incident_id) WHERE p.status = 'pending' AND p.created_at < now() - INTERVAL 24 HOUR"""):
-        notify("proposal", f"{pipeline}: proposal #{pid} has waited {age:.0f} h for approval; {pipeline} gets no other fixes until it is decided",
-               key=f"proposal_reminder:{pid}:{time.strftime('%Y-%m-%d')}", incident_id=inc_id, cooldown_s=86400)
+    for inc_id, pipeline, age in db("""SELECT incident_id, pipeline, round(epoch(now() - updated_at) / 3600) FROM heal.main.incidents
+                                       WHERE status = 'proposed' AND updated_at < now() - INTERVAL 24 HOUR"""):
+        notify("proposal", f"{pipeline}: the fix for incident #{inc_id} has waited {age:.0f} h for approval; {pipeline} gets no other fixes until it is decided",
+               key=f"proposal_reminder:{inc_id}:{time.strftime('%Y-%m-%d')}", incident_id=inc_id, cooldown_s=86400)
 
 
 # ------------------------------------------------------------------------------------------------ 2. agent accounts
@@ -551,7 +568,7 @@ def ensure_setup():
             api("POST", "/users", json={"username": name, "description": f"Self-healing pipeline agent of {OWNER} (pool account; created by {HEALER_FLIGHT})"})
             print(f"created agent service account {name}", flush=True)
         db(f"GRANT ROLE {ROLE} TO USER {name}")
-        db("INSERT OR IGNORE INTO heal.main.agent_accounts (username, role) VALUES (?, ?)", [name, ROLE])
+        db("INSERT OR IGNORE INTO heal.main.leases (name) VALUES (?)", [f"agent:{name}"])  # so the Dive lists the pool
     owned = dict(db("SELECT name, url FROM md_information_schema.owned_shares"))
     for d in dbs:
         share = f"{d}_heal_agents"
@@ -560,7 +577,6 @@ def ensure_setup():
             owned[share] = db("SELECT url FROM md_information_schema.owned_shares WHERE name = ?", [share])[0][0]
             print(f"shared {d} with role {ROLE} as {owned[share]}", flush=True)
         db(f"GRANT READ ON SHARE {share} TO ROLE {ROLE}")
-        db("INSERT OR REPLACE INTO heal.main.agent_shares (database_name, share_name, share_url, role) VALUES (?, ?, ?, ?)", [d, share, owned[share], ROLE])
 
 
 MINIMAL_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}  # every child process gets this, never the healer's own environment
@@ -685,7 +701,7 @@ class Agent:
     def clone(self, dbs, refresh):
         # A zero-copy clone of each production database, under the production name, inside the agent's own account. With
         # refresh, the owner snapshots the database and the agent refreshes its share first, so the clone is current.
-        shares = dict(db("SELECT database_name, share_url FROM heal.main.agent_shares"))
+        shares = {n[:-len("_heal_agents")]: u for n, u in db("SELECT name, url FROM md_information_schema.owned_shares WHERE suffix(name, '_heal_agents')")}
         stmts = []
         for d in dbs:
             if refresh:
@@ -990,10 +1006,8 @@ class Broker(BaseHTTPRequestHandler):
 
 # ------------------------------------------------------------------------------------------------ 5. one fix
 def act(w, kind, command, verdict, detail=None, ts=None):
-    # Every step goes to heal.actions (the Dive draws each incident's healing DAG from these rows).
-    db("""INSERT INTO heal.main.actions SELECT ?, coalesce(max(seq), 0) + 1, coalesce(to_timestamp(?), now()), ?, ?, ?, ?::JSON
-          FROM heal.main.actions WHERE fixer_run_id = ?""",
-       [w.run_id, ts, kind, command[:2000], verdict, json.dumps(detail or {}, default=str)[:20000], w.run_id])
+    # Every step of a fix is a log row with its fix_id (the Dive draws each incident's healing DAG from these rows).
+    log(kind, w.id, verdict, command[:2000], detail, fix_id=w.run_id, ts=ts)
 
 
 def merge3(ours, base, theirs, tag):
@@ -1013,12 +1027,12 @@ def udiff(a, b):
     return "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True), "pipeline.py", "pipeline.py"))
 
 
-def ship(inc_id, pipeline, fid, source, base_v, how="approved by the reviewers"):
+def ship(inc_id, pipeline, fid, source, base_v, how="approved by the reviewers", proposal=None):
     v = db("SELECT current_version FROM MD_UPDATE_FLIGHT(flight_id := ?::UUID, source_code := ?)", [fid, source])[0][0]
     if v != base_v + 1:
         notify("race", f"{pipeline}: another change landed while the fix for #{inc_id} shipped (v{base_v} -> v{v}); review version {v}", incident_id=inc_id)
     transition(inc_id, "verifying", f"{how}; shipped as Flight version {v} (was {base_v}); verifying on the next runs",
-               fix_sha=f"flight-v{v}", merged_at=db("SELECT now()")[0][0], green_runs=0)
+               fixed_version=v, shipped_at=db("SELECT now()")[0][0], green_runs=0, **({"proposal": {**proposal, "shipped_version": v}} if proposal else {}))
     run_flight(pipeline)
     return v
 
@@ -1051,15 +1065,18 @@ Reply with JSON only:
 
 
 def recall(w):
-    # Past-incident Guides that look like this one: embedding shortlist, then Jev "might this help?". Optional.
+    # Past-incident Guides (this owner's, read from MotherDuck) that look like this one: embedding shortlist, then Jev
+    # "might this help?". Optional.
     try:
-        for gid, title, sim in db("""SELECT guide_id::VARCHAR, title, array_cosine_similarity(embedding, embedding(?)) AS sim FROM heal.main.guide_index
-                                     WHERE embedding IS NOT NULL AND incident_id <> ? ORDER BY sim DESC LIMIT 3""", [w.title, w.id]):
+        for gid, title, sim in db("""WITH g AS (SELECT id, title, description FROM MD_LIST_GUIDES()
+                                              WHERE topic LIKE 'self-healing/incidents/%' AND owner_name = current_user AND NOT starts_with(title, ?)
+                                              ORDER BY updated_at DESC LIMIT 100)
+                                     SELECT id::VARCHAR, title, array_cosine_similarity(embedding(title || chr(10) || coalesce(description, '')), embedding(?)) AS sim
+                                     FROM g ORDER BY sim DESC LIMIT 3""", [f"#{w.id} ", w.title]):
             p = sim > 0.5 and db("SELECT prompt_jev(?, 'Might this past incident help diagnose or fix the new one?')", [f"New incident: {w.title}\n\nPast incident: {title}"])[0][0]
             if p and p >= 0.6:
                 content, ver = db("SELECT content, version FROM MD_GET_GUIDE(id := ?::UUID)", [gid])[0]
-                db("INSERT INTO heal.main.guide_reads (incident_id, fixer_run_id, guide_id, guide_version) VALUES (?, ?, ?::UUID, ?)", [w.id, w.run_id, gid, ver])
-                act(w, "guide", f"guide get {gid}", "ok", {"title": title, "similarity": round(sim, 3), "jev_p": p})
+                act(w, "guide", f"guide get {gid}", "ok", {"guide_id": gid, "version": ver, "title": title, "similarity": round(sim, 3), "jev_p": p})
                 w.guides[gid] = content
     except duckdb.Error as e:
         print(f"recall skipped: {e}", flush=True)
@@ -1124,7 +1141,7 @@ class Worker(threading.Thread):
         self.fid = FLIGHTS[self.p["flight"]]
         self.base_v, self.source, self.config = flight_version(self.fid)  # the version this fix builds on (it moves on a rebase)
         self.phase, self.sid, self.agent, self.result, self.over_budget = "starting", None, None, None, False
-        self.fixer_cost, self.other_cost, self.rounds, self.last_notice, self.seen = 0.0, 0.0, 0, 0.0, set()
+        self.fixer_cost, self.other_cost, self.logged_cost, self.rounds, self.last_notice, self.seen = 0.0, 0.0, 0.0, 0, 0.0, set()
         self.repro, self.baseline, self.guides, self.snap, self.sent = "", {}, {}, {}, []
         self.vlock = threading.Lock()
 
@@ -1365,13 +1382,16 @@ class Worker(threading.Thread):
             raise Stop(lost=True)
         self.check_stop()
         if AUTONOMY == "L3" or ok["risk"]:  # a fix that adds sensitive capabilities always waits for a human
-            pid = db("""INSERT INTO heal.main.proposals (incident_id, status, flight_id, base_version, source, diff, summary)
-                        VALUES (?, 'pending', ?::UUID, ?, ?, ?, ?::JSON) RETURNING proposal_id""",
-                     [self.id, self.fid, self.base_v, ok["new"], ok["diff"], json.dumps(summary, default=str)])[0][0]
-            act(self, "submit", f"proposal #{pid}", "proposed", {"proposal_id": pid, "base_version": self.base_v})
-            transition(self.id, "proposed", f"fix passed every check and review; proposal #{pid} waits for a human (Approve in the Dive)"
-                       + (f"; it adds {', '.join(ok['risk'])}" if ok["risk"] else ""))
-            notify("proposal", f"{self.pipeline}: a fix for incident #{self.id} ({self.title[:80]}) waits for approval as proposal #{pid}",
+            # The proposal lives on the incident. n numbers an incident's proposals, so a click on an older one never
+            # approves a newer one the human has not seen.
+            prev = db("SELECT proposal.n::INT FROM heal.main.incidents WHERE incident_id = ?", [self.id])[0][0] or 0
+            prop = {"n": prev + 1, "status": "pending", "fix_id": self.run_id, "flight_id": self.fid, "base_version": self.base_v,
+                    "source": ok["new"], "diff": ok["diff"], "summary": summary, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            ref = f"{self.id}:{prop['n']}"
+            act(self, "submit", f"proposal {ref}", "proposed", {"proposal": ref, "base_version": self.base_v, "diff": ok["diff"]})
+            transition(self.id, "proposed", f"fix passed every check and review; proposal {ref} waits for a human (Approve in the Dive)"
+                       + (f"; it adds {', '.join(ok['risk'])}" if ok["risk"] else ""), proposal=prop)
+            notify("proposal", f"{self.pipeline}: a fix for incident #{self.id} ({self.title[:80]}) waits for approval (proposal {ref})",
                    incident_id=self.id, severity="info")
             self.finish("proposed", summary=summary)
             return True
@@ -1425,19 +1445,19 @@ class Worker(threading.Thread):
                     ts=((part.get("time") or {}).get("created") or 0) / 1000 or None)
         return last
 
-    def ledger(self):
-        db("UPDATE heal.main.fixer_runs SET cost_usd = ?, approver_rounds = ? WHERE fixer_run_id = ?", [self.cost, self.rounds, self.run_id])
+    def ledger(self):  # append what was spent since the last entry: spend is a sum over these rows
+        delta = self.cost - self.logged_cost
+        if delta > 0:
+            log("cost", self.id, None, None, {"usd": delta, "rounds": self.rounds}, fix_id=self.run_id)
+            self.logged_cost = self.cost
 
     def finish(self, outcome, why=None, summary=None, status="escalated"):
         if why:
             transition(self.id, status, why, **({"attempts": self.attempt - 1} if outcome == "queued" else {}))
             if status == "escalated":
                 notify("escalated", f"{self.pipeline}: incident #{self.id} escalated: {why}", incident_id=self.id)
-        db("UPDATE heal.main.fixer_runs SET ended_at = now(), status = 'done', outcome = ?, cost_usd = ?, approver_rounds = ?, summary = ?::JSON WHERE fixer_run_id = ?",
-           [outcome, self.cost, self.rounds, json.dumps(summary or {}, default=str), self.run_id])
-        db("UPDATE heal.main.incidents SET cost_usd = cost_usd + ? WHERE incident_id = ?", [self.cost, self.id])
-        db("""UPDATE heal.main.actions SET seq = n.new_seq FROM (SELECT seq, row_number() OVER (ORDER BY ts, seq)::INT AS new_seq FROM heal.main.actions WHERE fixer_run_id = ?) n
-              WHERE actions.fixer_run_id = ? AND actions.seq = n.seq""", [self.run_id, self.run_id])  # agent steps arrive late with their own timestamps
+        self.ledger()
+        log("attempt", self.id, outcome, why, {"cost_usd": self.cost, "rounds": self.rounds, "summary": summary or {}}, fix_id=self.run_id)
         self.phase = "done"
         print(f"incident {self.id}: {outcome} (${self.cost:.3f}, {self.rounds} reviews)", flush=True)
 
@@ -1471,7 +1491,7 @@ def queue():
 
 
 def spent_today():
-    return db("SELECT coalesce(sum(cost_usd), 0) FROM heal.main.fixer_runs WHERE started_at >= current_date")[0][0]
+    return db("SELECT coalesce(sum(detail.usd::DOUBLE), 0) FROM heal.main.log WHERE kind = 'cost' AND ts >= current_date")[0][0]
 
 
 def start_workers():
@@ -1482,7 +1502,7 @@ def start_workers():
     todo = queue()
     if not todo:
         return 0
-    cap = float(CTL.get("daily_spend_cap_usd", 20))
+    cap = DAILY_CAP
     if spent_today() >= cap:
         notify("spend_cap", f"daily spend cap ${cap:.0f} reached; {len(todo)} incident(s) wait until tomorrow", key=f"spend_cap:{time.strftime('%Y-%m-%d')}")
         return 0
@@ -1508,9 +1528,11 @@ def start_workers():
             continue
         started += 1
         transition(inc_id, "investigating", f"healer run {SELF_RUN} is fixing it (attempt {attempts + 1})", attempts=attempts + 1)
-        db("UPDATE heal.main.fixer_runs SET status = 'done', outcome = 'abandoned', ended_at = now() WHERE incident_id = ? AND status = 'running'", [inc_id])
-        db("""INSERT OR REPLACE INTO heal.main.fixer_runs (fixer_run_id, incident_id, attempt, flight_run_number, started_at, status, level, model, approver_model, cost_usd, approver_rounds)
-              VALUES (?, ?, ?, ?, now(), 'running', ?, ?, ?, 0, 0)""", [w.run_id, inc_id, w.attempt, SELF_RUN, AUTONOMY, MODEL, APPROVER])
+        for (old,) in db("""SELECT fix_id FROM heal.main.log WHERE incident_id = ? AND kind = 'attempt' GROUP BY fix_id
+                            HAVING count(*) FILTER (verdict <> 'started') = 0""", [inc_id]):  # an attempt a crashed run never finished
+            log("attempt", inc_id, "abandoned", "the healer run that made this attempt ended before it finished", {}, fix_id=old)
+        log("attempt", inc_id, "started", f"attempt {w.attempt}",
+            {"attempt": w.attempt, "autonomy": AUTONOMY, "model": MODEL, "approver_model": APPROVER}, fix_id=w.run_id)
         INBOX.register(w.key, inc_id)
         # Tell the new agent about failures that already exist on its pipeline or its upstream (route() covers new ones).
         related = [n for n, q in PIPELINES.items() if n == pipeline or (q.get("upstream") and q.get("upstream") == PIPELINES[pipeline].get("upstream"))]
@@ -1525,8 +1547,8 @@ def start_workers():
 
 
 def watch_budgets():
-    # Per incident (BUDGET_USD) and per day (daily_spend_cap_usd), while agents work, not only when a fix starts.
-    cap = float(CTL.get("daily_spend_cap_usd", 20))
+    # Per incident (BUDGET_USD) and per day (DAILY_BUDGET_USD), while agents work, not only when a fix starts.
+    cap = DAILY_CAP
     if WORKERS and spent_today() > cap and not STOP.is_set():
         notify("spend_cap", f"daily spend cap ${cap:.0f} reached while fixing: stopping the running fixes", key=f"spend_cap_live:{time.strftime('%Y-%m-%d')}")
         STOP_WHY[0] = f"the daily spend cap (${cap:.0f}) is reached"
@@ -1562,8 +1584,7 @@ def coordinate():
                     if w.sid:
                         OC.interrupt(w.sid)
             if time.time() >= next_check and not STOP.is_set():
-                CTL.update(dict(db("SELECT key, value FROM heal.main.control")))
-                if CTL.get("kill_switch") == "on":
+                if killed():
                     STOP.set()
                     for w in WORKERS.values():
                         if w.sid:
@@ -1601,14 +1622,21 @@ def coordinate():
 
 
 # ------------------------------------------------------------------------------------------------ 7. a human decides
-def retry(inc):
+def parse_ref(ref, need_n):
+    # INCIDENT_ID is "<incident>" (retry) or "<incident>:<proposal n>" (approve, reject: the proposal the human saw).
+    m = re.fullmatch(r"([0-9]{1,12})(?::([0-9]{1,6}))?", ref)
+    if not m or (need_n and not m.group(2)):
+        sys.exit(f"INCIDENT_ID must be {'<incident>:<proposal>' if need_n else 'a number'}, e.g. {'12:1' if need_n else '12'} (got {ref!r})")
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
+def retry(ref):
     # The Dive's Retry button: an escalated, rejected or watched incident gets fresh fix attempts on the next healer run.
-    if not re.fullmatch(r"[0-9]{1,12}", inc):
-        sys.exit(f"INCIDENT_ID must be a number (got {inc!r})")
-    row = db("SELECT status FROM heal.main.incidents WHERE incident_id = ?", [int(inc)])
+    inc, _ = parse_ref(ref, False)
+    row = db("SELECT status FROM heal.main.incidents WHERE incident_id = ?", [inc])
     if not row or row[0][0] not in ("escalated", "rejected", "watching"):
         return print(f"incident {inc} is {row[0][0] if row else 'missing'}: nothing to retry", flush=True)
-    transition(int(inc), "open", f"{this_run()[2]} asked for a retry in the Dive", attempts=0, disposition="fix")
+    transition(inc, "open", f"{this_run()[2]} asked for a retry in the Dive", attempts=0, disposition="fix")
 
 
 def test_alert():
@@ -1620,30 +1648,32 @@ def test_alert():
         sys.exit(f"the test alert was recorded, but the webhook did not accept it ({status}); check the heal_webhook secret")
 
 
-def decide(action, pid):
-    # The Dive's Approve / Reject buttons run this Flight with ACTION and PROPOSAL_ID. The proposal is claimed atomically
-    # (pending -> deciding), so two clicks, or an Approve and a Reject at once, act only once.
+def decide(action, ref):
+    # The Dive's Approve / Reject buttons run this Flight with ACTION and INCIDENT_ID=<incident>:<proposal n>. The incident
+    # is claimed atomically (proposed -> deciding), so two clicks, or an Approve and a Reject at once, act only once.
     if action == "retry":
-        return retry(INCIDENT_ID)
+        return retry(ref)
     if action == "test_alert":
         return test_alert()
-    if action not in ("approve", "reject") or not re.fullmatch(r"[0-9]{1,12}", pid):
-        sys.exit(f"ACTION must be approve, reject, retry or test_alert, with PROPOSAL_ID (or INCIDENT_ID) a number (got {action!r}, {pid!r})")
-    if action == "approve" and CTL.get("kill_switch") == "on":
+    if action not in ("approve", "reject"):
+        sys.exit(f"ACTION must be approve, reject, retry or test_alert (got {action!r})")
+    inc_id, n = parse_ref(ref, True)
+    if action == "approve" and killed():
         sys.exit("the kill switch is on: nothing ships until it is off")
     who = this_run()[2]
-    claimed = db("UPDATE heal.main.proposals SET status = 'deciding', decided_by = ?, updated_at = now() WHERE proposal_id = ? AND status = 'pending' RETURNING incident_id",
-                 [who, int(pid)])
+    claimed = db("""UPDATE heal.main.incidents SET status = 'deciding', updated_at = now()
+                    WHERE incident_id = ? AND status = 'proposed' AND proposal.n::INT = ? RETURNING pipeline, proposal""", [inc_id, n])
     if not claimed:
-        return print(f"proposal {pid} is not pending: nothing to do", flush=True)
-    inc_id, fid, base_v, cand, pipeline = db("""SELECT p.incident_id, p.flight_id::VARCHAR, p.base_version, p.source, i.pipeline FROM heal.main.proposals p
-                                                JOIN heal.main.incidents i USING (incident_id) WHERE p.proposal_id = ?""", [int(pid)])[0]
+        return print(f"proposal {inc_id}:{n} is not waiting for a decision: nothing to do", flush=True)
+    pipeline, prop = claimed[0]
+    log("transition", inc_id, "deciding", f"{who} chose {action} for proposal {inc_id}:{n}", {"prior": "proposed"})
+    fid, base_v, cand = prop["flight_id"], int(prop["base_version"]), prop["source"]
 
-    def close(status, note, inc_to=None, why=None):  # the incident first: a half-finished close never leaves it 'proposed'
-        if inc_to:
-            transition(inc_id, inc_to, why or note)
-        db("UPDATE heal.main.proposals SET status = ?, note = ?, decided_at = now(), updated_at = now() WHERE proposal_id = ?", [status, note, int(pid)])
-        print(f"proposal {pid}: {status} ({note})", flush=True)
+    def close(status, note, inc_to, why, **fields):
+        transition(inc_id, inc_to, why, proposal={**prop, "status": status, "note": note, "decided_by": who,
+                                                  "decided_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, **fields)
+        log("decision", inc_id, status, note, {"proposal": n, "by": who})
+        print(f"proposal {inc_id}:{n}: {status} ({note})", flush=True)
 
     if action == "reject":
         return close("rejected", f"rejected in the Dive by {who}", "rejected", f"{who} rejected the proposed fix")
@@ -1651,31 +1681,34 @@ def decide(action, pid):
     try:
         v, src, cfg = flight_version(fid)
         if src == base_src and cfg == base_cfg:  # what was tested and approved is still what runs: ship it
-            new_v = ship(inc_id, pipeline, fid, cand, v, f"approved by {who} in the Dive")
-            db("UPDATE heal.main.proposals SET shipped_version = ? WHERE proposal_id = ?", [new_v, int(pid)])
-            return close("shipped", f"approved by {who}; shipped as v{new_v}")
+            note = f"approved by {who}"
+            new_v = ship(inc_id, pipeline, fid, cand, v, f"approved by {who} in the Dive",
+                         proposal={**prop, "status": "shipped", "note": note, "decided_by": who,
+                                   "decided_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            log("decision", inc_id, "shipped", f"{note}; shipped as v{new_v}", {"proposal": n, "by": who, "version": new_v})
+            return print(f"proposal {inc_id}:{n}: shipped as v{new_v}", flush=True)
         # The pipeline changed since the fix was tested. The healer redoes it on the new version, where every gate runs
         # again (merge, retest, test review, approver, risk), and proposes it again, so a human approves exactly what ships.
-        db("UPDATE heal.main.incidents SET attempts = greatest(attempts - 1, 0) WHERE incident_id = ?", [inc_id])
-        notify("proposal_stale", f"proposal #{pid}: {pipeline} changed since it was tested (now v{v}); the healer redoes the fix and proposes it again",
+        notify("proposal_stale", f"proposal {inc_id}:{n}: {pipeline} changed since it was tested (now v{v}); the healer redoes the fix and proposes it again",
                incident_id=inc_id, severity="info")
         return close("stale", f"{pipeline} changed since it was tested (now v{v}); redone and proposed again", "open",
-                     f"proposal #{pid} was approved but {pipeline} has changed since; redoing the fix on v{v}")
+                     f"proposal {inc_id}:{n} was approved but {pipeline} has changed since; redoing the fix on v{v}",
+                     attempts=db("SELECT greatest(attempts - 1, 0) FROM heal.main.incidents WHERE incident_id = ?", [inc_id])[0][0])
     except BaseException:
-        if db("SELECT status FROM heal.main.proposals WHERE proposal_id = ?", [int(pid)]) == [("deciding",)]:
-            db("UPDATE heal.main.proposals SET status = 'pending', note = 'the approval run failed; approve again' WHERE proposal_id = ?", [int(pid)])
+        if db("SELECT status FROM heal.main.incidents WHERE incident_id = ?", [inc_id]) == [("deciding",)]:
+            transition(inc_id, "proposed", "the approval run failed; approve again")
         raise
 
 
 # ------------------------------------------------------------------------------------------------ main
 def overrides():
-    # Whoever runs this Flight (the Dive's buttons) may set ACTION, PROPOSAL_ID and INCIDENT_ID for that run, nothing
+    # Whoever runs this Flight (the Dive's buttons) may set ACTION and INCIDENT_ID for that run, nothing
     # else: a run that overrides any other setting (AUTONOMY, budgets, models) is refused.
     if not (SELF_FID and E("MOTHERDUCK_FLIGHT_ID")):
         return []
     v, effective, _ = this_run()
     stored = flight_version(SELF_FID, v)[2]
-    return [k for k, val in (effective or {}).items() if k not in ("ACTION", "PROPOSAL_ID", "INCIDENT_ID") and str(val) != stored.get(k)]
+    return [k for k, val in (effective or {}).items() if k not in ("ACTION", "INCIDENT_ID") and str(val) != stored.get(k)]
 
 
 def this_run():  # (Flight version, effective config, who started it) of this healer run
@@ -1690,21 +1723,16 @@ def main():
         notify("override_refused", f"healer run {SELF_RUN} was started with overridden settings ({', '.join(bad)}) and refused to run", severity="error")
         sys.exit(f"refusing to run with overridden settings: {', '.join(bad)}")
     if ACTION:
-        return decide(ACTION, PROPOSAL_ID)
-    if CTL.get("kill_switch") == "on":
-        return print("kill switch is on: exiting", flush=True)
+        return decide(ACTION, INCIDENT_ID)
+    if killed():
+        return print(f"the kill switch is on ({killed()}): exiting", flush=True)
     if not take_over():
         return
     threading.Thread(target=heartbeat_loop, daemon=True).start()
     try:
-        beat("start")
-        # Runs the healer already processed before run_checks existed count as done.
-        db("""INSERT OR IGNORE INTO heal.main.run_checks (flight_id, run_number, status, attempts)
-              SELECT flight_id, run_number, 'done', 0 FROM heal.main.flight_runs
-              WHERE status IN ('SUCCEEDED', 'FAILED') AND kind = 'pipeline' AND NOT EXISTS (SELECT 1 FROM heal.main.run_checks)""")
         coordinate()
     finally:  # each step on its own, so one failure doesn't skip the others
-        for step in [*(lambda n=n: release(n) for n in list(HELD)), lambda: OC and OC.close(), lambda: beat("done", seconds=round(time.time() - T0))]:
+        for step in [*(lambda n=n: release(n) for n in list(HELD)), lambda: OC and OC.close()]:
             try:
                 step()
             except Exception as e:

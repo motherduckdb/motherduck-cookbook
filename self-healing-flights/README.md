@@ -36,13 +36,26 @@ waiting for approval, and each step of every fix.
 | `pipeline_flight.py`, `hourly_flight.py` | Two pipelines (NWS daily forecast and hourly temperatures). On failure they print one `HEAL_EVENT {...}` line: that is their whole contract with the healer. |
 | `healer_flight.py` | The healer. Runs every 5 minutes; see below. The Dive's Approve, Reject and Retry buttons run it too. |
 | `dive.tsx` | The board: health, alerts, fixes waiting for approval, pipeline graph, run timeline, incidents with each fix's steps, Guides, and three Architecture tabs. |
-| `schema.sql` | The `heal` database the healer writes and the Dive reads. |
+| `schema.sql` | The `heal` database the healer writes and the Dive reads: four tables (see below). |
 | `deploy.py` | Creates or updates everything above (safe to re-run). |
 
 **One coordinator at a time.** A healer run takes the `healer` lease (a row in `heal.main.leases`) or exits
 because a live run already holds it. While it holds the lease it renews it every 30 seconds, but only while
 its main loop makes progress. A run that hangs stops renewing; the next scheduled run cancels it and sends a
 `stuck` alert. A run that crashes is reported by the next one (`healer_failed`).
+
+**State: four tables in `heal`.**
+
+| Table | Holds |
+|---|---|
+| `incidents` | One row per incident: status, class, fingerprint, attempts, the shipped version and its Guide. The fix waiting for a human is a `proposal` VARIANT on the same row, so Approve claims it with one atomic `UPDATE ... WHERE status = 'proposed'`. |
+| `log` | Append-only, one row per fact: status transitions, failures, fix attempts and every step of a fix, costs, decisions, alerts, and which Guide helped. Kind-specific fields are in a `detail` VARIANT (`detail.usd::DOUBLE`). Counts such as an incident's failures or spend are sums over it, never stored copies. |
+| `runs` | The last runs of each Flight (for the Dive), and whether the healer has processed each one. |
+| `leases` | The `healer` lease, one `agent:<account>` lease per pool account, and the `kill_switch`. |
+
+Guides live in MotherDuck itself (`MD_LIST_GUIDES`), and the agent accounts and shares are found by their names, so
+none of them needs a table. Avoid reading a VARIANT field through an index lookup: DuckDB 1.5.6 fails on it, which is
+why `incidents` has no primary key (its sequence keeps ids unique) and `runs.config` is read as `config::JSON`.
 
 **Detection, even mid-fix.** The coordinator checks every finished pipeline run once per minute, also while
 fixes are running. A failure becomes an incident, or joins an open one with the same fingerprint (numbers,
@@ -124,7 +137,7 @@ and later fixes recall it.
 - **One fix per pipeline at a time.** A pending proposal holds its pipeline until you decide; the healer
   reminds you daily.
 - **Cost.** Each fix costs real LLM money (about $0.10 to $0.30 here). Keep `BUDGET_USD` (enforced while the
-  agent works) and the daily cap (`daily_spend_cap_usd` in `heal.main.control`).
+  agent works) and the daily cap (`DAILY_BUDGET_USD`, all fixes together per UTC day).
 - **Missed runs.** The healer reads the last 25 runs of each pipeline. Runs that finish while it is off for
   longer than that are not processed; it sends a `gap` alert.
 - Turn the schedules off when you are done: `deploy.py --no-schedules`.
@@ -142,7 +155,8 @@ and later fixes recall it.
 | Budget per incident; review rounds; attempts | Healer config `BUDGET_USD`, `APPROVER_ROUNDS`, `MAX_ATTEMPTS` | `10`, `2`, `2` |
 | Check interval while fixing; notices to an agent | Healer config `CHECK_EVERY_S`, `NOTICE_EVERY_S` (and `NOTICE_MAX_CHARS` in code) | `60`, `60` (`600`) |
 | Flood limits | `MAX_NEW_INCIDENTS_PER_CHECK`, `STORM_MAX_PER_HOUR`, `CHECK_BUDGET_S` | `10`, `5`, `45` |
-| Kill switch, daily spend cap | `heal.main.control` keys `kill_switch`, `daily_spend_cap_usd` | `off`, `20` |
+| Kill switch | A `kill_switch` row in `heal.main.leases` with a `holder`: `INSERT OR REPLACE INTO heal.main.leases (name, holder) VALUES ('kill_switch', 'your name')`; delete the row to turn it off | off |
+| Daily spend cap | Healer env `DAILY_BUDGET_USD` | `20` |
 | Alert webhook | Flight secret `heal_webhook` with key `WEBHOOK_URL` | none (alerts only in the Dive) |
 | Schedules | `deploy.py` (`--no-schedules` to skip) | healer every 5 min, pipelines hourly |
 
@@ -223,7 +237,7 @@ Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the or
   - new hosts
   - SQL such as `ATTACH`, `SECRET`, `GRANT` or `MD_*`
 - **Pipelines get no secrets.** Only the healer Flight holds the OpenRouter key and the webhook URL. A healer run started
-  with any setting overridden other than `ACTION`, `PROPOSAL_ID` or `INCIDENT_ID` refuses to run, so run access cannot
+  with any setting overridden other than `ACTION` or `INCIDENT_ID` refuses to run, so run access cannot
   switch autonomy to `L1`.
 - **Upstream text is data.** Log excerpts and recalled Guides reach agents and reviewers fenced and labelled as
   untrusted, never as instructions. Alerts escape it for Slack.

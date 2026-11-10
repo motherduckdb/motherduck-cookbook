@@ -219,173 +219,168 @@ function useWidth<E extends HTMLElement>(): [React.RefObject<E>, number] {
 }
 
 // ---------- SQL ----------
+// Four tables: incidents (current state + any proposal), log (append-only facts), runs, leases. VARIANT columns are
+// read as detail.field::TYPE, or as x::JSON when a query wants the JSON operators (always for runs.config: see schema.sql).
+const L = `${H}."log"`;
 const HEALTH_SQL = `
 WITH inc AS (SELECT status FROM ${H}."incidents"),
-hb AS (SELECT component, max(ts) AS ts FROM ${H}."heartbeats" GROUP BY component),
-ctl AS (SELECT key, value FROM ${H}."control")
+cfg AS (SELECT arg_max(config::JSON, created_at) AS c FROM ${H}."runs" WHERE kind = 'healer' AND config IS NOT NULL)
 SELECT
   (SELECT count(*) FROM inc WHERE status IN ('open', 'watching'))::INT AS n_open,
   (SELECT count(*) FROM inc WHERE status = 'investigating')::INT AS n_inv,
   (SELECT count(*) FROM inc WHERE status IN ('merged', 'verifying'))::INT AS n_ver,
   (SELECT count(*) FROM inc WHERE status IN ('escalated', 'regressed'))::INT AS n_esc,
-  (SELECT count(*) FROM inc WHERE status = 'proposed')::INT AS n_prop,
+  (SELECT count(*) FROM inc WHERE status IN ('proposed', 'deciding'))::INT AS n_prop,
   (SELECT count(*) FROM inc WHERE status = 'resolved')::INT AS n_res,
   (SELECT count(*) FROM inc)::INT AS n_all,
-  (SELECT epoch_ms(max(ts))::DOUBLE FROM hb WHERE component IN ('healer', 'checker')) AS checker_ms,
-  (SELECT any_value(value) FROM ctl WHERE key = 'kill_switch') AS kill_switch,
-  (SELECT any_value(autonomy) FROM ${H}."pipeline_registry" WHERE kind = 'pipeline') AS autonomy,
-  (SELECT any_value(value) FROM ctl WHERE key = 'daily_spend_cap_usd') AS spend_cap,
-  (SELECT count(*) FROM ${H}."proposals" WHERE status = 'pending')::INT AS n_pending,
-  (SELECT count(*) FROM ${H}."agent_accounts")::INT AS n_agents,
+  (SELECT epoch_ms(max(renewed_at))::DOUBLE FROM ${H}."leases" WHERE name = 'healer') AS checker_ms,
+  coalesce((SELECT 'on (' || any_value(holder) || ')' FROM ${H}."leases" WHERE name = 'kill_switch' AND holder IS NOT NULL), 'off') AS kill_switch,
+  (SELECT c->>'AUTONOMY' FROM cfg) AS autonomy,
+  (SELECT c->>'DAILY_BUDGET_USD' FROM cfg) AS spend_cap,
+  (SELECT count(*) FROM inc WHERE status = 'proposed')::INT AS n_pending,
+  (SELECT count(*) FROM ${H}."leases" WHERE name LIKE 'agent:%')::INT AS n_agents,
   (SELECT count(*) FROM ${H}."leases" WHERE name LIKE 'agent:%' AND holder IS NOT NULL AND expires_at > now())::INT AS n_agents_busy,
-  (SELECT count(*) FROM ${H}."alerts" WHERE ts > now() - INTERVAL 24 HOUR AND severity <> 'info')::INT AS n_alerts,
-  (SELECT coalesce(sum(cost_usd), 0) FROM ${H}."fixer_runs"
-     WHERE (started_at AT TIME ZONE 'UTC')::DATE = (now() AT TIME ZONE 'UTC')::DATE)::DOUBLE AS spend_today,
-  (SELECT count(*) FROM "heal_board"."eval"."scenario_runs")::INT AS n_eval,
-  (SELECT epoch_ms(max(snapshot_at))::DOUBLE FROM ${H}."flight_runs") AS snapshot_ms,
+  (SELECT count(*) FROM ${L} WHERE kind = 'alert' AND ts > now() - INTERVAL 24 HOUR AND detail.severity::VARCHAR <> 'info')::INT AS n_alerts,
+  (SELECT coalesce(sum(detail.usd::DOUBLE), 0) FROM ${L}
+     WHERE kind = 'cost' AND (ts AT TIME ZONE 'UTC')::DATE = (now() AT TIME ZONE 'UTC')::DATE)::DOUBLE AS spend_today,
+  (SELECT epoch_ms(max(updated_at))::DOUBLE FROM ${H}."runs") AS snapshot_ms,
   epoch_ms(now())::DOUBLE AS now_ms`;
 
+// The pipelines are the ones with runs; their autonomy is the healer's.
 const REG_SQL = `
-SELECT r.name, r.kind, r.flight_name, r.description, r.autonomy, r.schedule,
-  array_to_string(coalesce(r.upstream, []), ',') AS upstream,
-  array_to_string(coalesce(r.assets, []), ', ') AS assets,
-  array_to_string(coalesce(r.resources, []), ', ') AS resources,
-  (SELECT string_agg(i.incident_id::VARCHAR || '|' || i.status || '|' || coalesce(i.category, '') || '|' || (i.pipeline = r.name)::VARCHAR, ';' ORDER BY i.incident_id DESC)
-     FROM ${H}."incidents" i
-     WHERE (i.pipeline = r.name OR list_contains(coalesce(i.pipelines, []), r.name))
-       AND i.status NOT IN ('resolved')) AS active
-FROM ${H}."pipeline_registry" r
+WITH r AS (SELECT pipeline AS name, any_value(kind) AS kind FROM ${H}."runs" GROUP BY ALL),
+a AS (SELECT arg_max(config::JSON->>'AUTONOMY', created_at) AS autonomy FROM ${H}."runs" WHERE kind = 'healer')
+SELECT r.name, r.kind, CASE WHEN r.kind = 'pipeline' THEN (SELECT autonomy FROM a) END AS autonomy,
+  (SELECT string_agg(i.incident_id::VARCHAR || '|' || i.status || '|' || coalesce(i.category, '') || '|true', ';' ORDER BY i.incident_id DESC)
+     FROM ${H}."incidents" i WHERE i.pipeline = r.name AND i.status NOT IN ('resolved')) AS active
+FROM r
 ORDER BY r.kind DESC, r.name`;
 
 const RUNS_SQL = `
-SELECT f.component, f.kind, f.run_number::DOUBLE AS run_number, f.status, f.is_scheduled,
+WITH att AS (SELECT healer_run, min(incident_id) AS incident_id, min(fix_id) AS fix_id FROM ${L}
+             WHERE kind = 'attempt' AND verdict = 'started' GROUP BY ALL),
+outc AS (SELECT fix_id, arg_max(verdict, ts) AS outcome FROM ${L} WHERE kind = 'attempt' AND verdict <> 'started' GROUP BY ALL)
+SELECT f.pipeline AS component, f.kind, f.run_number::DOUBLE AS run_number, f.status, f.is_scheduled,
   epoch_ms(f.created_at)::DOUBLE AS created_ms, epoch_ms(f.started_at)::DOUBLE AS started_ms,
-  epoch_ms(f.ended_at)::DOUBLE AS ended_ms, f.sha,
-  CASE WHEN f.status = 'RUNNING' THEN (SELECT epoch_ms(max(h.ts))::DOUBLE FROM ${H}."heartbeats" h
-    WHERE h.component = f.component AND h.run_number = f.run_number AND (h.detail->>'phase') IN ('end', 'done')) END AS hb_end_ms,
-  coalesce(fr.incident_id, TRY_CAST(f.config->>'INCIDENT_ID' AS BIGINT))::DOUBLE AS incident_id,
-  fr.fixer_run_id, f.config->>'MODE' AS mode, f.config->>'ATTEMPT' AS attempt, fr.outcome,
+  epoch_ms(f.ended_at)::DOUBLE AS ended_ms,
+  coalesce(a.incident_id, TRY_CAST(split_part(f.config::JSON->>'INCIDENT_ID', ':', 1) AS BIGINT))::DOUBLE AS incident_id,
+  a.fix_id AS fixer_run_id, nullif(f.config::JSON->>'ACTION', '') AS mode, o.outcome,
   EXISTS (SELECT 1 FROM ${H}."incidents" i
-          WHERE i.incident_id = coalesce(fr.incident_id, TRY_CAST(f.config->>'INCIDENT_ID' AS BIGINT))) AS inc_exists
-FROM ${H}."flight_runs" f
-LEFT JOIN (SELECT flight_run_number, min(incident_id) AS incident_id, min(fixer_run_id) AS fixer_run_id, min(outcome) AS outcome
-           FROM ${H}."fixer_runs" GROUP BY ALL) fr ON f.component IN ('fixer', 'healer') AND fr.flight_run_number = f.run_number
-ORDER BY f.component, f.run_number`;
+          WHERE i.incident_id = coalesce(a.incident_id, TRY_CAST(split_part(f.config::JSON->>'INCIDENT_ID', ':', 1) AS BIGINT))) AS inc_exists
+FROM ${H}."runs" f
+LEFT JOIN att a ON f.kind = 'healer' AND a.healer_run = f.run_number
+LEFT JOIN outc o ON o.fix_id = a.fix_id
+ORDER BY f.pipeline, f.run_number`;
 
 const INC_SQL = `
-SELECT i.incident_id::DOUBLE AS id, i.status, i.class, i.category, i.level, i.severity, i.disposition,
-  i.pipeline, array_to_string(coalesce(i.pipelines, []), ', ') AS pipelines, i.title,
-  coalesce(i.event_count, 0)::DOUBLE AS events, coalesce(i.attempts, 0)::DOUBLE AS attempts,
-  coalesce(i.cost_usd, 0)::DOUBLE AS cost, i.gh_issue::DOUBLE AS gh_issue, i.gh_pr::DOUBLE AS gh_pr,
-  i.fix_sha, coalesce(i.green_runs, 0)::DOUBLE AS green_runs, coalesce(i.red_runs, 0)::DOUBLE AS red_runs,
-  coalesce(i.muted, false) AS muted, i.guide_id::VARCHAR AS guide_id, i.scenario, i.notes, i.resource,
+WITH ev AS (SELECT incident_id, count(*) AS n FROM ${L} WHERE kind = 'failure' GROUP BY ALL),
+co AS (SELECT incident_id, sum(detail.usd::DOUBLE) AS usd FROM ${L} WHERE kind = 'cost' GROUP BY ALL),
+rs AS (SELECT incident_id, max(ts) AS ts FROM ${L} WHERE kind = 'transition' AND verdict = 'resolved' GROUP BY ALL)
+SELECT i.incident_id::DOUBLE AS id, i.status, i.class, i.category, i.disposition, i.pipeline, i.title,
+  coalesce(ev.n, 0)::DOUBLE AS events, coalesce(i.attempts, 0)::DOUBLE AS attempts, coalesce(co.usd, 0)::DOUBLE AS cost,
+  i.fixed_version::DOUBLE AS fixed_version, coalesce(i.green_runs, 0)::DOUBLE AS green_runs, i.guide_id::VARCHAR AS guide_id,
   i.root_id::DOUBLE AS root_id, i.fingerprint,
   epoch_ms(i.created_at)::DOUBLE AS created_ms, epoch_ms(i.updated_at)::DOUBLE AS updated_ms,
-  epoch_ms(i.merged_at)::DOUBLE AS merged_ms, epoch_ms(i.resolved_at)::DOUBLE AS resolved_ms
-FROM ${H}."incidents" i
+  epoch_ms(i.shipped_at)::DOUBLE AS merged_ms, CASE WHEN i.status = 'resolved' THEN epoch_ms(rs.ts)::DOUBLE END AS resolved_ms
+FROM ${H}."incidents" i LEFT JOIN ev USING (incident_id) LEFT JOIN co USING (incident_id) LEFT JOIN rs USING (incident_id)
 ORDER BY i.created_at DESC, i.incident_id DESC`;
 
 const transSQL = (id: number) => `
-SELECT epoch_ms(ts)::DOUBLE AS ts_ms, from_status, to_status, reason, actor
-FROM ${H}."incident_transitions" WHERE incident_id = ${id} ORDER BY ts`;
+SELECT epoch_ms(ts)::DOUBLE AS ts_ms, detail.prior::VARCHAR AS from_status, verdict AS to_status, message AS reason, 'healer' AS actor
+FROM ${L} WHERE incident_id = ${id} AND kind = 'transition' ORDER BY ts`;
 
 const eventsSQL = (id: number) => `
-SELECT event_id::DOUBLE AS event_id, epoch_ms(ts)::DOUBLE AS ts_ms, source, pipeline, run_number::DOUBLE AS run_number,
-  left(sha, 10) AS sha, error_class, norm_msg, asset, resource, coalesce(attach_reason, 'new') AS attach_reason,
-  array_to_string(coalesce(top_frames, []), ' < ') AS frames
-FROM ${H}."events" WHERE incident_id = ${id} ORDER BY ts, event_id`;
+SELECT (row_number() OVER (ORDER BY ts))::DOUBLE AS event_id, epoch_ms(ts)::DOUBLE AS ts_ms, detail.pipeline::VARCHAR AS pipeline,
+  detail.run_number::DOUBLE AS run_number, verdict AS error_class, message AS norm_msg, coalesce(detail.attach::VARCHAR, 'new') AS attach_reason
+FROM ${L} WHERE incident_id = ${id} AND kind = 'failure' ORDER BY ts`;
 
+// One row per fix attempt: its 'attempt' rows (started, then the outcome) and its 'cost' rows.
 const fixerSQL = (id: number) => `
-SELECT fr.fixer_run_id, fr.attempt::DOUBLE AS attempt, fr.flight_run_number::DOUBLE AS frn,
-  epoch_ms(fr.started_at)::DOUBLE AS started_ms, epoch_ms(fr.ended_at)::DOUBLE AS ended_ms,
-  fr.status, fr.level, fr.model, fr.approver_model, coalesce(fr.cost_usd, 0)::DOUBLE AS cost,
-  fr.approver_rounds::DOUBLE AS approver_rounds, fr.outcome, fr.branch, fr.pr_number::DOUBLE AS pr_number,
-  fr.summary->>'symptoms' AS symptoms, fr.summary->>'root_cause' AS root_cause, fr.summary->>'fix' AS fix,
-  fr.summary->>'verification' AS verification, fr.summary->>'approver_notes' AS approver_notes,
-  (SELECT any_value(f.status) FROM ${H}."flight_runs" f WHERE f.component IN ('fixer', 'healer') AND f.run_number = fr.flight_run_number) AS flight_status
-FROM ${H}."fixer_runs" fr WHERE fr.incident_id = ${id}
-UNION ALL BY NAME
-SELECT 'run-' || f.run_number::VARCHAR AS fixer_run_id, TRY_CAST(f.config->>'ATTEMPT' AS DOUBLE) AS attempt,
-  f.run_number::DOUBLE AS frn, epoch_ms(coalesce(f.started_at, f.created_at))::DOUBLE AS started_ms,
-  epoch_ms(f.ended_at)::DOUBLE AS ended_ms, lower(f.status) AS status, f.config->>'AUTONOMY' AS level,
-  0::DOUBLE AS cost, f.status AS flight_status
-FROM ${H}."flight_runs" f
-WHERE f.component = 'fixer' AND (f.config->>'INCIDENT_ID') = '${id}'
-  AND f.run_number NOT IN (SELECT coalesce(flight_run_number, -1) FROM ${H}."fixer_runs" WHERE incident_id = ${id})
+WITH a AS (
+  SELECT fix_id, min(ts) FILTER (WHERE verdict = 'started') AS started, max(ts) FILTER (WHERE verdict <> 'started') AS ended,
+    arg_max(verdict, ts) FILTER (WHERE verdict <> 'started') AS outcome,
+    any_value(detail::JSON) FILTER (WHERE verdict = 'started') AS s, arg_max(detail::JSON, ts) FILTER (WHERE verdict <> 'started') AS e,
+    any_value(healer_run) FILTER (WHERE verdict = 'started') AS frn
+  FROM ${L} WHERE incident_id = ${id} AND kind = 'attempt' GROUP BY fix_id),
+c AS (SELECT fix_id, sum(detail.usd::DOUBLE) AS usd, max(detail.rounds::INT) AS rounds FROM ${L}
+      WHERE incident_id = ${id} AND kind = 'cost' GROUP BY fix_id)
+SELECT a.fix_id AS fixer_run_id, TRY_CAST(a.s->>'attempt' AS DOUBLE) AS attempt, a.frn::DOUBLE AS frn,
+  epoch_ms(a.started)::DOUBLE AS started_ms, epoch_ms(a.ended)::DOUBLE AS ended_ms,
+  CASE WHEN a.ended IS NULL THEN 'running' ELSE 'done' END AS status, a.s->>'autonomy' AS level, a.s->>'model' AS model,
+  a.s->>'approver_model' AS approver_model, coalesce(c.usd, 0)::DOUBLE AS cost,
+  coalesce(c.rounds, TRY_CAST(a.e->>'rounds' AS INT))::DOUBLE AS approver_rounds, coalesce(a.outcome, 'running') AS outcome,
+  a.e->'summary'->>'symptoms' AS symptoms, a.e->'summary'->>'root_cause' AS root_cause, a.e->'summary'->>'fix' AS fix,
+  a.e->'summary'->>'verification' AS verification, a.e->'summary'->>'approver_notes' AS approver_notes,
+  (SELECT any_value(f.status) FROM ${H}."runs" f WHERE f.kind = 'healer' AND f.run_number = a.frn) AS flight_status
+FROM a LEFT JOIN c USING (fix_id)
 ORDER BY attempt NULLS LAST, started_ms`;
 
 const actionsSQL = (id: number) => `
-SELECT a.fixer_run_id, a.seq::DOUBLE AS seq, epoch_ms(a.ts)::DOUBLE AS ts_ms, a.kind,
-  left(coalesce(a.command, ''), 600) AS command, coalesce(a.verdict, '') AS verdict,
-  a.detail->>'feedback' AS feedback, a.detail->>'risk' AS risk,
-  (a.detail->'violations')::VARCHAR AS violations, (a.detail->'l2_blocks')::VARCHAR AS l2_blocks,
-  (a.detail->'errors')::VARCHAR AS errors, (a.detail->'exits')::VARCHAR AS exits,
-  left(a.detail->>'output', 300) AS output
-FROM ${H}."actions" a
-WHERE a.fixer_run_id IN (SELECT fixer_run_id FROM ${H}."fixer_runs" WHERE incident_id = ${id})
-ORDER BY a.fixer_run_id, a.seq`;
+SELECT fix_id AS fixer_run_id, (row_number() OVER (PARTITION BY fix_id ORDER BY ts))::DOUBLE AS seq, epoch_ms(ts)::DOUBLE AS ts_ms, kind,
+  left(coalesce(message, ''), 600) AS command, coalesce(verdict, '') AS verdict,
+  d->>'feedback' AS feedback, d->>'risk' AS risk,
+  (d->'violations')::VARCHAR AS violations, (d->'l2_blocks')::VARCHAR AS l2_blocks,
+  (d->'errors')::VARCHAR AS errors, (d->'exits')::VARCHAR AS exits,
+  left(d->>'output', 300) AS output
+FROM (SELECT *, detail::JSON AS d FROM ${L} WHERE incident_id = ${id} AND fix_id IS NOT NULL AND kind NOT IN ('attempt', 'cost'))
+ORDER BY fixer_run_id, seq`;
+
+// Guides live in MotherDuck: listed with MD_LIST_GUIDES, linked through incidents.guide_id and the log.
+const GUIDE_LIST = `(SELECT id, title, description, topic, split_part(topic, '/', 3) AS category, current_version, created_at, updated_at
+  FROM MD_LIST_GUIDES() WHERE topic LIKE 'self-healing/incidents/%')`;
 
 const incGuidesSQL = (id: number) => `
-WITH gi AS (
-  SELECT * FROM ${H}."guide_index" QUALIFY row_number() OVER (PARTITION BY guide_id ORDER BY version DESC) = 1
-)
-SELECT 'own' AS rel, g.guide_id::VARCHAR AS guide_id, g.title, g.category, NULL::VARCHAR AS how_used, NULL::VARCHAR AS reason
-FROM ${H}."incidents" i JOIN gi g ON g.guide_id = i.guide_id WHERE i.incident_id = ${id}
+WITH g AS ${GUIDE_LIST}
+SELECT 'own' AS rel, i.guide_id::VARCHAR AS guide_id, g.title, g.category, NULL::VARCHAR AS how_used, NULL::VARCHAR AS reason
+FROM ${H}."incidents" i JOIN g ON g.id = i.guide_id WHERE i.incident_id = ${id}
 UNION ALL
-SELECT 'link', l.to_guide_id::VARCHAR, g.title, g.category, l.how_used, l.reason
-FROM ${H}."guide_links" l LEFT JOIN gi g ON g.guide_id = l.to_guide_id WHERE l.incident_id = ${id}
+SELECT 'link', l.detail.to_guide::VARCHAR, g.title, g.category, l.verdict, l.message
+FROM ${L} l LEFT JOIN g ON g.id::VARCHAR = l.detail.to_guide::VARCHAR WHERE l.incident_id = ${id} AND l.kind = 'guide_link'
 UNION ALL
-SELECT DISTINCT 'read', r.guide_id::VARCHAR, g.title, g.category, r.fixer_run_id, NULL
-FROM ${H}."guide_reads" r LEFT JOIN gi g ON g.guide_id = r.guide_id WHERE r.incident_id = ${id}`;
+SELECT DISTINCT 'read', coalesce(r.detail.guide_id::VARCHAR, replace(r.message, 'guide get ', '')) AS gid, g.title, g.category, r.fix_id, NULL
+FROM ${L} r LEFT JOIN g ON g.id::VARCHAR = coalesce(r.detail.guide_id::VARCHAR, replace(r.message, 'guide get ', ''))
+WHERE r.incident_id = ${id} AND r.kind = 'guide'`;
 
 const GUIDES_SQL = `
-SELECT guide_id::VARCHAR AS guide_id, version::DOUBLE AS version, topic, category, class, pipeline, outcome,
-  incident_id::DOUBLE AS incident_id, title, description, coalesce(helpful_count, 0)::DOUBLE AS helpful,
-  epoch_ms(created_at)::DOUBLE AS created_ms, epoch_ms(updated_at)::DOUBLE AS updated_ms
-FROM ${H}."guide_index"
-QUALIFY row_number() OVER (PARTITION BY guide_id ORDER BY version DESC) = 1
-ORDER BY category, created_at DESC`;
+WITH g AS ${GUIDE_LIST},
+h AS (SELECT detail.to_guide::VARCHAR AS gid, count(*) AS n FROM ${L} WHERE kind = 'guide_link' GROUP BY ALL)
+SELECT g.id::VARCHAR AS guide_id, g.current_version::DOUBLE AS version, g.topic, g.category, i.class, i.pipeline, 'fixed' AS outcome,
+  i.incident_id::DOUBLE AS incident_id, g.title, g.description, coalesce(h.n, 0)::DOUBLE AS helpful,
+  epoch_ms(g.created_at)::DOUBLE AS created_ms, epoch_ms(g.updated_at)::DOUBLE AS updated_ms
+FROM g LEFT JOIN ${H}."incidents" i ON i.guide_id = g.id LEFT JOIN h ON h.gid = g.id::VARCHAR
+ORDER BY g.category, g.created_at DESC`;
 
 const LINKS_SQL = `
-SELECT from_guide_id::VARCHAR AS from_id, to_guide_id::VARCHAR AS to_id, to_version::DOUBLE AS to_version,
-  how_used, reason, incident_id::DOUBLE AS incident_id, epoch_ms(created_at)::DOUBLE AS created_ms
-FROM ${H}."guide_links" ORDER BY created_at`;
-
-const EVAL_SQL = `
-SELECT scenario, level, campaign, passed, coalesce(cost_usd, 0)::DOUBLE AS cost,
-  epoch_ms(started_at)::DOUBLE AS started_ms,
-  (epoch_ms(resolved_at) - epoch_ms(injected_at))::DOUBLE AS ttr_ms,
-  (epoch_ms(detected_at) - epoch_ms(injected_at))::DOUBLE AS ttd_ms,
-  scores::VARCHAR AS scores, array_to_string(coalesce(incident_ids, []), ',') AS incident_ids, notes,
-  (expected->>'category') AS exp_category, (observed->>'category') AS obs_category,
-  (expected->'classes')::VARCHAR AS exp_classes, (observed->>'cls') AS obs_class,
-  (count(*) OVER (PARTITION BY scenario, level))::DOUBLE AS runs,
-  (sum(CASE WHEN passed THEN 1 ELSE 0 END) OVER (PARTITION BY scenario, level))::DOUBLE AS passes
-FROM "heal_board"."eval"."scenario_runs"
-QUALIFY row_number() OVER (PARTITION BY scenario, level ORDER BY started_at DESC) = 1
-ORDER BY scenario, level`;
+SELECT detail.from_guide::VARCHAR AS from_id, detail.to_guide::VARCHAR AS to_id, detail.to_version::DOUBLE AS to_version,
+  verdict AS how_used, message AS reason, incident_id::DOUBLE AS incident_id, epoch_ms(ts)::DOUBLE AS created_ms
+FROM ${L} WHERE kind = 'guide_link' ORDER BY ts`;
 
 const ALERTS_SQL = `
-SELECT alert_id::DOUBLE AS id, epoch_ms(ts)::DOUBLE AS ts_ms, kind, severity, message, incident_id::DOUBLE AS incident_id, webhook_status
-FROM ${H}."alerts" WHERE ts > now() - INTERVAL 7 DAY ORDER BY ts DESC LIMIT 50`;
+SELECT (row_number() OVER (ORDER BY ts))::DOUBLE AS id, epoch_ms(ts)::DOUBLE AS ts_ms, detail.type::VARCHAR AS kind,
+  detail.severity::VARCHAR AS severity, message, incident_id::DOUBLE AS incident_id, verdict AS webhook_status
+FROM ${L} WHERE kind = 'alert' AND ts > now() - INTERVAL 7 DAY ORDER BY ts DESC LIMIT 50`;
 
+// The fix waiting on each incident (the latest one it had). Approve/Reject send INCIDENT_ID = <incident>:<n>.
 const PROPOSALS_SQL = `
-SELECT p.proposal_id::DOUBLE AS id, p.incident_id::DOUBLE AS incident_id, p.status, p.base_version::DOUBLE AS base_version,
-  p.shipped_version::DOUBLE AS shipped_version, p.diff, p.note, i.pipeline, i.title,
-  p.summary->>'root_cause' AS root_cause, p.summary->>'fix' AS fix, p.summary->>'tests' AS tests,
-  p.summary->'test_review'->>'verdict' AS test_verdict, p.summary->'test_review'->>'notes' AS test_notes,
-  p.summary->>'approver_notes' AS approver_notes, (p.summary->'drift')::VARCHAR AS drift, (p.summary->'checks')::VARCHAR AS checks,
-  (p.summary->'risk')::VARCHAR AS risk, (p.summary->'unseen_failures')::VARCHAR AS unseen, p.decided_by,
-  epoch_ms(p.created_at)::DOUBLE AS created_ms, epoch_ms(p.decided_at)::DOUBLE AS decided_ms
-FROM ${H}."proposals" p LEFT JOIN ${H}."incidents" i USING (incident_id)
-ORDER BY (p.status = 'pending') DESC, p.created_at DESC LIMIT 30`;
+SELECT (p->>'n')::DOUBLE AS id, i.incident_id::DOUBLE AS incident_id,
+  CASE WHEN i.status = 'deciding' THEN 'deciding' ELSE p->>'status' END AS status,
+  (p->>'base_version')::DOUBLE AS base_version, (p->>'shipped_version')::DOUBLE AS shipped_version, p->>'diff' AS diff, p->>'note' AS note,
+  i.pipeline, i.title, p->'summary'->>'root_cause' AS root_cause, p->'summary'->>'fix' AS fix, p->'summary'->>'tests' AS tests,
+  p->'summary'->'test_review'->>'verdict' AS test_verdict, p->'summary'->'test_review'->>'notes' AS test_notes,
+  p->'summary'->>'approver_notes' AS approver_notes, (p->'summary'->'drift')::VARCHAR AS drift, (p->'summary'->'checks')::VARCHAR AS checks,
+  (p->'summary'->'risk')::VARCHAR AS risk, (p->'summary'->'unseen_failures')::VARCHAR AS unseen, p->>'decided_by' AS decided_by,
+  epoch_ms(TRY_CAST(p->>'created_at' AS TIMESTAMPTZ))::DOUBLE AS created_ms, epoch_ms(TRY_CAST(p->>'decided_at' AS TIMESTAMPTZ))::DOUBLE AS decided_ms
+FROM (SELECT *, proposal::JSON AS p FROM ${H}."incidents" WHERE proposal IS NOT NULL) i
+ORDER BY (i.status IN ('proposed', 'deciding')) DESC, i.updated_at DESC LIMIT 30`;
 
+// The pool accounts are the agent:<name> leases; their shares are the owner's *_heal_agents shares.
 const AGENTS_SQL = `
-SELECT a.username, a.role, l.holder, l.run_number::DOUBLE AS run_number, epoch_ms(l.acquired_at)::DOUBLE AS since_ms,
+SELECT substr(l.name, 7) AS username, coalesce((SELECT arg_max(config::JSON->>'AGENT_ROLE', created_at) FROM ${H}."runs" WHERE kind = 'healer'),
+  'self_healing_pipeline_agent') AS role, l.holder, l.run_number::DOUBLE AS run_number, epoch_ms(l.acquired_at)::DOUBLE AS since_ms,
   (l.holder IS NOT NULL AND l.expires_at > now()) AS busy,
-  (SELECT string_agg(database_name || ' (' || share_name || ')', ', ') FROM ${H}."agent_shares") AS shares
-FROM ${H}."agent_accounts" a LEFT JOIN ${H}."leases" l ON l.name = 'agent:' || a.username
-ORDER BY a.username`;
+  (SELECT string_agg(name, ', ') FROM md_information_schema.owned_shares WHERE suffix(name, '_heal_agents')) AS shares
+FROM ${H}."leases" l WHERE l.name LIKE 'agent:%'
+ORDER BY l.name`;
 
 // ---------- healing DAG derivation ----------
 type Phase = 'repro' | 'investigate' | 'edit' | 'verify' | 'submit' | 'guard' | 'tests' | 'approver' | 'sync' | 'outcome';
@@ -1125,7 +1120,7 @@ function IncidentTable({ rows, selected, onSelect, now, limit }: { rows: Row[]; 
 			<table style={{ width: '100%', borderCollapse: 'collapse' }}>
 				<thead>
 					<tr>
-						{['#', 'Status', 'Incident', 'Category', 'Lvl', 'Pipelines', 'Ev', 'Att', 'Cost', 'Fix', 'Created'].map((h) => (
+						{['#', 'Status', 'Incident', 'Category', 'Pipeline', 'Ev', 'Att', 'Cost', 'Fix', 'Created'].map((h) => (
 							<th key={h} style={th}>
 								{h}
 							</th>
@@ -1141,7 +1136,6 @@ function IncidentTable({ rows, selected, onSelect, now, limit }: { rows: Row[]; 
 								<td style={{ ...td, fontWeight: 700 }}>{id}</td>
 								<td style={td}>
 									<IncPill status={S(r.status)} />
-									{B(r.muted) ? <div style={{ fontSize: 9, color: T.amber }}>muted</div> : null}
 								</td>
 								<td style={{ ...td, maxWidth: 260 }}>
 									<div style={{ fontWeight: 600 }}>{S(r.class) || '–'}</div>
@@ -1150,23 +1144,14 @@ function IncidentTable({ rows, selected, onSelect, now, limit }: { rows: Row[]; 
 									</div>
 								</td>
 								<td style={{ ...td, fontSize: 11 }}>{S(r.category) || '–'}</td>
-								<td style={td}>{S(r.level) || '–'}</td>
 								<td style={{ ...td, fontSize: 11 }}>
 									<b>{S(r.pipeline)}</b>
-									{S(r.pipelines)
-										.split(', ')
-										.filter((p) => p && p !== S(r.pipeline))
-										.map((p) => (
-											<div key={p} style={{ color: T.muted }}>
-												↳ {p}
-											</div>
-										))}
 								</td>
 								<td style={td}>{N(r.events)}</td>
 								<td style={td}>{N(r.attempts)}</td>
 								<td style={{ ...td, whiteSpace: 'nowrap' }}>{usd(N(r.cost))}</td>
 								<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11 }} onClick={(e) => e.stopPropagation()}>
-									{S(r.fix_sha) ? <span style={{ fontFamily: T.mono }}>{S(r.fix_sha).replace('flight-', '')}</span> : <span style={{ color: T.faint }}>–</span>}
+									{NN(r.fixed_version) ? <span style={{ fontFamily: T.mono }}>v{N(r.fixed_version)}</span> : <span style={{ color: T.faint }}>–</span>}
 								</td>
 								<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11, color: T.muted }} title={stamp(NN(r.created_ms))}>
 									{ago(NN(r.created_ms), now)}
@@ -1266,7 +1251,8 @@ function AttemptCard({
 	example?: boolean;
 }) {
 	const id = S(fr.fixer_run_id);
-	const running = S(fr.flight_status) === 'RUNNING' || (S(fr.flight_status) === 'PENDING' && !NN(fr.ended_ms));
+	// An attempt with an outcome row is finished, even if the runs snapshot still shows its healer run as running.
+	const running = !NN(fr.ended_ms) && ['RUNNING', 'PENDING'].includes(S(fr.flight_status));
 	const endMs = NN(fr.ended_ms);
 	const h = useMemo(() => buildHealing(actions, endMs), [actions, endMs]);
 	const outcome = S(fr.outcome);
@@ -1388,7 +1374,7 @@ function AlertsPanel({ now, onIncident }: { now: number; onIncident: (id: number
 			<SectionTitle
 				note={
 					<span>
-						heal.main.alerts · also posted to the heal_webhook secret's URL when set ·{' '}
+						heal.main.log (kind alert) · also posted to the heal_webhook secret's URL when set ·{' '}
 						<span style={linkStyle} onClick={() => setAll(!all)}>
 							{all ? 'last 24 h only' : `all ${rows.length} from 7 days`}
 						</span>
@@ -1449,14 +1435,14 @@ function DiffBlock({ diff }: { diff: string }) {
 	);
 }
 
-const PROP_COLOR: Record<string, string> = { pending: T.purple, shipped: T.green, rejected: T.gray, stale: T.orange };
+const PROP_COLOR: Record<string, string> = { pending: T.purple, deciding: T.blue, shipped: T.green, rejected: T.gray, stale: T.orange };
 function ProposalCard({ p, now, onDone, onIncident }: { p: Row; now: number; onDone: () => void; onIncident: (id: number) => void }) {
 	const pending = S(p.status) === 'pending';
 	const drift = parseList(p.drift);
 	return (
 		<div style={{ borderLeft: `3px solid ${PROP_COLOR[S(p.status)] ?? T.line}`, paddingLeft: 10, marginBottom: 16 }}>
 			<div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-				<b style={{ fontSize: 13 }}>Proposal #{N(p.id)}</b>
+				<b style={{ fontSize: 13 }}>Proposal {N(p.incident_id)}:{N(p.id)}</b>
 				<Pill label={S(p.status)} color={PROP_COLOR[S(p.status)] ?? T.gray} />
 				<span style={{ fontSize: 11, color: T.muted }}>
 					{S(p.pipeline)} · built on Flight version {N(p.base_version)} · {ago(NN(p.created_ms), now)}
@@ -1503,8 +1489,8 @@ function ProposalCard({ p, now, onDone, onIncident }: { p: Row; now: number; onD
 					</div>
 					<DiffBlock diff={S(p.diff)} />
 					<div className="flex flex-wrap items-center" style={{ gap: 12, marginTop: 8 }}>
-						<HealerButton label="Approve and ship" kind="primary" config={{ ACTION: 'approve', PROPOSAL_ID: String(N(p.id)) }} onDone={onDone} />
-						<HealerButton label="Reject" kind="danger" config={{ ACTION: 'reject', PROPOSAL_ID: String(N(p.id)) }} onDone={onDone} />
+						<HealerButton label="Approve and ship" kind="primary" config={{ ACTION: 'approve', INCIDENT_ID: `${N(p.incident_id)}:${N(p.id)}` }} onDone={onDone} />
+						<HealerButton label="Reject" kind="danger" config={{ ACTION: 'reject', INCIDENT_ID: `${N(p.incident_id)}:${N(p.id)}` }} onDone={onDone} />
 						<span style={{ fontSize: 10, color: T.muted }}>If the pipeline changed since this fix was tested, Approve does not ship it: the healer redoes it on the new version, runs every check and review again, and proposes it again.</span>
 					</div>
 				</>
@@ -1522,7 +1508,7 @@ function ApprovalsView({ now, onIncident, onChange }: { now: number; onIncident:
 	};
 	return (
 		<Section>
-			<SectionTitle note="heal.main.proposals · a fix that passed every check and review, waiting for a human (autonomy L3)">Fixes waiting for approval</SectionTitle>
+			<SectionTitle note="heal.main.incidents.proposal · a fix that passed every check and review, waiting for a human (autonomy L3)">Fixes waiting for approval</SectionTitle>
 			{q.isLoading && !q.data ? (
 				<Skeleton h={120} />
 			) : q.isError ? (
@@ -1575,8 +1561,9 @@ function AgentsPanel({ now }: { now: number }) {
 }
 
 const incProposalsSQL = (id: number) => `
-SELECT proposal_id::DOUBLE AS id, status, base_version::DOUBLE AS base_version, shipped_version::DOUBLE AS shipped_version, note
-FROM ${H}."proposals" WHERE incident_id = ${id} ORDER BY proposal_id DESC`;
+SELECT (p->>'n')::DOUBLE AS id, CASE WHEN status = 'deciding' THEN 'deciding' ELSE p->>'status' END AS status,
+  (p->>'base_version')::DOUBLE AS base_version, (p->>'shipped_version')::DOUBLE AS shipped_version, p->>'note' AS note
+FROM (SELECT status, proposal::JSON AS p FROM ${H}."incidents" WHERE incident_id = ${id} AND proposal IS NOT NULL)`;
 
 function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Row; now: number; onGuides: () => void; onApprovals: () => void; onChange: () => void }) {
 	const id = N(inc.id);
@@ -1607,16 +1594,15 @@ function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Ro
 				</h3>
 				<IncPill status={S(inc.status)} />
 				<span style={{ fontSize: 11, color: T.muted }}>
-					{S(inc.category)} · {S(inc.level) || 'no fixer level'} · {S(inc.severity)} · {S(inc.disposition)} · {N(inc.events)} events · {N(inc.attempts)} attempts · {usd(N(inc.cost))}
-					{S(inc.scenario) ? ` · test scenario ${S(inc.scenario)}` : ''}
+					{S(inc.category)} · {S(inc.disposition)} · {N(inc.events)} events · {N(inc.attempts)} attempts · {usd(N(inc.cost))}
 				</span>
 			</div>
 			<div style={{ fontSize: 12, color: T.text, marginTop: 2 }}>{S(inc.title)}</div>
 			<div className="flex flex-wrap" style={{ gap: 12, fontSize: 11, marginTop: 4, color: T.muted }}>
 				<span>
-					pipelines: <b style={{ color: T.text }}>{S(inc.pipelines) || S(inc.pipeline)}</b>
+					pipeline: <b style={{ color: T.text }}>{S(inc.pipeline)}</b>
 				</span>
-				{S(inc.fix_sha) ? <span style={{ fontFamily: T.mono }}>fix shipped as {S(inc.fix_sha)}</span> : null}
+				{NN(inc.fixed_version) ? <span style={{ fontFamily: T.mono }}>fix shipped as Flight version {N(inc.fixed_version)}</span> : null}
 				<span>green runs since the fix {N(inc.green_runs)}</span>
 				{NN(inc.root_id) ? <span>waits behind the fix for #{N(inc.root_id)}</span> : null}
 				<span>opened {stamp(NN(inc.created_ms))}</span>
@@ -1626,7 +1612,7 @@ function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Ro
 				<div className="flex flex-wrap items-center" style={{ gap: 10, fontSize: 11, marginTop: 6 }}>
 					{props.map((p) => (
 						<span key={N(p.id)}>
-							proposal #{N(p.id)} <Pill label={S(p.status)} color={PROP_COLOR[S(p.status)] ?? T.gray} /> {S(p.note) ? <span style={{ color: T.muted }}>{trunc(S(p.note), 120)}</span> : null}
+							proposal {id}:{N(p.id)} <Pill label={S(p.status)} color={PROP_COLOR[S(p.status)] ?? T.gray} /> {S(p.note) ? <span style={{ color: T.muted }}>{trunc(S(p.note), 120)}</span> : null}
 							{S(p.status) === 'pending' ? (
 								<span style={{ ...linkStyle, marginLeft: 6 }} onClick={onApprovals}>
 									review and approve
@@ -1648,12 +1634,12 @@ function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Ro
 			) : null}
 
 			<Section>
-				<SectionTitle note="incident_transitions">Lifecycle</SectionTitle>
+				<SectionTitle note="log rows of kind transition">Lifecycle</SectionTitle>
 				{transQ.isLoading && !transQ.data ? <Skeleton h={60} /> : transQ.isError ? <ErrorLine error={transQ.error} /> : <Lifecycle rows={rowsOf(transQ)} />}
 			</Section>
 
 			<Section>
-				<SectionTitle note="phases derived from actions; red arcs are fix loops, dashed arcs are revisits">Healing DAG per attempt</SectionTitle>
+				<SectionTitle note="phases derived from the log's fix steps; red arcs are fix loops, dashed arcs are revisits">Healing DAG per attempt</SectionTitle>
 				{fixQ.isLoading && !fixQ.data ? (
 					<Skeleton h={140} />
 				) : fixQ.isError ? (
@@ -1669,11 +1655,11 @@ function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Ro
 
 			<div className="grid grid-cols-2" style={{ gap: 20 }}>
 				<Section>
-					<SectionTitle note="events.attach_reason">Grouped events</SectionTitle>
+					<SectionTitle note="log rows of kind failure">Grouped events</SectionTitle>
 					{eventsQ.isLoading && !eventsQ.data ? <Skeleton h={60} /> : eventsQ.isError ? <ErrorLine error={eventsQ.error} /> : <EventGroups rows={rowsOf(eventsQ)} now={now} />}
 				</Section>
 				<Section>
-					<SectionTitle note="guide_index · guide_links · guide_reads">Memory</SectionTitle>
+					<SectionTitle note="MD_LIST_GUIDES · log rows guide, guide_link">Memory</SectionTitle>
 					{gQ.isLoading && !gQ.data ? (
 						<Skeleton h={40} />
 					) : gQ.isError ? (
@@ -1714,7 +1700,7 @@ function IncidentDetail({ inc, now, onGuides, onApprovals, onChange }: { inc: Ro
 
 			{fixers.some((f) => S(f.root_cause) || S(f.fix)) ? (
 				<Section>
-					<SectionTitle note="fixer_runs.summary">Fixer summary</SectionTitle>
+					<SectionTitle note="log: the attempt's summary">Fixer summary</SectionTitle>
 					{fixers.map((f) => (
 						<SummaryBlock key={S(f.fixer_run_id)} fr={f} />
 					))}
@@ -1848,95 +1834,6 @@ function MemoryView({ now }: { now: number }) {
 				) : null}
 			</Section>
 		</div>
-	);
-}
-
-function EvalView({ onIncident }: { onIncident: (id: number) => void }) {
-	const q = useSQLQuery(EVAL_SQL);
-	const rows = rowsOf(q);
-	const [cell, setCell] = useState('');
-	const scen = Array.from(new Set(rows.map((r) => S(r.scenario)))).sort();
-	const levels = ['L1', 'L2', 'L3', ...Array.from(new Set(rows.map((r) => S(r.level)))).filter((l) => !['L1', 'L2', 'L3'].includes(l))];
-	const at = (s: string, l: string) => rows.find((r) => S(r.scenario) === s && S(r.level) === l);
-	const picked = rows.find((r) => `${S(r.scenario)}|${S(r.level)}` === cell);
-	return (
-		<Section>
-			<SectionTitle note="latest run per scenario and level · eval.scenario_runs">Scenario × level</SectionTitle>
-			{q.isLoading && !q.data ? (
-				<Skeleton h={100} />
-			) : q.isError ? (
-				<ErrorLine error={q.error} />
-			) : !rows.length ? (
-				<Empty>No scenario runs yet.</Empty>
-			) : (
-				<>
-					<table style={{ borderCollapse: 'collapse' }}>
-						<thead>
-							<tr>
-								<th style={th}>Scenario</th>
-								{levels.map((l) => (
-									<th key={l} style={{ ...th, textAlign: 'center', minWidth: 120 }}>
-										{l}
-									</th>
-								))}
-							</tr>
-						</thead>
-						<tbody>
-							{scen.map((s) => (
-								<tr key={s}>
-									<td style={{ ...td, fontWeight: 700 }}>{s}</td>
-									{levels.map((l) => {
-										const r = at(s, l);
-										if (!r) return <td key={l} style={{ ...td, textAlign: 'center', color: T.faint }}>–</td>;
-										const ok = B(r.passed);
-										const k = `${s}|${l}`;
-										return (
-											<td key={l} style={{ ...td, textAlign: 'center', cursor: 'pointer', background: cell === k ? '#e9f2f8' : undefined }} onClick={() => setCell(cell === k ? '' : k)}>
-												<Pill label={ok ? 'pass' : 'fail'} color={ok ? T.green : T.red} />
-												<div style={{ fontSize: 10, color: T.muted }}>
-													{usd(N(r.cost))} · {fmtDur(NN(r.ttr_ms))}
-												</div>
-												<div style={{ fontSize: 9, color: T.faint }}>
-													{N(r.passes)}/{N(r.runs)} runs passed
-												</div>
-											</td>
-										);
-									})}
-								</tr>
-							))}
-						</tbody>
-					</table>
-					{picked ? (
-						<div style={{ marginTop: 10, fontSize: 11 }}>
-							<b>
-								{S(picked.scenario)} {S(picked.level)}
-							</b>{' '}
-							· campaign {S(picked.campaign)} · detect {fmtDur(NN(picked.ttd_ms))} · resolve {fmtDur(NN(picked.ttr_ms))} · incidents{' '}
-							{S(picked.incident_ids)
-								.split(',')
-								.filter(Boolean)
-								.map((i) => (
-									<span key={i} style={linkStyle} onClick={() => onIncident(Number(i))}>
-										#{i}{' '}
-									</span>
-								))}
-							<div className="flex flex-wrap" style={{ gap: 6, marginTop: 4 }}>
-								{parseList(picked.scores).map((s) => {
-									const [k, v] = s.split(': ');
-									return <Pill key={k} label={k} color={v === 'true' ? T.green : T.red} outline={v === 'true'} />;
-								})}
-							</div>
-							<div style={{ color: T.muted, marginTop: 4 }}>
-								expected {S(picked.exp_category) || '–'} / {parseList(picked.exp_classes).join(', ') || '–'} · observed {S(picked.obs_category) || '–'} / {S(picked.obs_class) || '–'}
-							</div>
-							{S(picked.notes) ? <div style={{ color: T.muted, marginTop: 4 }}>{S(picked.notes)}</div> : null}
-						</div>
-					) : (
-						<div style={{ fontSize: 11, color: T.muted, marginTop: 6 }}>Click a cell to see its checks.</div>
-					)}
-				</>
-			)}
-		</Section>
 	);
 }
 
@@ -2146,8 +2043,8 @@ function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: str
 const ARCH_SQL = `
 SELECT
   (SELECT count(*) FROM ${H}."incidents" WHERE status = 'resolved')::INT AS n_res,
-  (SELECT median(cost_usd) FROM ${H}."fixer_runs" WHERE outcome = 'merged' AND cost_usd > 0)::DOUBLE AS fix_cost,
-  (SELECT count(*) FROM ${H}."guide_index")::INT AS n_guides`;
+  (SELECT median(detail.cost_usd::DOUBLE) FROM ${L} WHERE kind = 'attempt' AND verdict = 'merged' AND detail.cost_usd::DOUBLE > 0)::DOUBLE AS fix_cost,
+  (SELECT count(*) FROM MD_LIST_GUIDES() WHERE topic LIKE 'self-healing/incidents/%')::INT AS n_guides`;
 
 function ArchHeader({ letter, title, sub, live }: { letter: string; title: string; sub: string; live: React.ReactNode }) {
 	return (
@@ -2583,7 +2480,7 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<rect x={240} y={326} width={480} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
 				<Ic I={Database} x={262} y={340} s={16} />
 				<Tx x={490} y={345} s={13} w={500} f="sans">
-					every step, alert and proposal is written to heal
+					every fact is appended to heal.log; incidents, runs and leases hold the current state
 				</Tx>
 			</Fig>
 
@@ -2981,8 +2878,7 @@ export default function SelfHealingBoard() {
 		return o;
 	}, [reg, runs]);
 	const selectedInc = incs.find((r) => N(r.id) === incSel) ?? incs[0];
-	const nEval = N(health.n_eval);
-	const tabs = ['overview', 'approvals', 'runs', 'incidents', 'memory', ...(nEval ? ['eval'] : []), 'archA', 'archB', 'archC'];
+	const tabs = ['overview', 'approvals', 'runs', 'incidents', 'memory', 'archA', 'archB', 'archC'];
 	const openIncident = (id: number) => {
 		setIncSel(id);
 		setTab('incidents');
@@ -3145,7 +3041,7 @@ export default function SelfHealingBoard() {
 							/>
 						)}
 						<div style={{ fontSize: 10, color: T.muted, marginTop: 4 }}>
-							Bars run from start to end (running bars extend to now, dashed line). Fixer bars open their incident. flight_runs keeps the last ~25 runs per Flight.
+							Bars run from start to end (running bars extend to now, dashed line). Fixer bars open their incident. heal.main.runs keeps the last ~25 runs per Flight.
 						</div>
 					</Section>
 					<Section>
@@ -3172,7 +3068,7 @@ export default function SelfHealingBoard() {
 													<td style={td}>{r.run}</td>
 													<td style={td}>
 														<RunPill status={r.status} />
-														{r.hbEnd ? <div style={{ fontSize: 9, color: T.muted }} title="flight_runs snapshot was taken mid-run; the heartbeat log shows this run finished">done per heartbeat</div> : null}
+														{r.hbEnd ? <div style={{ fontSize: 9, color: T.muted }} title="the runs snapshot was taken mid-run">done per heartbeat</div> : null}
 													</td>
 													<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11 }} title={stamp(r.started ?? r.created)}>
 														{stamp(r.started ?? r.created)} <span style={{ color: T.muted }}>({ago(r.started ?? r.created, now)})</span>
@@ -3246,7 +3142,6 @@ export default function SelfHealingBoard() {
 			) : null}
 
 			{tab === 'memory' ? <MemoryView now={now} /> : null}
-			{tab === 'eval' ? <EvalView onIncident={openIncident} /> : null}
 			{ARCH_SUB[tab] ? <ArchView which={tab} /> : null}
 		</main>
 	);
