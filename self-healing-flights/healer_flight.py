@@ -214,18 +214,24 @@ LOST = threading.Event()  # another run took the healer lease: stop coordinating
 
 
 def lease(name, ttl=LEASE_S):
+    # Take a free or expired lease. Never one this run already holds: two workers of one run must not share an agent
+    # account (they would share its uid, and each one's cleanup kills the other's processes). The name is reserved in
+    # HELD first, so two threads of this run cannot both take it.
+    with HELD_LOCK:
+        if name in HELD:
+            return False
+        HELD[name] = ttl
+    got = []
     try:
         db("INSERT OR IGNORE INTO heal.main.leases (name) VALUES (?)", [name])
-        got = db("""UPDATE heal.main.leases SET holder = ?, run_number = ?, renewed_at = now(), expires_at = now() + to_seconds(?),
-                      acquired_at = CASE WHEN holder IS DISTINCT FROM ? THEN now() ELSE acquired_at END
-                    WHERE name = ? AND (holder IS NULL OR holder = ? OR expires_at < now()) RETURNING holder""",
-                 [HOLDER, SELF_RUN, ttl, HOLDER, name, HOLDER])
+        got = db("""UPDATE heal.main.leases SET holder = ?, run_number = ?, renewed_at = now(), expires_at = now() + to_seconds(?), acquired_at = now()
+                    WHERE name = ? AND (holder IS NULL OR expires_at < now()) RETURNING holder""", [HOLDER, SELF_RUN, ttl, name])
     except duckdb.Error as e:  # another run updated the same lease at the same moment and won
         print(f"lease {name}: lost a race ({type(e).__name__})", flush=True)
-        return False
-    if got:
-        with HELD_LOCK:
-            HELD[name] = ttl
+    finally:
+        if not got:
+            with HELD_LOCK:
+                HELD.pop(name, None)
     return bool(got)
 
 
@@ -655,6 +661,10 @@ print("RESULT " + json.dumps(out, default=str))
 """
 
 
+class AgentError(RuntimeError):
+    """An agent account could not run something (its token, its connection, its clone): infrastructure, not the fix."""
+
+
 class Agent:
     """One pool service account, leased for one fix. Its SQL and pipeline runs use a short-lived token for that account,
     under that account's own uid, from a box the healer owns (the code) and a fresh home the uid owns (nothing else)."""
@@ -698,10 +708,10 @@ class Agent:
                       env=self.env({"HEAL_EXPECT_USER": self.name, "HEAL_STRICT": "1" if strict else "0"}))
         line = next((l for l in reversed(r.stdout.splitlines()) if l.startswith("RESULT ")), None)
         if not line:
-            raise RuntimeError(f"agent SQL as {self.name} failed: {(r.stderr or r.stdout)[-800:]}")
+            raise AgentError(f"agent SQL as {self.name} failed: {(r.stderr or r.stdout)[-800:]}")
         out = json.loads(line[7:])
         if strict and any("error" in o for o in out):
-            raise RuntimeError(f"agent SQL as {self.name}: {next(o['error'] for o in out if 'error' in o)}")
+            raise AgentError(f"agent SQL as {self.name}: {next(o['error'] for o in out if 'error' in o)}")
         return out
 
     def clone(self, dbs, refresh):
@@ -1182,7 +1192,7 @@ class Worker(threading.Thread):
                 self.finish("abandoned")
             else:
                 self.finish("queued", f"{e.why}; back in the queue", status="open")
-        except (requests.RequestException, duckdb.Error, OSError) as e:  # infrastructure, not the fix: retry later at no attempt's cost
+        except (requests.RequestException, duckdb.Error, OSError, AgentError) as e:  # infrastructure, not the fix: retry later at no attempt's cost
             traceback.print_exc()
             notify("infra", f"{self.pipeline}: incident #{self.id} hit an infrastructure error and goes back in the queue: {type(e).__name__}: {e}"[:600],
                    key=f"infra:{type(e).__name__}", cooldown_s=1800)
