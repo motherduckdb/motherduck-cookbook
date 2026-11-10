@@ -18,10 +18,11 @@ HEALER_CONFIG = {
     # The recipe's own pipelines are a demo, so they run fully autonomous. Leave AUTONOMY out (or set L3) for real
     # pipelines: then every fix waits for a human to approve it in the Dive.
     "AUTONOMY": "L1",
-    "AGENT_POOL_SIZE": "3", "GREEN_RUNS": "2", "MAX_ATTEMPTS": "2", "BUDGET_USD": "10", "APPROVER_ROUNDS": "2",
-    "MODEL": "~anthropic/claude-opus-latest", "APPROVER_MODEL": "~openai/gpt-sol-latest", "TEST_REVIEW_MODEL": "~openai/gpt-sol-latest",
-    "CLASSIFIER_MODEL": "~openai/gpt-luna-latest",
-    "CHECK_EVERY_S": "60", "NOTICE_EVERY_S": "60",
+    "AGENT_POOL_SIZE": "3",  # agent service accounts, created once as heal_agent_<owner>_1..n: the most fixes at once
+    "MODEL": "~anthropic/claude-opus-latest",  # the fixing agent
+    "REVIEW_MODEL": "~openai/gpt-sol-latest",  # the approver and the test-reviewer agent (another vendor on purpose)
+    "BUDGET_USD": "10",  # per incident
+    "DAILY_BUDGET_USD": "20",  # all fixes together, per UTC day
     "ACTION": "", "INCIDENT_ID": "",  # set per run by the Dive's Approve, Reject, Retry and test-alert buttons
 }
 FLIGHTS = {

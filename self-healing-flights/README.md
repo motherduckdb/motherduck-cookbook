@@ -51,7 +51,7 @@ its main loop makes progress. A run that hangs stops renewing; the next schedule
 | `incidents` | One row per incident: status, class, fingerprint, attempts, the shipped version and its Guide. The fix waiting for a human is a `proposal` VARIANT on the same row, so Approve claims it with one atomic `UPDATE ... WHERE status = 'proposed'`. |
 | `log` | Append-only, one row per fact: status transitions, failures, fix attempts and every step of a fix, costs, decisions, alerts, and which Guide helped. Kind-specific fields are in a `detail` VARIANT (`detail.usd::DOUBLE`). Counts such as an incident's failures or spend are sums over it, never stored copies. |
 | `runs` | The last runs of each Flight (for the Dive), and whether the healer has processed each one. |
-| `leases` | The `healer` lease, one `agent:<account>` lease per pool account, and the `kill_switch`. |
+| `leases` | The `healer` lease and one `agent:<account>` lease per pool account. |
 
 Guides live in MotherDuck itself (`MD_LIST_GUIDES`), and the agent accounts and shares are found by their names, so
 none of them needs a table. Avoid reading a VARIANT field through an index lookup: DuckDB 1.5.6 fails on it, which is
@@ -60,14 +60,13 @@ why `incidents` has no primary key (its sequence keeps ids unique) and `runs.con
 **Detection, even mid-fix.** The coordinator checks every finished pipeline run once per minute, also while
 fixes are running. A failure becomes an incident, or joins an open one with the same fingerprint (numbers,
 ids and hashes are masked first). `prompt_jev` classifies new incidents: fix, watch (a source outage) or
-escalate (credentials). When Jev is unsure (confidence below 0.8) or fails, an LLM classifies instead, with the log text fenced as data. An
-LLM answer that is not one of the classes is ignored, and if neither answers, the incident is a `code_bug` and gets a
-fix attempt. The incident's first transition records which path decided. A run that cannot be processed, for example because of a malformed `HEAL_EVENT`
-line, is retried for 30 minutes and then parked with a `dead_letter` alert. It never blocks later runs.
-Floods are capped:
-- at most 10 new incidents per pipeline per pass
-- a 45-second budget per pass
-- more than 5 new kinds of failure on one pipeline within an hour fold into one incident, with a `storm` alert
+escalate (credentials). When Jev is unsure (confidence below 0.8) or fails, an LLM classifies instead, with the
+log text fenced as data. An LLM answer that is not one of the classes is ignored, and if neither answers, the incident
+is a `code_bug` and gets a fix attempt. The incident's first transition records which path decided. A run that cannot
+be processed, for example because of a malformed `HEAL_EVENT` line, is retried for 30 minutes and then parked with a
+`dead_letter` alert. It never blocks later runs. Floods are capped by one rule: after 5 new kinds of failure on a
+pipeline within an hour, further ones fold into its newest open incident, with a `storm` alert. A pass reads at most
+the last 25 runs of each Flight, so it stays short however many runs fail.
 
 **Picking up new failures while an agent fixes.** Every new failure on the same pipeline, or on another
 pipeline with the same upstream, goes to the fixing agent's inbox. The inbox is a local SQLite file in WAL
@@ -130,7 +129,7 @@ and later fixes recall it.
 - **This recipe's demo runs at `AUTONOMY=L1`**: `deploy.py` sets it so the demo heals on its own. Remove it, or
   set `L3`, for real pipelines; then every fix waits in the Dive's Approvals tab.
 - **The role is organization-wide.** Every owner's agent accounts hold `self_healing_pipeline_agent`, so they can
-  read every share granted to it. Set `AGENT_ROLE` per owner or team to separate them.
+  read every share granted to it. To separate owners or teams, give each its own `ROLE` constant in `healer_flight.py`.
 - **Agent accounts and shares stay** after you delete the Flights. Remove them with
   `DELETE /v1/users/<name>` (REST API) and `DROP SHARE <db>_heal_agents`.
 - **The sandbox runs the healer's Python and packages, without the pipeline's secrets.** A failure that depends on either
@@ -152,13 +151,12 @@ and later fixes recall it.
 |---|---|---|
 | Pipelines to heal, their databases, protected lines, contract and drift check | `PIPELINES` in `healer_flight.py` | the two weather pipelines |
 | Autonomy: `L3` waits for Approve in the Dive, `L1` ships | Healer config `AUTONOMY` | `L3` in code; `L1` in this demo's `deploy.py` |
-| Agent pool size (= most fixes at once) and role | Healer config `AGENT_POOL_SIZE`, `AGENT_ROLE`, `AGENT_PREFIX` | `3`, `self_healing_pipeline_agent`, `heal_agent_<owner>_` |
-| Fixer, test-reviewer, approver and classifier models | Healer config `MODEL`, `TEST_REVIEW_MODEL`, `APPROVER_MODEL`, `CLASSIFIER_MODEL` | Claude Opus latest, GPT Sol latest, GPT Sol latest, GPT Luna latest |
-| Budget per incident; review rounds; attempts | Healer config `BUDGET_USD`, `APPROVER_ROUNDS`, `MAX_ATTEMPTS` | `10`, `2`, `2` |
-| Check interval while fixing; notices to an agent | Healer config `CHECK_EVERY_S`, `NOTICE_EVERY_S` (and `NOTICE_MAX_CHARS` in code) | `60`, `60` (`600`) |
-| Flood limits | `MAX_NEW_INCIDENTS_PER_CHECK`, `STORM_MAX_PER_HOUR`, `CHECK_BUDGET_S` | `10`, `5`, `45` |
-| Kill switch | A `kill_switch` row in `heal.main.leases` with a `holder`: `INSERT OR REPLACE INTO heal.main.leases (name, holder) VALUES ('kill_switch', 'your name')`; delete the row to turn it off | off |
-| Daily spend cap | Healer env `DAILY_BUDGET_USD` | `20` |
+| Agent pool size: service accounts `heal_agent_<owner>_1..n`, created once; the most fixes at once | Healer config `AGENT_POOL_SIZE` | `3` |
+| Models: the fixing agent; the approver and test reviewer (keep another vendor) | Healer config `MODEL`, `REVIEW_MODEL` | Claude Opus latest, GPT Sol latest |
+| Spend: per incident; all fixes per UTC day | Healer config `BUDGET_USD`, `DAILY_BUDGET_USD` | `10`, `20` |
+| Constants: agent role, fallback classifier, green runs to resolve, attempts, review rounds, merge loops, check and notice cadence, storm limit | Top of `healer_flight.py` (`ROLE`, `CLASSIFIER`, `GREEN_RUNS`, ...) | `self_healing_pipeline_agent`, GPT Luna latest, `2`, `2`, `2`, `3`, `60` s, `5` per hour |
+| Run deadline | The healer Flight's `max_runtime_sec`: it stops starting work 5 minutes before | `2700` s in `deploy.py` |
+| Kill switch | Pause the healer's schedule (`MD_UPDATE_FLIGHT(..., schedule_cron := '')`, or `deploy.py --no-schedules`) and cancel its running run (`MD_CANCEL_FLIGHT_RUN`). Interrupted fixes go back in the queue for the next run. | on schedule |
 | Alert webhook | Flight secret `heal_webhook` with key `WEBHOOK_URL` | none (alerts only in the Dive) |
 | Schedules | `deploy.py` (`--no-schedules` to skip) | healer every 5 min, pipelines hourly |
 

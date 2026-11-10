@@ -234,7 +234,6 @@ SELECT
   (SELECT count(*) FROM inc WHERE status = 'resolved')::INT AS n_res,
   (SELECT count(*) FROM inc)::INT AS n_all,
   (SELECT epoch_ms(max(renewed_at))::DOUBLE FROM ${H}."leases" WHERE name = 'healer') AS checker_ms,
-  coalesce((SELECT 'on (' || any_value(holder) || ')' FROM ${H}."leases" WHERE name = 'kill_switch' AND holder IS NOT NULL), 'off') AS kill_switch,
   (SELECT c->>'AUTONOMY' FROM cfg) AS autonomy,
   (SELECT c->>'DAILY_BUDGET_USD' FROM cfg) AS spend_cap,
   (SELECT count(*) FROM inc WHERE status = 'proposed')::INT AS n_pending,
@@ -375,8 +374,7 @@ ORDER BY (i.status IN ('proposed', 'deciding')) DESC, i.updated_at DESC LIMIT 30
 
 // The pool accounts are the agent:<name> leases; their shares are the owner's *_heal_agents shares.
 const AGENTS_SQL = `
-SELECT substr(l.name, 7) AS username, coalesce((SELECT arg_max(config::JSON->>'AGENT_ROLE', created_at) FROM ${H}."runs" WHERE kind = 'healer'),
-  'self_healing_pipeline_agent') AS role, l.holder, l.run_number::DOUBLE AS run_number, epoch_ms(l.acquired_at)::DOUBLE AS since_ms,
+SELECT substr(l.name, 7) AS username, 'self_healing_pipeline_agent' AS role, l.holder, l.run_number::DOUBLE AS run_number, epoch_ms(l.acquired_at)::DOUBLE AS since_ms,
   (l.holder IS NOT NULL AND l.expires_at > now()) AS busy,
   (SELECT string_agg(name, ', ') FROM md_information_schema.owned_shares WHERE suffix(name, '_heal_agents')) AS shares
 FROM ${H}."leases" l WHERE l.name LIKE 'agent:%'
@@ -1088,7 +1086,10 @@ function HealthStrip({ q, now }: { q: ReturnType<typeof useSQLQuery>; now: numbe
 	const r = rowsOf(q)[0] ?? {};
 	const hbMs = NN(r.checker_ms);
 	const hbStale = hbMs == null || now - hbMs > 2 * HB_EXPECTED_MIN * 60e3;
-	const kill = S(r.kill_switch);
+	// The kill switch is the healer's schedule: pause it (and cancel a running run) to stop everything.
+	const schedQ = useSQLQuery(`SELECT schedule_cron FROM MD_GET_FLIGHT(flight_id := '${HEALER_FLIGHT_ID}'::UUID)`, { enabled: DEPLOYED });
+	const cron = S(rowsOf(schedQ)[0]?.schedule_cron);
+	const sched = !DEPLOYED || schedQ.isError ? '' : schedQ.isLoading ? '…' : cron ? `healer schedule on (${cron})` : 'healer schedule off: paused';
 	const auto = S(r.autonomy);
 	const tiles: { label: string; value: string; color?: string; sub?: string }[] = [
 		{ label: 'Open', value: String(N(r.n_open)), color: N(r.n_open) ? T.red : undefined, sub: `${N(r.n_inv)} being fixed now` },
@@ -1097,7 +1098,7 @@ function HealthStrip({ q, now }: { q: ReturnType<typeof useSQLQuery>; now: numbe
 		{ label: 'Escalated', value: String(N(r.n_esc)), color: N(r.n_esc) ? T.orange : undefined, sub: 'need a human (Retry in the incident)' },
 		{ label: 'Healer heartbeat', value: hbMs == null ? 'no heartbeat' : ago(hbMs, now), color: hbStale ? T.red : T.green, sub: hbStale ? `silent for over ${2 * HB_EXPECTED_MIN} min: is the schedule on?` : 'runs every 5 min; checks every minute while fixing' },
 		{ label: 'Agent accounts busy', value: `${N(r.n_agents_busy)} / ${N(r.n_agents) || '–'}`, color: N(r.n_agents_busy) ? T.blue : undefined, sub: 'one fix per service account' },
-		{ label: 'Alerts, last 24 h', value: String(N(r.n_alerts)), color: N(r.n_alerts) ? T.red : T.green, sub: kill && kill !== 'off' ? `kill switch ${kill}` : 'kill switch off' },
+		{ label: 'Alerts, last 24 h', value: String(N(r.n_alerts)), color: N(r.n_alerts) ? T.red : T.green, sub: sched || undefined },
 		{ label: 'Fixer spend today', value: usd(N(r.spend_today)), sub: r.spend_cap ? `cap $${S(r.spend_cap)} (UTC day)` : 'UTC day' },
 	];
 	return (
