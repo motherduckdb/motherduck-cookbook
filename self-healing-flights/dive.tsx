@@ -826,7 +826,6 @@ type RunRow = {
 	mode: string;
 	attempt: string;
 	outcome: string;
-	hbEnd: number | null;
 };
 
 function Sparkline({ runs, x, y }: { runs: RunRow[]; x: number; y: number }) {
@@ -919,7 +918,7 @@ function PipelineDag({
 					{name}
 				</text>
 				<text x={x + 12} y={y + 30} fontSize={10} fill={last ? runColor(last.status) : T.muted}>
-					{trunc(last ? `${last.hbEnd ? 'done (heartbeat)' : last.status.toLowerCase()} · run ${last.run} · ${ago(last.ended ?? last.hbEnd ?? last.started ?? last.created, now)}` : 'no runs in snapshot', Math.floor((w - 16) / 4.9))}
+					{trunc(last ? `${last.status.toLowerCase()} · run ${last.run} · ${ago(last.ended ?? last.started ?? last.created, now)}` : 'no runs in snapshot', Math.floor((w - 16) / 4.9))}
 				</text>
 				{!small ? <Sparkline runs={runs.slice(-15)} x={x + 12} y={y + 40} /> : null}
 				{badge ? (
@@ -1053,7 +1052,7 @@ function Gantt({
 					const i = order.indexOf(r.component);
 					if (i < 0) return null;
 					const a = r.started ?? r.created ?? now;
-					const b = r.ended ?? (r.status === 'RUNNING' ? r.hbEnd ?? now : a);
+					const b = r.ended ?? (r.status === 'RUNNING' ? now : a);
 					if (b < t0 || a > t1) return null;
 					const x1 = Math.max(labelW, sx(a));
 					const x2 = Math.min(labelW + plotW, sx(b));
@@ -1072,7 +1071,7 @@ function Gantt({
 							style={{ cursor: 'pointer' }}
 							onClick={() => onSelect(r)}
 						>
-							<title>{`${r.component} run ${r.run}: ${r.status}\n${stamp(a)} · ${fmtDur((r.ended ?? (r.status === 'RUNNING' ? r.hbEnd ?? now : null) ?? a) - a)}${r.incident ? `\nincident #${r.incident}${r.incExists ? '' : ' (not in table)'}` : ''}${r.sha ? `\nsha ${r.sha.slice(0, 12)}` : ''}`}</title>
+							<title>{`${r.component} run ${r.run}: ${r.status}\n${stamp(a)} · ${fmtDur((r.ended ?? (r.status === 'RUNNING' ? now : null) ?? a) - a)}${r.incident ? `\nincident #${r.incident}${r.incExists ? '' : ' (not in table)'}` : ''}${r.sha ? `\nsha ${r.sha.slice(0, 12)}` : ''}`}</title>
 						</rect>
 					);
 				})}
@@ -2187,7 +2186,7 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				{[
 					{ I: Lock, n: 'Lease', a: 'one coordinator', b: 'run at a time' },
 					{ I: Search, n: 'Check', a: 'every minute,', b: 'even mid-fix' },
-					{ I: Sparkles, n: 'Classify', a: 'Jev: new or', b: 'known incident?' },
+					{ I: Sparkles, n: 'Classify', a: 'Jev, or an LLM', b: 'if Jev is unsure' },
 					{ I: Wrench, n: 'Fix', a: 'an agent account', b: 'per incident' },
 					{ I: UserCheck, n: 'Review', a: 'checks, tests,', b: 'approver' },
 					{ I: Rocket, n: 'Ship', a: 'merge, retest,', b: 'propose or ship' },
@@ -2334,7 +2333,7 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const cols = [
 		{ I: Lock, n: 'Lease', chips: ['one coordinator', 'cancel stuck runs', 'heartbeat'] },
 		{ I: Search, n: 'Check', chips: ['every minute', 'each run once', 'park bad runs'] },
-		{ I: Sparkles, n: 'Classify', chips: ['fingerprint', 'ask Jev the class', 'open or attach'] },
+		{ I: Sparkles, n: 'Classify', chips: ['fingerprint', 'Jev, else an LLM', 'open or attach'] },
 		{ I: Wrench, n: 'Fix', chips: ['agent account', 'clone a share', 'forward failures'] },
 		{ I: UserCheck, n: 'Review', chips: ['healer checks', 'test reviewer', 'approver'] },
 		{ I: Rocket, n: 'Ship', chips: ['merge if moved', 'retest, recheck', 'propose or ship'] },
@@ -2440,7 +2439,7 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				</Tx>
 			</Fig>
 
-			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="A run takes the healer lease, or exits because a live run holds it. It checks for failures every minute, even while fixes run, and hands each incident to a worker with its own agent account. A heartbeat renews the lease only while the run makes progress, so a stuck run is cancelled by the next one and an alert goes out.">
+			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="A run takes the healer lease, or exits because a live run holds it. It checks for failures every minute, even while fixes run. Jev classifies each new failure, and an LLM decides when Jev is unsure; the healer then hands each incident to a worker with its own agent account. A heartbeat renews the lease only while the run makes progress, so a stuck run is cancelled by the next one and an alert goes out.">
 				<Defs p="b2" />
 				<Card x={20} y={36} w={920} h={344} r={22} />
 				<rect x={20} y={12} width={250} height={34} rx={10} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
@@ -2478,8 +2477,8 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 					);
 				})}
 				<path d="M50 340 L910 340" stroke={A.sky} strokeWidth={3} className="ax-march" fill="none" />
-				<rect x={240} y={326} width={480} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
-				<Ic I={Database} x={262} y={340} s={16} />
+				<rect x={140} y={326} width={680} height={28} rx={14} fill={A.white} stroke={A.ink} strokeWidth={1.5} />
+				<Ic I={Database} x={164} y={340} s={16} />
 				<Tx x={490} y={345} s={13} w={500} f="sans">
 					every fact is appended to heal.log; incidents, runs and leases hold the current state
 				</Tx>
@@ -2652,7 +2651,7 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				sub="An incident as a state machine, a healer run as a timeline, and how it all adds up over time."
 				live={<LiveChip q={q} value={(r) => (N(r.n_guides) ? String(N(r.n_guides)) : null)} label="Guides written to memory" />}
 			/>
-			<Fig n="C1" title="Every incident is a little state machine" h={410} caption="Most incidents walk the middle path. Blips are only watched; at autonomy L3 a reviewed fix waits as proposed until you approve it; an escalated incident waits for a human, who can Retry it from the Dive; and a failure after a fix reopens the incident.">
+			<Fig n="C1" title="Every incident is a little state machine" h={410} caption="Most incidents walk the middle path. Blips are only watched; at autonomy L3 a reviewed fix waits as proposed until you Approve or Reject it; an escalated incident waits for a human, who can Retry it from the Dive; and a failure after a fix reopens the incident.">
 				<Defs p="c1" />
 				<Tok d="M110 190 L900 190" c={A.white} r={9} dur={8} />
 				{[
@@ -2696,6 +2695,11 @@ function ArchC({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				</Tx>
 				<Tx x={500} y={356} s={12} w={500} f="sans">
 					L3: waits for Approve
+				</Tx>
+				<StatePill cx={735} cy={312} w={150} fill={A.white} label="rejected" />
+				<Edge p="c1" d="M590 312 L654 312" />
+				<Tx x={735} y={356} s={12} w={500} f="sans">
+					Reject · Retry
 				</Tx>
 
 				<path d="M860 220 L860 380 Q 860 395 845 395 L 95 395 Q 80 395 80 380 L80 228" fill="none" stroke={A.coral} strokeWidth={2.5} strokeDasharray="7 7" markerEnd="url(#c1-ah)" />
@@ -2863,7 +2867,6 @@ export default function SelfHealingBoard() {
 				mode: S(r.mode),
 				attempt: S(r.attempt),
 				outcome: S(r.outcome),
-				hbEnd: NN(r.hb_end_ms),
 			})),
 		[runsQ.data],
 	);
@@ -2961,7 +2964,7 @@ export default function SelfHealingBoard() {
 						) : runsQ.isError ? (
 							<ErrorLine error={runsQ.error} />
 						) : !reg.length ? (
-							<Empty>pipeline_registry is empty.</Empty>
+							<Empty>No pipeline runs yet.</Empty>
 						) : (
 							<PipelineDag reg={reg} runsBy={runsBy} now={now} onOpen={openRuns} onIncident={openIncident} />
 						)}
@@ -3062,14 +3065,13 @@ export default function SelfHealingBoard() {
 									<tbody>
 										{filtered.slice(0, 80).map((r) => {
 											const key = `${r.component}#${r.run}`;
-											const dur = r.started != null ? (r.ended ?? (r.status === 'RUNNING' ? r.hbEnd ?? now : null) ?? r.started) - r.started : null;
+											const dur = r.started != null ? (r.ended ?? (r.status === 'RUNNING' ? now : null) ?? r.started) - r.started : null;
 											return (
 												<tr key={key} style={{ background: selRun === key ? '#e9f2f8' : undefined }} onClick={() => setSelRun(key)}>
 													<td style={{ ...td, fontWeight: 600 }}>{r.component}</td>
 													<td style={td}>{r.run}</td>
 													<td style={td}>
 														<RunPill status={r.status} />
-														{r.hbEnd ? <div style={{ fontSize: 9, color: T.muted }} title="the runs snapshot was taken mid-run">done per heartbeat</div> : null}
 													</td>
 													<td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11 }} title={stamp(r.started ?? r.created)}>
 														{stamp(r.started ?? r.created)} <span style={{ color: T.muted }}>({ago(r.started ?? r.created, now)})</span>

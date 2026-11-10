@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS heal.main.runs (
     checked VARCHAR, check_attempts INTEGER DEFAULT 0, check_error VARCHAR, first_checked_at TIMESTAMPTZ, updated_at TIMESTAMPTZ,
     PRIMARY KEY (flight_id, run_number)
 );
--- Leases: 'healer' (the one run that checks and fixes), 'agent:<account>' (one fix per agent service account), and
--- 'kill_switch' (on while a human holds it: holder is who turned it on).
+-- Leases: 'healer' (the one run that checks and fixes) and 'agent:<account>' (one fix per agent service account).
+-- A lease is renewed only while its run makes progress, so a stuck run's lease expires and the next run takes over.
 CREATE TABLE IF NOT EXISTS heal.main.leases (
     name VARCHAR PRIMARY KEY, holder VARCHAR, run_number BIGINT, acquired_at TIMESTAMPTZ, renewed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ
 );
