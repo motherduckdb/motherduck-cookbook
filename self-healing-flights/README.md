@@ -157,11 +157,17 @@ work from a fresh service account.
    CREATE OR REPLACE SECRET openrouter IN motherduck (TYPE flights, PARAMS MAP {'OPENROUTER_API_KEY': getenv('OPENROUTER_API_KEY')});
    ```
 
-   Optional: alerts to Slack (or anything that accepts a Slack-style `{"text": ...}` POST):
+   Optional: alerts to Slack. Create a Slack app with an incoming webhook for your alerts channel (api.slack.com/apps,
+   then Incoming Webhooks, then Add New Webhook). Store its URL as a secret; put it in the environment without echoing
+   it (`read -s HEAL_WEBHOOK_URL && export HEAL_WEBHOOK_URL`). Any endpoint that accepts a Slack-style `{"text": ...}`
+   POST works too.
 
    ```sql
    CREATE OR REPLACE SECRET heal_webhook IN motherduck (TYPE flights, PARAMS MAP {'WEBHOOK_URL': getenv('HEAL_WEBHOOK_URL')});
    ```
+
+   Deploy (step 2) after creating it, so the healer Flight gets the secret. Then **Send a test alert** in the Dive's
+   Alerts panel; the healer run fails if the webhook does not accept it.
 
 ### Deploy as a Flight
 

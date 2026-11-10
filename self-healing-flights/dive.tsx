@@ -1397,6 +1397,9 @@ function AlertsPanel({ now, onIncident }: { now: number; onIncident: (id: number
 			>
 				Alerts
 			</SectionTitle>
+			<div style={{ marginBottom: 6 }}>
+				<HealerButton label="Send a test alert" config={{ ACTION: 'test_alert' }} onDone={() => q.refetch()} />
+			</div>
 			{q.isLoading && !q.data ? (
 				<Skeleton h={40} />
 			) : q.isError ? (

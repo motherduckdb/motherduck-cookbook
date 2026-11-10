@@ -78,7 +78,7 @@ T0 = time.time()
 DEADLINE = T0 + int(E("RUNTIME_CAP_S") or 2400)  # keep below the Flight's max_runtime_sec
 CHECK_EVERY, NOTICE_EVERY, NOTICE_MAX = int(E("CHECK_EVERY_S") or 60), int(E("NOTICE_EVERY_S") or 60), int(E("NOTICE_MAX_CHARS") or 600)
 MAX_NEW, MAX_SYNC, TURN_S = int(E("MAX_NEW_INCIDENTS_PER_CHECK") or 10), int(E("MAX_SYNC_LOOPS") or 3), int(E("TURN_TIMEOUT_S") or 1200)
-STALL_S, LEASE_S, STALE_S = 60 * int(E("STALL_MINUTES") or 10), 180, 90
+STALL_S, LEASE_S = 60 * int(E("STALL_MINUTES") or 10), 180
 MODEL, APPROVER = E("MODEL") or "~anthropic/claude-opus-latest", E("APPROVER_MODEL") or "~openai/gpt-sol-latest"
 TEST_REVIEWER, CHEAP = E("TEST_REVIEW_MODEL") or APPROVER, E("CLASSIFIER_MODEL") or "~openai/gpt-luna-latest"
 OPENCODE = ("2.2.5", {"x64": "09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e",
@@ -90,7 +90,6 @@ SELF_RUN = int(E("MOTHERDUCK_FLIGHT_RUN_NUMBER") or 0)
 HOLDER = f"run{SELF_RUN}-{secrets.token_hex(3)}"
 ACTION, PROPOSAL_ID, INCIDENT_ID = (E("ACTION") or "").strip().lower(), (E("PROPOSAL_ID") or "").strip(), (E("INCIDENT_ID") or "").strip()
 API = "https://api.motherduck.com/v1"
-NOBODY = 65534
 HOW_USED = ("reused_fix", "same_root_cause", "pointed_to_location", "ruled_out_hypothesis")
 CLASSES = {
     "schema_drift": ("schema-and-contract", "fix", "The source changed the shape of its data (a field renamed, dropped or changed type, e.g. a number became an object); shows up as cast errors or NULLs after parsing"),
@@ -168,10 +167,11 @@ def notify(kind, message, key=None, incident_id=None, severity="warn", cooldown_
     # Every alert lands in heal.main.alerts (the Dive shows them); with a heal_webhook secret it is also posted there.
     # Never raises: alerting must not be what takes the healer down.
     print(f"ALERT {severity} {kind}: {message}", flush=True)
+    status = "not sent"
     try:
         key = key or f"{kind}:{incident_id}"
         if db("SELECT 1 FROM heal.main.alerts WHERE dedupe_key = ? AND ts > now() - to_seconds(?)", [key, cooldown_s]):
-            return
+            return "deduplicated"
         status = "no webhook"
         if WEBHOOK:
             try:
@@ -183,6 +183,7 @@ def notify(kind, message, key=None, incident_id=None, severity="warn", cooldown_
            [kind, severity, key, message[:2000], incident_id, SELF_RUN, status])
     except Exception as e:
         print(f"could not record the alert: {type(e).__name__}: {e}", flush=True)
+    return status
 
 
 HELD, HELD_LOCK = {}, threading.Lock()  # leases this run holds, renewed by the heartbeat while the run makes progress
@@ -1610,13 +1611,24 @@ def retry(inc):
     transition(int(inc), "open", f"{this_run()[2]} asked for a retry in the Dive", attempts=0, disposition="fix")
 
 
+def test_alert():
+    # The Dive's "Send a test alert" button: one alert through the normal path. The run fails if the webhook rejects it.
+    status = notify("test", f"Test alert from the self-healing healer of {OWNER} (run {SELF_RUN}, started by {this_run()[2]}). "
+                    "If you can read this, alerts reach you.", key=f"test:{SELF_RUN}:{secrets.token_hex(3)}", severity="info", cooldown_s=0)
+    print(f"test alert: webhook {status}", flush=True)
+    if not status.startswith("2"):
+        sys.exit(f"the test alert was recorded, but the webhook did not accept it ({status}); check the heal_webhook secret")
+
+
 def decide(action, pid):
     # The Dive's Approve / Reject buttons run this Flight with ACTION and PROPOSAL_ID. The proposal is claimed atomically
     # (pending -> deciding), so two clicks, or an Approve and a Reject at once, act only once.
     if action == "retry":
         return retry(INCIDENT_ID)
+    if action == "test_alert":
+        return test_alert()
     if action not in ("approve", "reject") or not re.fullmatch(r"[0-9]{1,12}", pid):
-        sys.exit(f"ACTION must be approve, reject or retry, with PROPOSAL_ID (or INCIDENT_ID) a number (got {action!r}, {pid!r})")
+        sys.exit(f"ACTION must be approve, reject, retry or test_alert, with PROPOSAL_ID (or INCIDENT_ID) a number (got {action!r}, {pid!r})")
     if action == "approve" and CTL.get("kill_switch") == "on":
         sys.exit("the kill switch is on: nothing ships until it is off")
     who = this_run()[2]
