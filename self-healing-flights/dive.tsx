@@ -2185,37 +2185,36 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 			<Fig n="A2" title="What one healer Flight does" h={290}>
 				<Defs p="a2" />
 				{[
-					{ I: Lock, n: 'Lease', a: 'one coordinator', b: 'run at a time' },
-					{ I: Search, n: 'Check', a: 'every minute,', b: 'even mid-fix' },
-					{ I: Sparkles, n: 'Classify', a: 'Jev, or an LLM', b: 'if Jev is unsure' },
-					{ I: Wrench, n: 'Fix', a: 'an agent account', b: 'per incident' },
-					{ I: UserCheck, n: 'Review', a: 'checks, tests,', b: 'approver' },
-					{ I: Rocket, n: 'Ship', a: 'merge, retest,', b: 'propose or ship' },
-					{ I: BookOpen, n: 'Learn', a: 'a Guide with', b: 'a code snippet' },
+					{ I: Sparkles, n: 'Classify', sub: ['Group errors into', 'incidents with Jev', 'and an LLM'] },
+					{ I: Database, n: 'Clone', sub: ['Zero-copy clone data', 'into separate', 'MotherDuck compute'] },
+					{ I: Wrench, n: 'Fix', sub: ['An OpenCode agent', 'per incident'] },
+					{ I: UserCheck, n: 'Review', sub: ['Independent', 'reviewer approves'] },
+					{ I: Rocket, n: 'Ship', sub: ['merge, retest,', 'propose or ship'] },
+					{ I: BookOpen, n: 'Learn', sub: ['a Guide with', 'a code snippet'] },
 				].map((s, i, all) => {
-					// Seven equal boxes across the 900px row, 13px apart
-					const x = 45 + i * 128;
+					// Six equal 136px boxes across the 900px row (45 to 945), 16.8px apart
+					const w = 136;
+					const x = 45 + i * 152.8;
 					return (
 						<g key={s.n}>
-							<Card x={x} y={40} w={115} h={160} cls="ax-lit" style={lit(A.white, 0.32 + i * 1.14)} />
-							<Ic I={s.I} x={x + 57.5} y={82} s={30} />
-							<Tx x={x + 57.5} y={136} s={18}>
+							<Card x={x} y={40} w={w} h={172} cls="ax-lit" style={lit(A.white, 0.41 + i * 1.36)} />
+							<Ic I={s.I} x={x + w / 2} y={82} s={30} />
+							<Tx x={x + w / 2} y={136} s={18}>
 								{s.n}
 							</Tx>
-							<Tx x={x + 57.5} y={160} s={11.5} w={400} f="sans">
-								{s.a}
-							</Tx>
-							<Tx x={x + 57.5} y={177} s={11.5} w={400} f="sans">
-								{s.b}
-							</Tx>
-							{i < all.length - 1 ? <Edge p="a2" d={`M${x + 119} 120 L${x + 126} 120`} /> : null}
+							{s.sub.map((line, j) => (
+								<Tx key={j} x={x + w / 2} y={160 + j * 17} s={11.5} w={400} f="sans">
+									{line}
+								</Tx>
+							))}
+							{i < all.length - 1 ? <Edge p="a2" d={`M${x + w + 3} 120 L${x + 150.8} 120`} /> : null}
 						</g>
 					);
 				})}
 				<path d="M45 232 L945 232 Q 960 232 960 248 L960 256 Q 960 272 945 272 L60 272 Q 45 272 45 256 L45 232" fill="none" stroke={A.ink} strokeWidth={2} className="ax-march" opacity={0.5} />
-				<rect x={270} y={260} width={420} height={24} fill={A.paper} />
+				<rect x={265} y={260} width={430} height={24} fill={A.paper} />
 				<Tx x={480} y={277} s={13} w={500} f="sans">
-					a new run every 5 minutes · a check every minute while fixing
+					Run every 5 minutes. Check for new errors every 1 minute
 				</Tx>
 				<Tok d="M45 232 L945 232" c={A.yellow} dur={8} r={9} />
 			</Fig>
