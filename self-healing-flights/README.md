@@ -196,7 +196,9 @@ work from a fresh service account.
    ```
 
    Only the deploying account sees the Dive's data. To let others in your organization see it, add `--share-org`:
-   it creates `heal_board`, an organization share of `heal`, and points the Dive at it. Later deploys keep using that
+   it creates `heal_board`, an organization share of `heal`, and points the Dive at it (both its `required_resources`
+   and the `REQUIRED_DATABASES` export in its code: viewers other than the owner are warned about "Unshared databases"
+   whenever the code still declares a plain `database`). Later deploys keep using that
    share without the flag; `DROP SHARE heal_board` and a redeploy make the Dive private again.
 
 3. Break a pipeline on purpose. This makes the weather API send a new payload shape (DuckDB 1.5.6 or later, connected as the owner):

@@ -25,6 +25,7 @@ import {
 	Wrench,
 } from 'lucide-react';
 
+// deploy.py --share-org rewrites this entry to the heal_board organization share, so viewers other than the owner see the data.
 export const REQUIRED_DATABASES = [
 	{ type: 'database', path: 'md:heal', alias: 'heal_board' },
 ];

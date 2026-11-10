@@ -82,14 +82,21 @@ for name in PIPELINES:
 title = "Self-healing Flights"
 # The Dive's Approve / Reject buttons run the healer Flight, whose id is written into the Dive's code.
 content = (HERE / "dive.tsx").read_text().replace("__HEALER_FLIGHT_ID__", ids["heal-demo-healer"])
-# Dives must list their databases explicitly; the REQUIRED_DATABASES export in the code is not enough. By default the
-# Dive reads this account's own heal database, so only this account sees its data. With --share-org, the Dive reads
-# heal_board, an organization share of heal; once that share exists every later deploy keeps using it (pass nothing
-# extra), and DROP SHARE heal_board then a redeploy makes the Dive private again.
+# By default the Dive reads this account's own heal database, so only this account sees its data. With --share-org,
+# the Dive reads heal_board, an organization share of heal; once that share exists every later deploy keeps using it
+# (pass nothing extra), and DROP SHARE heal_board then a redeploy makes the Dive private again.
 share = con.execute("SELECT url FROM md_information_schema.owned_shares WHERE name = 'heal_board'").fetchone()
 if SHARE_ORG and not share:
     share = con.execute("CREATE SHARE heal_board FROM heal (ACCESS ORGANIZATION, VISIBILITY DISCOVERABLE, UPDATE AUTOMATIC)").fetchone()
     print(f"created organization share {share[0]} of heal for the Dive")
+# The database must be named twice, the same way: in the Dive's required_resources (which the server attaches), and in
+# the REQUIRED_DATABASES export of its code, which the viewer checks. A 'database' entry warns everyone but the owner
+# ("Unshared databases"), so with a share both must say 'share'.
+if share:
+    default = "{ type: 'database', path: 'md:heal', alias: 'heal_board' }"
+    if default not in content:
+        sys.exit("dive.tsx: REQUIRED_DATABASES no longer has the md:heal entry deploy.py rewrites for the share")
+    content = content.replace(default, f"{{ type: 'share', path: '{share[0]}', alias: 'heal_board' }}")
 resources = f"[{{'url': '{share[0] if share else 'md:heal'}', 'alias': 'heal_board'}}]"
 dive = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [title]).fetchone()
 if dive:
