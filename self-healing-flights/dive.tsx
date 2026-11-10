@@ -2041,6 +2041,175 @@ function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: str
 	);
 }
 
+// A3: four failed runs flow into Classify, which buckets them into two incidents; each incident gets a clone and a fixer,
+// and both fixes converge on the reviewer, then ship and learn.
+function FlowA3() {
+	const C = { x: 262, y: 175, r: 58 };
+	const lanes = [95, 255];
+	const edgeAt = (x: number, y: number) => {
+		const dx = x - C.x;
+		const dy = y - C.y;
+		const d = Math.hypot(dx, dy);
+		return [Math.round((C.x + (dx / d) * C.r) * 10) / 10, Math.round((C.y + (dy / d) * C.r) * 10) / 10];
+	};
+	const errs = [
+		{ y: 55, p: 'weather', lane: 0 },
+		{ y: 135, p: 'weather', lane: 0 },
+		{ y: 215, p: 'hourly', lane: 1 },
+		{ y: 295, p: 'weather', lane: 0 },
+	];
+	const CYCLE = 6;
+	const outPath = (L: number) => {
+		const [ox, oy] = edgeAt(372, L);
+		return { start: [ox, oy], d: `M${ox} ${oy} Q 342 ${L} 366 ${L}`, tail: `Q 342 ${L} 366 ${L}` };
+	};
+	const inPath = (y: number) => {
+		const [bx, by] = edgeAt(150, y);
+		return { end: [bx, by], d: `M150 ${y} Q 182 ${y} ${bx} ${by}` };
+	};
+	// Each error arrives in its incident at ~92% of its cycle; that incident's dot pops then.
+	const delayOf = (i: number) => i * 1.5;
+	const popDelay = (i: number) => delayOf(i) + CYCLE * 0.92 - CYCLE * 0.03;
+	const dotsByLane = lanes.map((_, li) => errs.map((e, i) => ({ e, i })).filter((x) => x.e.lane === li));
+	const review = { x: 816, y: 120, w: 138, h: 108 };
+	const rc = review.x + review.w / 2;
+	const enter = [155, 193];
+	return (
+		<Fig
+			n="A3"
+			title="Four errors, two incidents, fixed side by side"
+			y0={10}
+			h={390}
+			caption="Jev groups failed runs into incidents, and an LLM decides when Jev is unsure. Each incident gets its own agent service account with a zero-copy clone of the data on separate MotherDuck compute, and an OpenCode fixer. Every fix passes the healer's checks, an independent test reviewer and an approver, then waits for your Approve (L3, the default) or ships at once (L1). Once the fix runs green, the healer writes a Guide."
+		>
+			<Defs p="a3" />
+			<Tx x={88} y={26} s={12} w={500} f="sans" c={A.muted}>
+				4 failed runs
+			</Tx>
+			{errs.map((e) => {
+				const { d } = inPath(e.y);
+				return (
+					<g key={`c${e.y}`}>
+						<Edge p="a3" d={d} />
+						<Card x={28} y={e.y - 17} w={120} h={34} r={17} shadow={3} fill={A.coralSoft} />
+						<Cross x={48} y={e.y} />
+						<Tx x={98} y={e.y + 5} s={13}>
+							{e.p}
+						</Tx>
+					</g>
+				);
+			})}
+			{lanes.map((L) => (
+				<Edge key={`o${L}`} p="a3" d={outPath(L).d} />
+			))}
+			{/* Error tokens: drawn before the Classify circle, so each one disappears into it and comes out toward its incident. */}
+			{errs.map((e, i) => {
+				const a = inPath(e.y);
+				const o = outPath(lanes[e.lane]);
+				const d = `${a.d} L ${o.start[0]} ${o.start[1]} ${o.tail}`;
+				return <Tok key={`t${i}`} d={d} dur={CYCLE} delay={delayOf(i)} c={A.coral} r={7} />;
+			})}
+			<circle cx={C.x} cy={C.y} r={C.r} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
+			<Ic I={Sparkles} x={C.x} y={C.y - 26} s={24} />
+			<Tx x={C.x} y={C.y + 8} s={16}>
+				Classify
+			</Tx>
+			<Tx x={C.x} y={C.y + 26} s={12} w={400} f="sans">
+				Jev + an LLM
+			</Tx>
+			<Tx x={437} y={168} s={12} w={400} f="sans" c={A.muted}>
+				same cause,
+			</Tx>
+			<Tx x={437} y={185} s={12} w={400} f="sans" c={A.muted}>
+				one incident
+			</Tx>
+			{/* Work flowing down each lane, hidden behind the cards so it shows in the gaps */}
+			{lanes.map((L, li) => (
+				<Tok key={`w${L}`} d={`M506 ${L} L794 ${L} C 810 ${L}, 798 ${enter[li]}, 812 ${enter[li]}`} dur={4} delay={li * 0.6 + 1} c={A.yellow} r={7} />
+			))}
+			<Tok d={`M${rc} 233 L${rc} 331`} dur={3} delay={2} c={A.tealSoft} r={7} />
+			{lanes.map((L, li) => (
+				<g key={`l${L}`}>
+					<Card x={372} y={L - 37} w={130} h={74} fill={A.coralSoft} />
+					<Tx x={437} y={L - 10} s={15}>
+						{`incident ${li + 1}`}
+					</Tx>
+					<Tx x={437} y={L + 8} s={12} w={400} f="sans">
+						{`${li ? 'hourly' : 'weather'} pipeline`}
+					</Tx>
+					{dotsByLane[li].map(({ i }, k) => {
+						const n = dotsByLane[li].length;
+						const cx = 437 + (k - (n - 1) / 2) * 16;
+						return (
+							<circle
+								key={i}
+								cx={cx}
+								cy={L + 23}
+								r={5.5}
+								fill={A.coral}
+								stroke={A.ink}
+								strokeWidth={1.5}
+								className="ax-pop"
+								style={{ animationDuration: `${CYCLE}s`, animationDelay: `${popDelay(i)}s` }}
+							/>
+						);
+					})}
+					<Edge p="a3" d={`M508 ${L} L533 ${L}`} />
+					<Cyl cx={585} cy={L} w={96} h={62} />
+					<Tx x={585} y={L + 13} s={14}>
+						clone
+					</Tx>
+					<Edge p="a3" d={`M637 ${L} L663 ${L}`} />
+					<Card x={668} y={L - 45} w={120} h={90} fill={A.yellow} />
+					<Ic I={Bot} x={728} y={L - 20} s={26} />
+					<Tx x={728} y={L + 12} s={15}>
+						fixer
+					</Tx>
+					<Tx x={728} y={L + 30} s={12} w={400} f="sans">
+						OpenCode agent
+					</Tx>
+					<Edge p="a3" d={`M794 ${L} C 810 ${L}, 798 ${enter[li]}, 812 ${enter[li]}`} />
+				</g>
+			))}
+			<Tx x={585} y={168} s={12} w={400} f="sans" c={A.muted}>
+				zero-copy clone on
+			</Tx>
+			<Tx x={585} y={185} s={12} w={400} f="sans" c={A.muted}>
+				separate MotherDuck compute
+			</Tx>
+			<Card x={review.x} y={review.y} w={review.w} h={review.h} fill={A.tealSoft} />
+			<Ic I={UserCheck} x={rc} y={146} s={26} />
+			<Tx x={rc} y={177} s={15}>
+				review
+			</Tx>
+			<Tx x={rc} y={197} s={11.5} w={400} f="sans">
+				independent
+			</Tx>
+			<Tx x={rc} y={213} s={11.5} w={400} f="sans">
+				reviewer approves
+			</Tx>
+			<Edge p="a3" d={`M${rc} 234 L${rc} 249`} />
+			<Card x={review.x} y={254} w={review.w} h={50} fill={A.white} />
+			<Ic I={Rocket} x={842} y={279} s={22} />
+			<Tx x={904} y={276} s={14}>
+				ship
+			</Tx>
+			<Tx x={904} y={293} s={11} w={400} f="sans">
+				propose or ship
+			</Tx>
+			<Edge p="a3" d={`M${rc} 310 L${rc} 329`} />
+			<Card x={review.x} y={334} w={review.w} h={50} fill={A.white} />
+			<Ic I={BookOpen} x={842} y={359} s={22} />
+			<Tx x={904} y={356} s={14}>
+				learn
+			</Tx>
+			<Tx x={904} y={373} s={11} w={400} f="sans">
+				write a Guide
+			</Tx>
+		</Fig>
+	);
+}
+
 const ARCH_SQL = `
 SELECT
   (SELECT count(*) FROM ${H}."incidents" WHERE status = 'resolved')::INT AS n_res,
@@ -2219,83 +2388,7 @@ function ArchA({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				<Tok d="M45 232 L945 232" c={A.yellow} dur={8} r={9} />
 			</Fig>
 
-			<Fig n="A3" title="Two breaks, fixed side by side" y0={20} h={340} caption="The healer itself (plain code, no coordinator model) starts one Claude fixer per incident at once, each as its own agent service account on its own zero-copy clone. A new failure reaches a running fixer as at most one short notice a minute, and every fix passes the healer's checks, an independent test reviewer and an approver.">
-				<Defs p="a3" />
-				{[70, 250].map((y, i) => (
-					<g key={y}>
-						<Card x={30} y={y} w={170} h={80} fill={A.coralSoft} />
-						<Tx x={115} y={y + 35} s={17}>
-							{`incident ${i + 1}`}
-						</Tx>
-						<Tx x={115} y={y + 58} s={13} w={400} f="sans">
-							{i ? 'hourly pipeline' : 'weather pipeline'}
-						</Tx>
-					</g>
-				))}
-				<Edge p="a3" d="M206 110 Q 250 110 268 160" />
-				<Edge p="a3" d="M206 290 Q 250 290 268 240" />
-				<circle cx={325} cy={200} r={64} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
-				<Duck x={327} y={180} s={0.42} />
-				<Tx x={325} y={222} s={14}>
-					healer
-				</Tx>
-				<Tx x={325} y={240} s={12} w={400} f="sans">
-					plain code
-				</Tx>
-				<rect x={262} y={44} width={150} height={34} rx={17} fill={A.white} stroke={A.ink} strokeWidth={2} />
-				<Ic I={Inbox} x={282} y={61} s={18} />
-				<Tx x={346} y={66} s={12} w={600} f="sans">
-					≤ 1 notice / min
-				</Tx>
-				<Edge p="a3" d="M412 61 C 430 61, 440 66, 446 74" />
-				<Tok d="M412 61 C 430 61, 440 66, 446 74" c={A.coral} dur={2} />
-				<Tx x={325} y={300} s={13} w={500} f="sans">
-					fixers start
-				</Tx>
-				<Tx x={325} y={318} s={13} w={500} f="sans">
-					at the same moment
-				</Tx>
-				{[105, 295].map((y, i) => {
-					const d = i ? 'M386 212 C 420 212, 412 295, 444 295' : 'M386 188 C 420 188, 412 105, 444 105';
-					return (
-						<g key={y}>
-							<Edge p="a3" d={d} />
-							<Tok d={d} c={A.yellow} dur={2.4} delay={i * 0.05} />
-							<Card x={450} y={y - 45} w={160} h={90} fill={A.yellow} />
-							<Ic I={Bot} x={482} y={y} s={30} />
-							<Tx x={556} y={y - 2} s={17}>
-								fixer
-							</Tx>
-							<Tx x={556} y={y + 20} s={12} w={400} f="sans">
-								{`agent account ${i + 1}`}
-							</Tx>
-							<path d={`M618 ${y} L668 ${y}`} stroke={A.ink} strokeWidth={2.5} className="ax-march" fill="none" />
-							<Tx x={643} y={y - 12} s={12} w={500} f="sans">
-								verify
-							</Tx>
-							<Cyl cx={730} cy={y} w={120} h={64} />
-							<Tx x={730} y={y + 10} s={14}>
-								clone
-							</Tx>
-							<Edge p="a3" d={i ? `M792 ${y} Q 830 ${y} 848 255` : `M792 ${y} Q 830 ${y} 848 145`} />
-						</g>
-					);
-				})}
-				<Tx x={730} y={190} s={12} w={400} f="sans" c={A.muted}>
-					zero-copy, inside
-				</Tx>
-				<Tx x={730} y={208} s={12} w={400} f="sans" c={A.muted}>
-					each agent account
-				</Tx>
-				<Card x={830} y={150} w={115} h={100} fill={A.tealSoft} />
-				<Ic I={UserCheck} x={887} y={180} s={28} />
-				<Tx x={887} y={216} s={14}>
-					reviews
-				</Tx>
-				<Tx x={887} y={236} s={11.5} w={400} f="sans">
-					tests · approver
-				</Tx>
-			</Fig>
+			<FlowA3 />
 
 			<Fig n="A4" title="2 a.m., start to finish" h={250} caption="On the 5-minute schedule an incident usually goes from open to a fully reviewed fix in 4 to 9 minutes; the fix itself takes about 2. At autonomy L1 it ships at once; at L3, the default, it waits for your Approve in this Dive (times illustrative).">
 				<line x1={70} y1={110} x2={900} y2={110} stroke={A.paper3} strokeWidth={10} strokeLinecap="round" />
