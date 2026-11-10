@@ -159,6 +159,7 @@ and later fixes recall it.
 | Kill switch | Pause the healer's schedule (`MD_UPDATE_FLIGHT(..., schedule_cron := '')`, or `deploy.py --no-schedules`) and cancel its running run (`MD_CANCEL_FLIGHT_RUN`). Interrupted fixes go back in the queue for the next run. | on schedule |
 | Alert webhook | Flight secret `heal_webhook` with key `WEBHOOK_URL` | none (alerts only in the Dive) |
 | Schedules | `deploy.py` (`--no-schedules` to skip) | healer every 5 min, pipelines hourly |
+| Who sees the Dive's data | `deploy.py --share-org` (organization share `heal_board`, kept on later deploys) | the deploying account only |
 
 ## Run it
 
@@ -193,6 +194,10 @@ work from a fresh service account.
    cd self-healing-flights
    MOTHERDUCK_TOKEN=... uv run --with duckdb==1.5.6 --with pytz deploy.py
    ```
+
+   Only the deploying account sees the Dive's data. To let others in your organization see it, add `--share-org`:
+   it creates `heal_board`, an organization share of `heal`, and points the Dive at it. Later deploys keep using that
+   share without the flag; `DROP SHARE heal_board` and a redeploy make the Dive private again.
 
 3. Break a pipeline on purpose. This makes the weather API send a new payload shape (DuckDB 1.5.6 or later, connected as the owner):
 
@@ -243,6 +248,8 @@ Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the or
   untrusted, never as instructions. Alerts escape it for Slack.
 - **The Dive's buttons run the healer Flight.** Approve and Reject claim the proposal atomically and record who
   decided. A run always uses the owner's settings, so grant `run` on the healer only to people who may approve fixes.
+- **The Dive's data is private unless you share it.** `deploy.py --share-org` shares all of `heal` with your
+  organization: incidents, the fix log with each agent's steps and diffs, and alerts. `heal_demo` stays private.
 
 What remains:
 - **A shipped fix runs as the owner, an Admin.** A malicious change that got past every gate (and, at `L3`, past you)

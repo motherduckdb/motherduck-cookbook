@@ -1,6 +1,6 @@
 """Create or update the schema, the three Flights and the Dive (all resolved by name, so it is safe to re-run).
 
-    MOTHERDUCK_TOKEN=... uv run --with duckdb==1.5.6 --with pytz deploy.py [--no-schedules] [--reset-pipelines]
+    MOTHERDUCK_TOKEN=... uv run --with duckdb==1.5.6 --with pytz deploy.py [--no-schedules] [--reset-pipelines] [--share-org]
 
 The account that runs this owns everything and must be an Admin: on its first run the healer creates the agent service
 accounts and the role they share.
@@ -14,6 +14,7 @@ import duckdb
 HERE = pathlib.Path(__file__).parent
 REQS = "duckdb==1.5.6\npytz\nrequests\n"
 SCHEDULES = "--no-schedules" not in sys.argv
+SHARE_ORG = "--share-org" in sys.argv  # let everyone in the organization who opens the Dive see its data
 HEALER_CONFIG = {
     # The recipe's own pipelines are a demo, so they run fully autonomous. Leave AUTONOMY out (or set L3) for real
     # pipelines: then every fix waits for a human to approve it in the Dive.
@@ -81,8 +82,15 @@ for name in PIPELINES:
 title = "Self-healing Flights"
 # The Dive's Approve / Reject buttons run the healer Flight, whose id is written into the Dive's code.
 content = (HERE / "dive.tsx").read_text().replace("__HEALER_FLIGHT_ID__", ids["heal-demo-healer"])
-# Dives must list their databases explicitly; the REQUIRED_DATABASES export in the code is not enough.
-resources = "[{'url': 'md:heal', 'alias': 'heal_board'}]"
+# Dives must list their databases explicitly; the REQUIRED_DATABASES export in the code is not enough. By default the
+# Dive reads this account's own heal database, so only this account sees its data. With --share-org, the Dive reads
+# heal_board, an organization share of heal; once that share exists every later deploy keeps using it (pass nothing
+# extra), and DROP SHARE heal_board then a redeploy makes the Dive private again.
+share = con.execute("SELECT url FROM md_information_schema.owned_shares WHERE name = 'heal_board'").fetchone()
+if SHARE_ORG and not share:
+    share = con.execute("CREATE SHARE heal_board FROM heal (ACCESS ORGANIZATION, VISIBILITY DISCOVERABLE, UPDATE AUTOMATIC)").fetchone()
+    print(f"created organization share {share[0]} of heal for the Dive")
+resources = f"[{{'url': '{share[0] if share else 'md:heal'}', 'alias': 'heal_board'}}]"
 dive = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [title]).fetchone()
 if dive:
     con.execute(f"SELECT * FROM MD_UPDATE_DIVE_CONTENT(id := ?::UUID, content := ?, required_resources := {resources})", [str(dive[0]), content]).fetchall()
