@@ -1596,6 +1596,9 @@ def coordinate():
                         traceback.print_exc()
                         notify("check_failed", f"checking for failures failed: {type(e).__name__}: {e}"[:600], key="check_failed", cooldown_s=900)
                 next_check = time.time() + CHECK_EVERY
+            for inc_id, w in list(WORKERS.items()):  # reap finished fixes first, so the incident queued behind one starts now
+                if not w.is_alive():
+                    WORKERS.pop(inc_id)
             started = 0
             try:
                 started = start_workers()
@@ -1606,9 +1609,6 @@ def coordinate():
             if OC:
                 dispatch()
                 watch_budgets()
-            for inc_id, w in list(WORKERS.items()):
-                if not w.is_alive():
-                    WORKERS.pop(inc_id)
             if not WORKERS and not started:  # nothing running and nothing startable: the next scheduled run carries on
                 return
             errors = 0
