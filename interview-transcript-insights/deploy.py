@@ -114,6 +114,14 @@ def deploy_dive(con: duckdb.DuckDBPyConnection, args: argparse.Namespace, flight
         raise SystemExit("dive.tsx no longer contains the placeholder Flight id")
     content = source.replace(PLACEHOLDER_ID, flight_id).replace("interview_insights", args.database)
     resources = [{"url": f"md:{args.database}", "alias": args.database}]
+    # Once the Dive's data is shared (share_dive_data), keep reading the share, or a redeploy
+    # would point viewers back at the owner's private database.
+    share = con.execute(
+        "SELECT url FROM md_information_schema.owned_shares WHERE name = ?", [args.database]
+    ).fetchone()
+    if share:
+        content = content.replace(f"type: 'database', path: 'md:{args.database}'", f"type: 'share', path: '{share[0]}'")
+        resources = [{"url": share[0], "alias": args.database}]
 
     existing = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [args.dive_title]).fetchall()
     if len(existing) > 1:
