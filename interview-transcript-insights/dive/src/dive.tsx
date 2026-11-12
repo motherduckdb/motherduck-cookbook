@@ -78,17 +78,25 @@ function Err({ q }: { q: { isError?: boolean; error?: unknown } }) {
 
 // Viewers read the database through a share, which lags the Flight's writes. The Flight
 // publishes a snapshot when it finishes; refresh the share once per succeeded run, then refetch.
-// A plain database attachment can't be refreshed, so an error also counts as done.
+// REFRESH DATABASE only works on a share. The owner's own database is attached directly
+// (read-only inside a Dive, but not a share) and is already current, so it skips the refresh.
 // Returns true while the refresh is still running.
 function useAfterRun(runNumber: number | undefined, succeeded: boolean, onFresh: () => void): boolean {
-	const refresh = useSQLQuery(`REFRESH DATABASE "interview_insights" -- run ${runNumber}`, { enabled: succeeded });
+	const attachment = useSQLQuery(
+		`SELECT contains(path, '_share/') AS is_share FROM duckdb_databases() WHERE database_name = 'interview_insights'`,
+	);
+	const isShare = rowsOf(attachment)[0]?.is_share === true;
+	const refresh = useSQLQuery(`REFRESH DATABASE "interview_insights" -- run ${runNumber}`, {
+		enabled: succeeded && isShare,
+	});
 	const handled = useRef<number | undefined>(undefined);
+	const done = (attachment.isSuccess || attachment.isError) && (!isShare || refresh.isSuccess || refresh.isError);
 	useEffect(() => {
-		if ((refresh.isSuccess || refresh.isError) && succeeded && handled.current !== runNumber) {
+		if (done && succeeded && handled.current !== runNumber) {
 			handled.current = runNumber;
 			onFresh();
 		}
-	}, [refresh.isSuccess, refresh.isError, succeeded, runNumber]);
+	}, [done, succeeded, runNumber]);
 	return succeeded && handled.current !== runNumber;
 }
 

@@ -138,9 +138,11 @@ source documents per theme.
   permission message. Restricted members can't run Flights.
 - **Sharing the Dive means sharing the data.** To show it to others, share the
   Dive's data (the `share_dive_data` MCP tool, or a share of `<DATABASE>`). The
-  Flight runs `CREATE SNAPSHOT` at the end of every run, and the Dive runs
-  `REFRESH DATABASE` after every successful run, so viewers on a share see new
-  results without waiting for the share to sync.
+  Flight runs `CREATE SNAPSHOT` at the end of every run, and for a viewer on a
+  share the Dive runs `REFRESH DATABASE` after every successful run, so they see
+  new results without waiting for the share to sync. The owner's own database
+  is not a share and is already current, so the Dive skips the refresh there;
+  `REFRESH DATABASE` on it fails with "is not a share".
 - **Open the Dive after the first `load`.** `deploy.py` creates the database,
   but the tables only exist once the Flight has run.
 

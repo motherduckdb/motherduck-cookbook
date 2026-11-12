@@ -74,10 +74,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> str:
-    existing = con.execute(
-        "SELECT flight_id FROM MD_LIST_FLIGHTS(owner_only := true) WHERE flight_name = ?", [args.flight_name]
+def find_flights(con: duckdb.DuckDBPyConnection, name: str) -> list[tuple]:
+    return con.execute(
+        "SELECT flight_id FROM MD_LIST_FLIGHTS(owner_only := true) WHERE flight_name = ?", [name]
     ).fetchall()
+
+
+def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> str:
+    existing = find_flights(con, args.flight_name)
     if len(existing) > 1:
         raise SystemExit(f"{len(existing)} Flights are named {args.flight_name!r}; expected 0 or 1")
 
@@ -95,7 +99,10 @@ def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> s
         con.execute(f"FROM MD_UPDATE_FLIGHT(flight_id := ?::UUID, {fields})", [flight_id, *params])
         print(f"updated Flight {args.flight_name} ({flight_id})")
     else:
-        flight_id = str(con.execute(f"FROM MD_CREATE_FLIGHT({fields})", params).fetchone()[0])
+        # Reading MD_CREATE_FLIGHT's row would convert its TIMESTAMPTZ columns, which needs pytz,
+        # so look the new id up by name instead.
+        con.execute(f"FROM MD_CREATE_FLIGHT({fields})", params)
+        flight_id = str(find_flights(con, args.flight_name)[0][0])
         print(f"created Flight {args.flight_name} ({flight_id})")
     return flight_id
 
