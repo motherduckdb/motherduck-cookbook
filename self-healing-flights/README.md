@@ -48,7 +48,7 @@ its main loop makes progress. A run that hangs stops renewing; the next schedule
 
 | Table | Holds |
 |---|---|
-| `incidents` | One row per incident: status, class, fingerprint, attempts, the shipped version and its Guide. The fix waiting for a human is a `proposal` VARIANT on the same row, so Approve claims it with one atomic `UPDATE ... WHERE status = 'proposed'`. |
+| `incidents` | One row per incident: status, class, the fingerprint of its first failure (exact repeats join it), attempts, the shipped version and its Guide. The fix waiting for a human is a `proposal` VARIANT on the same row, so Approve claims it with one atomic `UPDATE ... WHERE status = 'proposed'`. |
 | `log` | Append-only, one row per fact: status transitions, failures, fix attempts and every step of a fix, costs, decisions, alerts, and which Guide helped. Kind-specific fields are in a `detail` VARIANT (`detail.usd::DOUBLE`). Counts such as an incident's failures or spend are sums over it, never stored copies. |
 | `runs` | The last runs of each Flight (for the Dive), and whether the healer has processed each one. |
 | `leases` | The `healer` lease and one `agent:<account>` lease per pool account. |
@@ -58,14 +58,24 @@ none of them needs a table. Avoid reading a VARIANT field through an index looku
 why `incidents` has no primary key (its sequence keeps ids unique) and `runs.config` is read as `config::JSON`.
 
 **Detection, even mid-fix.** The coordinator checks every finished pipeline run once per minute, also while
-fixes are running. A failure becomes an incident, or joins an open one with the same fingerprint (numbers,
-ids and hashes are masked first). `prompt_jev` classifies new incidents: fix, watch (a source outage) or
+fixes are running. Jev decides whether a failure joins one of the pipeline's current incidents. Its message is
+masked first (numbers, ids and hashes), and one `prompt_jev` request asks two questions, following TypeSafe's
+companion Noul pattern: a yes/no "same root cause as one of these incidents?" and a choice of which one. Each
+incident is described by its class, status and recent failures. A clear yes (0.8) with a clear pick (0.8) joins that
+incident; a clear no (0.3 or less) opens a new one; anything in between goes to an LLM that picks an incident or
+`new_incident`, and an unsure or invalid answer opens a new incident rather than risk hiding a failure in an old one.
+Only incidents a fix is coming for are candidates: watching and escalated incidents get no fix, so a different
+failure must not disappear into one, and resolved incidents are left out because what they taught reaches fixers as
+Guides. An exact repeat of a failure that opened, or was routed to, a current incident reuses that decision without
+asking again. Every failure's log row records how it was routed (`attach`, and Jev's yes/no and pick probabilities
+under `routing`). `prompt_jev` then classifies new incidents: fix, watch (a source outage) or
 escalate (credentials). When Jev is unsure (confidence below 0.8) or fails, an LLM classifies instead, with the
 log text fenced as data. An LLM answer that is not one of the classes is ignored, and if neither answers, the incident
 is a `code_bug` and gets a fix attempt. The incident's first transition records which path decided. A run that cannot
 be processed, for example because of a malformed `HEAL_EVENT` line, is retried for 30 minutes and then parked with a
 `dead_letter` alert. It never blocks later runs. Floods are capped by one rule: after 5 new kinds of failure on a
-pipeline within an hour, further ones fold into its newest open incident, with a `storm` alert. A pass reads at most
+pipeline within an hour, further ones fold into its newest open incident, with a `storm` alert, even
+when Jev would have opened a new one. A pass reads at most
 the last 25 runs of each Flight, so it stays short however many runs fail.
 
 **Picking up new failures while an agent fixes.** Every new failure on the same pipeline, or on another

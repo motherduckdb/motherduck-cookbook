@@ -1196,8 +1196,8 @@ function EventGroups({ rows, now }: { rows: Row[]; now: number }) {
 	const groups: { key: string; label: string; match: (a: string) => boolean }[] = [
 		{ key: 'root', label: 'Root', match: (a) => a === 'new' },
 		{ key: 'lineage', label: 'Lineage symptoms (downstream)', match: (a) => a === 'lineage' },
-		{ key: 'repeat', label: 'Repeats (same fingerprint)', match: (a) => a === 'fingerprint' },
-		{ key: 'other', label: 'Grouped by resource / similarity / regression', match: (a) => !['new', 'lineage', 'fingerprint'].includes(a) },
+		{ key: 'repeat', label: 'Repeats (same text)', match: (a) => a === 'repeat' || a === 'fingerprint' },
+		{ key: 'other', label: 'Joined by Jev, an LLM or a storm', match: (a) => !['new', 'lineage', 'repeat', 'fingerprint'].includes(a) },
 	];
 	return (
 		<div className="flex flex-col" style={{ gap: 8 }}>
@@ -2445,7 +2445,7 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 	const cols = [
 		{ I: Lock, n: 'Lease', chips: ['one coordinator', 'cancel stuck runs', 'heartbeat'] },
 		{ I: Search, n: 'Check', chips: ['every minute', 'each run once', 'park bad runs'] },
-		{ I: Sparkles, n: 'Classify', chips: ['fingerprint', 'Jev, else an LLM', 'open or attach'] },
+		{ I: Sparkles, n: 'Classify', chips: ['Jev: same cause?', 'else an LLM', 'join or open'] },
 		{ I: Wrench, n: 'Fix', chips: ['agent account', 'clone a share', 'forward failures'] },
 		{ I: UserCheck, n: 'Review', chips: ['healer checks', 'test reviewer', 'approver'] },
 		{ I: Rocket, n: 'Ship', chips: ['merge if moved', 'retest, recheck', 'propose or ship'] },
@@ -2551,7 +2551,7 @@ function ArchB({ q }: { q: ReturnType<typeof useSQLQuery> }) {
 				</Tx>
 			</Fig>
 
-			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="A run takes the healer lease, or exits because a live run holds it. It checks for failures every minute, even while fixes run. Jev classifies each new failure, and an LLM decides when Jev is unsure; the healer then hands each incident to a worker with its own agent account. A heartbeat renews the lease only while the run makes progress, so a stuck run is cancelled by the next one and an alert goes out.">
+			<Fig n="B2" title="Level 2 · inside the healer Flight" h={400} caption="A run takes the healer lease, or exits because a live run holds it. It checks for failures every minute, even while fixes run. Jev decides whether each new failure joins a current incident and classifies new ones, and an LLM decides when Jev is unsure; the healer then hands each incident to a worker with its own agent account. A heartbeat renews the lease only while the run makes progress, so a stuck run is cancelled by the next one and an alert goes out.">
 				<Defs p="b2" />
 				<Card x={20} y={36} w={920} h={344} r={22} />
 				<rect x={20} y={12} width={250} height={34} rx={10} fill={A.yellow} stroke={A.ink} strokeWidth={2.5} />
