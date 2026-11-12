@@ -40,7 +40,7 @@ refs:
 
 A Dive whose pages are generated, not hand-built, and that gets better the more it is used. Every morning a Flight writes a briefing. It covers the numbers that matter, the insights that need attention with how each changed since last week, and the charts that show the evidence. Viewers can ask a new question and get a new page, or click **Investigate** on an insight to get a drill-down that explains it.
 
-The example uses NYC 311 service requests from MotherDuck's public `sample_data` share. Five weekly briefings in, it flags heat-complaint closures as *worsening since 12 December*. A follow-up query it chose found Queens at 3.67 days against the 3-day target in its Guide, and the headline shows "29/29 numbers checked".
+The example uses NYC 311 service requests from MotherDuck's public `sample_data` share. That data is static, so the example replays one briefing a week with `AS_OF` dates. Five briefings in, it flags heat-complaint closures as *worsening since 12 December*. A follow-up query it chose found Queens at 3.67 days against the 3-day target in its Guide, and the headline shows "29/29 numbers checked".
 
 ![The NYC 311 briefing](assets/briefing.png)
 
@@ -65,40 +65,95 @@ Four things make it learn:
 
 - **Memory.** Every run, model call, insight and viewer signal is logged in the output database. The next briefing reads back the last three briefings' insights and marks each new one as new, ongoing, worsening, improving or resolved. Viewer ratings and the chart types people switch to steer the next analysis and the default layout.
 - **Guides.** The Flight reads every MotherDuck Guide under `briefings/<db>`. That includes your business context (audience, targets, known patterns) and the memory Guide it maintains itself. Edit a Guide and the next briefing follows it. The Dive's AI Chat and other agents read the same Guides.
-- **Questions.** When the data shows what moved but not why, such as a spike in one week or one referrer, the briefing asks its viewers, with a few likely answers to pick from. An answer becomes a note. The note appears on every chart that shows that date or value, and later briefings use it as the explanation. Questions nobody has answered stay on the page. Viewers can also pin a note to any chart.
+- **Questions to viewers.** When the data shows what moved but not why, such as a spike in one week or one referrer, the briefing asks its viewers, with a few likely answers to pick from. An answer becomes a note. The note appears on every chart that shows that date or value, and later briefings use it as the explanation. Questions nobody has answered stay on the page. Viewers can also pin a note to any chart.
 - **Evals.** `eval.py` scores the planner, and with `--narrate` the share of grounded numbers, on a fixed question set. Results are recorded per prompt version and model, so you can compare a prompt or model change before it ships. The Dive's **Memory** page shows the insight timeline, what viewers asked and did, and every prompt version.
 
 ![The Memory page](assets/memory.png)
 
 ## Questions to answer
 
-Ask these before adapting the recipe; the answers go into a Guide (see `business-context.sql`), the recipe and `questions.json`:
+Most of these can be answered from the data, so investigate before asking anyone. Work in three passes, and keep the questions for a person to the few that only a person can answer: about five, each with a proposed answer to confirm or correct.
 
-1. Who reads the briefing, how often, and what do they decide after reading it?
-2. Which 3 to 5 numbers matter most, how exactly are they defined, and which are better when lower?
-3. What are the targets, and what size of change is worth reporting?
-4. Compare with what: the previous period, last year, or the target?
-5. Which breakdowns explain a change, and which should the briefing ignore?
-6. Which known patterns, events or data quirks matter?
-7. Who acts on which kind of insight, and what does a useful one look like?
-8. Which questions do you expect to ask it?
+**1. Find out from the data.** Query the sources and settle these without asking:
 
-After the first briefing, ask which insight they would act on, which is noise, and what is missing, and update the Guide.
+| Question | How to find out | Where the answer goes |
+| --- | --- | --- |
+| Which tables hold the data, what is one row, and which column is the date? | `duckdb_tables()`, `duckdb_columns()`, a sample of rows | `ATTACH`, `MARTS`, `ANCHOR` |
+| How often does the data load, and how far back does it go? | Minimum and maximum date, rows per day over recent weeks | `MARTS_REFRESH`, `AS_OF_DEFAULT`, `flight.schedule` |
+| When is a period complete? | For measures that depend on a later event, such as a closing date, compare the newest weeks with older ones | The date cut-off in `MARTS` |
+| Which columns can break a number down? | Distinct counts and null shares per column | `CATALOG` dimensions |
+| Which patterns repeat? | Weekly and yearly rhythm in the main counts | "Known patterns" in the Guide |
+| Are metrics already defined somewhere? | Existing Guides (`MD_LIST_GUIDES`), table and column comments | `GUIDE_TOPICS`, `CATALOG` descriptions |
+
+**2. Draft, then confirm in one pass.** Propose these from what the data shows and ask for corrections, not for answers from scratch:
+
+| Question | Where the answer goes |
+| --- | --- |
+| Which 3 to 5 numbers matter most, and how is each defined? | `CATALOG` measures, `WATCH`, `LABELS` |
+| Which of them are better when lower? | `"down"` on the measure |
+| Compare against the previous period or the same period last year? | `DEFAULT_COMPARE` |
+| Which breakdowns explain a change, and which should the briefing ignore? | `CATALOG` dimensions, `PLANNER_HINTS` |
+| Which questions will people ask it? | `examples` in `app.json`, `questions.json` |
+| Which acronyms and labels do readers use? | `ACRONYMS`, `LABELS` |
+
+**3. Needs a person.** The data can't answer these:
+
+| Question | Where the answer goes |
+| --- | --- |
+| Who reads the briefing, how often, and what do they decide after reading it? | `AUDIENCE`, `BRIEFING_QUESTION`, `CADENCE`, the Guide |
+| Does a second audience read the same data? | `BOARDS` (see [Boards](#boards-one-flight-several-dashboards)) |
+| What are the targets, and what size of change is worth reporting? | The Guide; there is no threshold setting |
+| Which events or data issues matter that the data doesn't show? | The Guide, `DOMAIN_CONTEXT` |
+| Who acts on which kind of insight? | The Guide |
+| Who may view, who may ask questions, and which columns must not reach the model? | The share, `GRANT RUN`, the columns in `MARTS` (see [Security](#security)) |
+| Which look do readers expect? | `theme` (see [Theme and brand](#theme-and-brand)) |
+
+**Don't wait for every answer.** Build the first briefing on the best available answer, and write each assumption into the Guide under a heading such as "Assumptions to confirm", so a person can correct it by editing the Guide. A real page gets better feedback than a list of questions: after the first briefing, find out which insight readers would act on, which is noise, and what is missing, and update the Guide. Unexplained spikes need no question up front either, because the briefing asks its viewers about them on the page.
+
+## Caveats
+
+- **Live data:** the example's data is static, so it ships `MARTS_REFRESH = "missing"` (build the marts once) and `AS_OF_DEFAULT = "max"` (report up to the latest date in the data). For data that keeps loading, set `MARTS_REFRESH = "always"`, or the briefing never changes. Set `AS_OF_DEFAULT = "yesterday"` when the latest day is still filling in.
+- **History:** the change scan skips a metric with less than about 30 weeks of history (`BASELINE_WEEKS` plus 4). The comparison with last year needs a full year more than the window.
+- **Continuity:** insights are marked ongoing, worsening or resolved only once earlier briefings exist, so the first page shows every insight as new.
+- **Run time:** each generation makes two or three `prompt()` calls (plan, follow-up queries, narrative) and takes about 15 to 35 seconds. Set `ANALYST_PROBES = 0` to drop the follow-up step. Every question a viewer asks is a Flight run with these calls.
+- **Writes:** a Dive can't write to a database. Viewer feedback reaches the log tables only through a Flight run, which validates every event.
+- **Model:** `DEFAULT_MODEL` names the `prompt()` model. Check current model names in the AI functions docs.
+- **Wrong tool:** for a fixed dashboard with no narrative, build a plain Dive. For a question asked once, use AI Chat. The recipe pays off when the same audience reads it repeatedly.
+- **Agent skills:** the recipe matches the `motherduck-build-malleable-dive` and `motherduck-dive-components` agent skills. With them installed, an agent can investigate the data, run the interview and adapt the recipe for you.
 
 ## What you'll adjust
 
-Copy `recipes/nyc-311` to `recipes/<name>` and replace:
+Copy `recipes/nyc-311` to `recipes/<name>` and replace these in `domain.py`:
 
-- **`domain.py`:**
-  - `DB` (a new output database) and `ATTACH` (your sources).
-  - `MARTS`: curated tables, pre-aggregated where you can.
-  - `CATALOG`: datasets, dimensions and measures, with descriptions the planner reads. Mark measures where lower is better with `"down"`, and include the dimensions that explain why a number moves.
-  - `WATCH`: metrics for the change scan.
-  - `BRIEFING_PLAN`: the fixed daily page.
-  - Context for the model, and the learning settings: `GUIDE_TOPICS`, `ANALYST_PROBES`, `DEFAULT_MODEL`.
-- **`app.json`:** brand name, theme (see [Theme and brand](#theme-and-brand)), example questions and the Flight name.
-- **`questions.json`:** 8 to 12 questions with what a good plan uses, plus one off-topic question.
-- **`business-context.sql`:** your interview answers as a Guide.
+| Setting | What it does | Example |
+| --- | --- | --- |
+| `DB` | The output database the Flight creates and writes | `"nyc_311_briefing"` |
+| `ATTACH` | Sources to attach, as alias and path | `[("sample_data", "md:_share/…")]` |
+| `MARTS` | Curated tables, pre-aggregated where you can | `{"mart_requests": "SELECT …"}` |
+| `MARTS_REFRESH` | When to rebuild the marts | `"missing"` (once), `"always"` (every briefing) |
+| `ANCHOR` | The mart and date column that set the data's date range | `("mart_requests", "day")` |
+| `AS_OF_DEFAULT` | The date a briefing reports up to | `"max"`, `"yesterday"` |
+| `CATALOG` | Datasets, dimensions and measures, with descriptions the planner reads. Mark a measure where lower is better with `"down"` | See `recipes/nyc-311/domain.py` |
+| `WATCH` | Measures for the change scan | `[("requests.requests", "Requests")]` |
+| `BASELINE_WEEKS` | Weeks the change scan uses as its baseline | `26` |
+| `DEFAULT_COMPARE` | The comparison when a question names none | `"previous_period"`, `"previous_year"`, `"none"` |
+| `BRIEFING_PLAN` | The blocks of the scheduled page | KPI row, line, bar, heatmap, table |
+| `CADENCE` | What a briefing reports on | `"daily"` (default), `"monthly"` |
+| `AUDIENCE`, `BRIEFING_QUESTION` | Who the narrator writes for, and the question each briefing answers | `"city operations analyst"` |
+| `DOMAIN_DESCRIPTION`, `DOMAIN_CONTEXT` | What the data is, in a sentence and in a paragraph | |
+| `PLANNER_HINTS` | Rules for the planner: which dimension explains what | `"- Use descriptor to explain a complaint type's change"` |
+| `ACRONYMS`, `LABELS` | How names are displayed | `{"nypd": "NYPD"}` |
+| `GUIDE_TOPICS` | More Guide topics to read | `["core-metrics"]` |
+| `ANALYST_PROBES`, `VIEWER_QUESTIONS` | Follow-up queries per page, and questions to viewers per page; `0` turns either off | `3`, `2` |
+| `DEFAULT_MODEL` | The `prompt()` model | |
+
+And the other recipe files:
+
+| File | What to set |
+| --- | --- |
+| `app.json` | `brand`, `tagline`, `placeholder`, `examples` (example questions), `db` (the same as `DB`), `theme` (see [Theme and brand](#theme-and-brand)), `flight.name`, `flight.schedule` (cron in UTC, `0 6 * * *` by default), `requiredDatabases` (see [Security](#security)) |
+| `questions.json` | 8 to 12 eval questions with what a good plan uses, plus one off-topic question |
+| `business-context.sql` | The Guide with your answers. It is at the folder root; set its topic to `briefings/<DB>`, the topic the Flight reads |
 
 The components live in `dive-components/`: KPI rows, metric cards, gauges, line, area, bar, table, calendar and matrix heatmaps, Sankey, treemap, timeline, callouts and a date picker. Add your own by copying `dive-components/examples/funnel.tsx`.
 
@@ -181,9 +236,13 @@ The NYC 311 recipe has two boards: `operations`, the daily briefing, and `leader
 
 ## Run it
 
+First create the business-context Guide, so the first briefing reads it: run the statement in `business-context.sql` once, in the MotherDuck UI or any client connected to MotherDuck.
+
+Then build the recipe and run it locally:
+
 ```bash
 export MOTHERDUCK_TOKEN=...
-python3 build.py recipes/nyc-311                      # writes recipes/nyc-311/flight/main.py and dive/index.tsx
+uv run python build.py recipes/nyc-311                # writes recipes/nyc-311/flight/main.py and dive/index.tsx
 cd recipes/nyc-311/flight
 MODE=briefing REQUEST_ID=t1 uv run --with duckdb==1.5.6 python main.py
 MODE=ask PROMPT="Which agencies take longest to close requests?" REQUEST_ID=t2 uv run --with duckdb==1.5.6 python main.py
@@ -191,27 +250,44 @@ cd ../../..
 uv run --with duckdb==1.5.6 python eval.py recipes/nyc-311 --out baseline.json
 ```
 
-Run the business-context Guide once (`business-context.sql`), and run several briefings with consecutive `AS_OF=YYYY-MM-DD` dates to see insights continue across weeks.
+To see insights continue across weeks, run several briefings with consecutive dates:
 
-Deploy the Flight and the Dive:
+```bash
+cd recipes/nyc-311/flight
+for d in 2022-12-12 2022-12-19 2022-12-26; do
+  AS_OF=$d MODE=briefing REQUEST_ID=w-$d uv run --with duckdb==1.5.6 python main.py
+done
+```
+
+The Flight reads its settings from config keys, which arrive as environment variables:
+
+| Key | What it does |
+| --- | --- |
+| `MODE` | `briefing` (default), `ask`, `investigate`, `refresh` or `feedback` |
+| `PROMPT` | The question, for `ask` and `investigate` |
+| `PARENT` | For `investigate`: the id of the page whose insight is being investigated |
+| `BOARD` | The board the run is for. A scheduled briefing without it writes every board |
+| `REQUEST_ID` | An id from the caller, so the Dive can open the page it asked for |
+| `AS_OF` | The analysis date. Empty means the recipe's `AS_OF_DEFAULT` |
+| `MODEL` | The `prompt()` model. Empty means the recipe's `DEFAULT_MODEL` |
+| `FEEDBACK` | A JSON list of viewer events. `MODE=feedback` only records them |
+
+### Deploy as a Flight
 
 ```bash
 uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311 --dry-run   # shows what it will create or update
 uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311
 ```
 
-`deploy.py` creates or updates the Flight with `MD_CREATE_FLIGHT` or `MD_UPDATE_FLIGHT`, finding it by name in `MD_LIST_FLIGHTS()`. It writes the Flight id into `app.json`, rebuilds, and creates the Dive or adds a version with `MD_CREATE_DIVE` or `MD_UPDATE_DIVE_CONTENT`. Then run the briefing once (`SELECT * FROM MD_RUN_FLIGHT(flight_id := '<id>')`) and open the Dive.
+`deploy.py` creates or updates the Flight with `MD_CREATE_FLIGHT` or `MD_UPDATE_FLIGHT`, finding it by name in `MD_LIST_FLIGHTS()`. It sets the schedule from `flight.schedule` in `app.json`; pass `--no-schedule` to leave it off. It writes the Flight id into `app.json`, rebuilds, and creates the Dive or adds a version with `MD_CREATE_DIVE` or `MD_UPDATE_DIVE_CONTENT`. Then run the briefing once (`SELECT * FROM MD_RUN_FLIGHT(flight_id := '<id>')`) and open the Dive.
 
-To let others use it:
-- **Read access:** they need a share of the output database. Set `requiredDatabases` in `app.json` to the share.
-- **Asking questions and rating:** they need run access on the Flight: `GRANT RUN ON FLIGHT '<flight_id>' TO ROLE <role>`. Every run uses the Flight owner's credentials, so grant it to the people the Dive is for.
+## Security
 
-## Caveats
-
-- **Run time:** each generation makes two or three `prompt()` calls (plan, follow-up queries, narrative) and takes about 15 to 35 seconds. Set `ANALYST_PROBES = 0` to drop the follow-up step.
-- **Writes:** a Dive can't write to a database. Viewer feedback reaches the log tables only through a Flight run, which validates every event.
-- **Model:** `DEFAULT_MODEL` names the `prompt()` model. Check current model names in the AI functions docs.
-- **Agent skills:** the recipe matches the `motherduck-build-malleable-dive` and `motherduck-dive-components` agent skills. With them installed, an agent can run the interview and adapt the recipe for you.
+- **Reading:** viewers need a share of the output database. Set `requiredDatabases` in `app.json` to the share, in the shape of the default: `[{"type": "database", "path": "md:<db>", "alias": "<db>"}]`.
+- **Asking and rating:** viewers need run access on the Flight: `GRANT RUN ON FLIGHT '<flight_id>' TO ROLE <role>`. Every run uses the Flight owner's credentials, so grant it only to the people the Dive is for.
+- **What a viewer can reach:** the model never writes SQL. It picks measures and dimensions from `CATALOG`, and Python compiles the query. A viewer's question can therefore reach only what the marts and the catalog expose, so keep columns that viewers or the model must not see out of `MARTS`.
+- **What reaches the model:** query results, viewer questions, viewer notes and the Guides are sent to `prompt()`. Viewer notes also go into the memory Guide, which AI Chat and other agents read, so treat them as untrusted text.
+- **The Guide:** `business-context.sql` creates it with `access = 'user'`, so only you and the Flight read it. Widen the access when other people's AI Chat and agents should read it too.
 
 ## Files
 
@@ -234,3 +310,4 @@ To let others use it:
 - [Run Flights from Dives](https://motherduck.com/docs/key-tasks/dives/run-flights-from-dives/)
 - [`prompt()`](https://motherduck.com/docs/sql-reference/motherduck-sql-reference/ai-functions/prompt/)
 - [NYC 311 sample data](https://motherduck.com/docs/getting-started/sample-data-queries/nyc-311-data/)
+- With the MotherDuck MCP server connected, `get_dive_guide` and `get_flight_guide` give the current Dive and Flight authoring rules, and `ask_docs_question` answers questions from the docs.
