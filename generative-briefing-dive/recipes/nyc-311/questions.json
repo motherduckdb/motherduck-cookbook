@@ -1,0 +1,14 @@
+[
+	{"q": "Which agencies take longest to close requests?", "expect": {"measures": ["requests.avg_days_to_close", "requests.slow_share"], "dimensions": ["agency"], "types": ["table", "bar"]}},
+	{"q": "How do people report noise complaints: phone, online or the app?", "expect": {"measures": ["requests.requests", "requests.online_share"], "dimensions": ["channel"], "filters": ["complaint_type"]}},
+	{"q": "Why are heat and hot water complaints so high in Brooklyn?", "expect": {"measures": ["requests.requests"], "dimensions": ["descriptor", "agency"], "filters": ["complaint_type", "borough"], "types": ["drivers", "bar", "table"]}},
+	{"q": "Which complaint types grew the most in the last 28 days compared with a year ago?", "expect": {"measures": ["requests.requests"], "dimensions": ["complaint_type"], "types": ["bar", "table", "drivers"]}},
+	{"q": "How has weekly request volume moved by borough over the last year?", "expect": {"measures": ["requests.requests"], "dimensions": ["borough"], "types": ["line", "area", "heatmap"]}},
+	{"q": "Which boroughs report most online or in the app?", "expect": {"measures": ["requests.online_share"], "dimensions": ["borough"], "types": ["bar", "table"]}},
+	{"q": "Is illegal parking getting worse, and where?", "expect": {"measures": ["requests.requests"], "dimensions": ["borough"], "filters": ["complaint_type"], "types": ["line", "bar", "drivers", "heatmap"]}},
+	{"q": "Which days of the week are busiest for 311?", "expect": {"measures": ["requests.requests"], "types": ["heatmap"]}},
+	{"q": "How do requests flow from each reporting channel to the agencies?", "expect": {"measures": ["requests.requests"], "dimensions": ["channel", "agency"], "types": ["sankey"]}},
+	{"q": "What share of all requests does each agency handle, and for which complaint types?", "expect": {"measures": ["requests.requests"], "dimensions": ["agency", "complaint_type"], "types": ["treemap", "bar", "table"]}},
+	{"q": "Which kinds of noise complaints are rising?", "expect": {"measures": ["requests.requests"], "dimensions": ["descriptor"], "filters": ["complaint_type"]}},
+	{"q": "What will the weather be in Paris tomorrow?", "off_topic": true}
+]

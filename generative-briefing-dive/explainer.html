@@ -1,0 +1,568 @@
+<title>Malleable Dives</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 1040px Swiss column; a six-step workflow strip, then one ruled section per step with a small diagram. */
+:root {
+	--bg: #ffffff;
+	--fg: #111111;
+	--muted: #6e6e6e;
+	--rule: #111111;
+	--line: #e4e4e4;
+	--soft: #f4f4f4;
+	--accent: #e4002b;
+	--on-fg: #ffffff;
+	--display: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
+	--body: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
+	--mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) { --bg: #101010; --fg: #f1f1f1; --muted: #9a9a9a; --rule: #f1f1f1; --line: #2a2a2a; --soft: #1a1a1a; --accent: #ff3b57; --on-fg: #101010; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #101010; --fg: #f1f1f1; --muted: #9a9a9a; --rule: #f1f1f1; --line: #2a2a2a; --soft: #1a1a1a; --accent: #ff3b57; --on-fg: #101010; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.mark { display: inline-block; width: 12px; height: 12px; background: var(--accent); margin-right: 8px; vertical-align: -1px; }
+.eyebrow { font-size: 13px; font-weight: 500; color: var(--muted); }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(40px, 7vw, 72px); letter-spacing: -0.035em; line-height: 0.98; margin: 18px 0 20px; text-wrap: balance; }
+.lede { font-size: clamp(18px, 2.2vw, 22px); line-height: 1.4; max-width: 48ch; margin: 0; }
+section { border-top: 1px solid var(--rule); margin-top: 56px; padding-top: 18px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 9fr); gap: 32px; }
+section > h2 { font-family: var(--display); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+section > h2 .num { display: block; font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); margin-bottom: 4px; }
+section > h2 .who { display: block; font-family: var(--body); font-size: 13px; font-weight: 500; color: var(--muted); margin-top: 6px; }
+section > div { min-width: 0; }
+p { margin: 0 0 14px; max-width: 65ch; }
+.muted { color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Workflow strip */
+.flow { margin-top: 44px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--rule); }
+.flow a { display: block; text-decoration: none; padding: 10px 12px 12px 0; border-right: 1px solid var(--line); margin-right: 12px; }
+.flow a:last-child { border-right: none; }
+.flow .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.flow b { display: block; font-size: 15px; line-height: 1.25; margin: 2px 0 4px; text-wrap: balance; }
+.flow span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+.flow a:hover b { color: var(--accent); }
+
+/* Pipeline lanes */
+.lanes { display: grid; gap: 10px; margin: 6px 0 14px; }
+.lane { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.lane-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding-top: 12px; border-top: 2px solid var(--rule); }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.step { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.step .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.step b { display: block; font-size: 15px; margin: 2px 0 2px; }
+.step span { display: block; font-size: 13px; color: var(--muted); line-height: 1.4; }
+.step.model b::after { content: "prompt()"; font-family: var(--mono); font-weight: 400; font-size: 10.5px; color: var(--accent); border: 1px solid var(--accent); padding: 0 4px; margin-left: 6px; vertical-align: 2px; }
+.handoff { font-size: 13px; color: var(--muted); padding-left: 112px; }
+.handoff::before { content: "↓ "; color: var(--accent); }
+
+/* Component catalog */
+.catalog { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 20px; margin: 4px 0 18px; }
+.catalog div { border-top: 1px solid var(--line); padding: 8px 0; }
+.catalog b { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.catalog span { display: block; font-size: 13px; color: var(--muted); line-height: 1.35; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.chip { font-size: 12.5px; border: 1px solid var(--rule); padding: 1px 8px; }
+.chip.on { background: var(--fg); color: var(--on-fg); }
+
+/* Build diagram */
+.build { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr) 70px minmax(0, 1fr); align-items: center; gap: 0; margin: 6px 0 16px; }
+.box { border: 1px solid var(--rule); padding: 8px 10px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+.box .label { font-family: var(--body); display: block; margin-bottom: 2px; }
+.box + .box { border-top: none; }
+.col { display: grid; }
+.arrow { text-align: center; color: var(--accent); font-size: 20px; }
+.box.out { background: var(--fg); color: var(--on-fg); border-color: var(--fg); }
+
+/* Arrange mock */
+.rows { display: grid; gap: 8px; margin: 6px 0 16px; }
+.row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; align-items: center; }
+.row .name { font-size: 12.5px; color: var(--muted); }
+.slots { display: grid; gap: 6px; height: 34px; }
+.slot { border: 1px dashed var(--muted); display: flex; align-items: center; padding: 0 8px; font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+.slot.filled { border: 1px solid var(--rule); color: var(--fg); }
+.slot.drop { border: 2px solid var(--accent); color: var(--accent); }
+
+/* Tables */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th { text-align: left; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); }
+td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { font-weight: 700; }
+
+pre { margin: 0 0 14px; background: var(--soft); padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+pre .k { color: var(--accent); }
+pre .c { color: var(--muted); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
+.cols h3 { font-size: 15px; margin: 0 0 4px; }
+.cols p { font-size: 14.5px; color: var(--muted); }
+
+.links { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.links a { display: block; border-top: 2px solid var(--rule); padding-top: 10px; text-decoration: none; }
+.links a b { display: block; font-size: 17px; }
+.links a span { display: block; font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.links a:hover b { color: var(--accent); }
+
+.cycle { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 4px 0 8px; border-top: 2px solid var(--rule); }
+.cycle > div { padding: 10px 14px 12px 0; border-right: 1px solid var(--line); margin-right: 14px; min-width: 0; }
+.cycle > div:last-child { border-right: none; }
+.cycle .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.cycle b { display: block; font-size: 15px; margin: 2px 0 4px; }
+.cycle span { display: block; font-size: 13px; color: var(--muted); line-height: 1.4; }
+.loopback { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+.loopback::before { content: "↺ "; color: var(--accent); font-size: 15px; }
+.evolve { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 16px; margin: 4px 0 18px; }
+.evolve div { border-top: 1px solid var(--line); padding: 8px 0; }
+.evolve .d { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.evolve b { display: block; font-size: 14.5px; margin: 2px 0; }
+.evolve .c { font-size: 12.5px; }
+.evolve .c.worse { color: var(--accent); }
+ol.qs { margin: 0 0 14px; padding-left: 20px; font-size: 14.5px; }
+ol.qs li { margin: 2px 0; }
+/* Data flow: sources → Flight → output database → Dive */
+.dflow { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1.1fr) 40px minmax(0, 1.4fr) 40px minmax(0, 1fr); align-items: stretch; margin: 6px 0 12px; min-width: 680px; }
+.dflow .colh { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; border-top: 2px solid var(--rule); padding-top: 8px; margin-bottom: 2px; }
+.dflow .stack { display: grid; gap: 6px; align-content: start; }
+.dflow .t { border: 1px solid var(--line); padding: 6px 8px; font-size: 12.5px; line-height: 1.35; }
+.dflow .t code { font-size: 12px; display: block; color: var(--fg); }
+.dflow .t span { color: var(--muted); }
+.dflow .t.hot { border-color: var(--accent); }
+.dflow .t.guide { border-style: dashed; border-color: var(--rule); }
+.dflow .ar { display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 18px; }
+.keys { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--muted); margin: 0 0 18px; }
+.keys i { display: inline-block; width: 18px; height: 11px; border: 1px solid var(--line); vertical-align: -1px; margin-right: 6px; }
+.keys i.hot { border-color: var(--accent); }
+.keys i.guide { border: 1px dashed var(--rule); }
+pre.ev { font-size: 12px; }
+td code { font-size: 12.5px; }
+td.m { font-family: var(--mono); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+@media (max-width: 820px) {
+	.cycle { grid-template-columns: 1fr 1fr; }
+	.cycle > div { border-right: none; border-bottom: 1px solid var(--line); }
+	.flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.flow a { border-right: none; border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 720px) {
+	section { grid-template-columns: 1fr; gap: 12px; }
+	.lane { grid-template-columns: 1fr; gap: 6px; }
+	.handoff { padding-left: 0; }
+	.build { grid-template-columns: 1fr; }
+	.arrow { transform: rotate(90deg); padding: 4px 0; }
+	.row { grid-template-columns: 1fr; gap: 4px; }
+}
+</style>
+
+<div class="wrap">
+	<div class="eyebrow"><span class="mark"></span>MotherDuck Dives + Flights · cookbook recipe</div>
+	<h1>Malleable Dives</h1>
+	<p class="lede">A Dive whose layout, charts and words come from a spec a Flight writes. Every morning it writes a briefing; ask a question or investigate an insight and it writes a new page. Then you rearrange it, rate it, and the next analysis learns from what you did.</p>
+
+	<nav class="flow" aria-label="The workflow">
+		<a href="#design"><div class="n">01</div><b>Design the components</b><span>Developer · component skill</span></a>
+		<a href="#recipe"><div class="n">02</div><b>Describe the data</b><span>Agent · a recipe</span></a>
+		<a href="#flight"><div class="n">03</div><b>Create the Flight</b><span>Plans, queries, narrates</span></a>
+		<a href="#dive"><div class="n">04</div><b>Create the Dive</b><span>Renders specs</span></a>
+		<a href="#interact"><div class="n">05</div><b>Ask and investigate</b><span>Viewer · new pages</span></a>
+		<a href="#arrange"><div class="n">06</div><b>Rearrange</b><span>Viewer · own layout</span></a>
+		<a href="#learn"><div class="n">07</div><b>Learn</b><span>Memory · Guides · evals</span></a>
+	</nav>
+
+	<section id="design">
+		<h2><span class="num">01</span>Design the components<span class="who">motherduck-dive-components skill</span></h2>
+		<div>
+			<p>Dives can only import React, Recharts, d3 and lucide, so the components travel as source code, the shadcn way. <code>dive-components/kit/*.tsx</code> holds the components, and <code>assemble.py</code> copies the ones a Dive needs into its single <code>index.tsx</code>.</p>
+			<div class="catalog" aria-label="Default components">
+				<div><b>kpi</b><span>Stats, metric cards, compact stats or gauges</span></div>
+				<div><b>line · area</b><span>Trends; area adds headline value and legend toggles</span></div>
+				<div><b>bar · table</b><span>Categories against the previous period; rankings</span></div>
+				<div><b>drivers</b><span>Which values of every dimension moved a number</span></div>
+				<div><b>heatmap</b><span>A calendar of days, or a category against weeks</span></div>
+				<div><b>sankey</b><span>How a count flows from one category to another</span></div>
+				<div><b>treemap</b><span>Part-to-whole, grouped, click to zoom</span></div>
+				<div><b>timeline</b><span>Events in order, such as detected shifts</span></div>
+				<div><b>callouts · text</b><span>Insights with an Investigate button; prose</span></div>
+				<div><b>date picker</b><span>A date or range for the viewer to choose</span></div>
+				<div><b>questions</b><span>What the page asks its viewers; answers become notes on the charts</span></div>
+				<div><b>form · fields</b><span>shadcn-style Field, with label, description and error, inputs, selects and choice cards</span></div>
+			</div>
+			<p><code>components.json</code> describes each component once: the data it takes, when to use it, which other components can show the same data, and a <code>plan_rule</code> that tells the Flight's planner when to pick it. Every component, built-in or custom, registers itself the same way:</p>
+<pre><span class="k">registerComponent</span>('funnel', {
+  label: 'Funnel', icon: Filter, render: FunnelBlock,
+  variants: ['bar', 'table'],              <span class="c">// what a viewer may switch it to</span>
+  accepts: (b) =&gt; b.series[0].format === 'count',
+});</pre>
+			<div class="chips" aria-label="Themes"><span class="chip on">Swiss</span><span class="chip">Paper</span><span class="chip">MotherDuck</span><span class="chip">Duck</span><span class="chip">Night</span><span class="chip">makeTheme({ base, accent, ...tokens })</span></div>
+			<p>Blocks also carry the narrative around the chart. <code>BlockInsight</code> adds a "so what" line under a chart, and the About panel shows the definitions of what it measures and why it is on the page. Insights show a continuity chip, such as <b>New</b>, <b>Ongoing since 12 Dec · 3 briefings</b> or <b>Resolved</b>, and thumbs up and down for rating.</p>
+			<p class="muted">Five themes, among them Swiss and a Tufte-style Paper, plus brand themes: a base with your accent colour, or a full style guide that overrides any token. The gallery, <code>gallery/index.html</code>, shows every component on sample data and opens in any browser; the same code runs as a gallery Dive.</p>
+		</div>
+	</section>
+
+	<section id="recipe">
+		<h2><span class="num">02</span>Describe the data<span class="who">a recipe, written by an agent with the malleable-dive skill</span></h2>
+		<div>
+			<p>It starts with an interview. Before writing anything, the agent asks the owner eight questions, skipping what the data, existing Dives and Guides already answer:</p>
+			<ol class="qs">
+				<li>Who reads the briefing, how often, and what do they decide?</li>
+				<li>Which 3 to 5 numbers matter, how are they defined, and which are better when lower?</li>
+				<li>What are the targets, and what size of change is worth reporting?</li>
+				<li>Compare with what: last period, last year, or the target?</li>
+				<li>Which breakdowns explain a change, and which to ignore?</li>
+				<li>Which known patterns, events or data quirks matter?</li>
+				<li>Who acts on which kind of insight?</li>
+				<li>Which questions do you expect to ask?</li>
+			</ol>
+			<p>The answers go to three places: a MotherDuck Guide under the topic <code>briefings/&lt;db&gt;</code>, which the Flight reads before every analysis; the recipe; and <code>questions.json</code>, the eval set. After the first briefing the agent asks once more: which insight would you act on, which is noise, and what is missing?</p>
+			<p>A recipe is one Python file that describes the data in words a model can use, and one JSON file for the brand. The template and the components stay the same.</p>
+<pre><span class="c"># recipes/&lt;name&gt;/domain.py, abridged</span>
+<span class="k">ATTACH</span> = [("sales", "md:_share/…")]
+<span class="k">MARTS</span> = {"mart_orders": "SELECT order_date AS day, region, channel, … FROM sales.orders"}
+<span class="k">CATALOG</span> = {
+  "orders": {
+    "table": "mart_orders", "time": "day",
+    "dims": {"channel": ("channel", "Where the order came from: web, app, partner")},
+    "measures": {
+      "revenue":     ("sum(amount)", "currency", "Revenue after discounts"),
+      "return_rate": ("avg(returned::INT)", "pct", "Share of orders returned", "down"),
+    },
+  },
+}
+<span class="k">WATCH</span> = [("orders.revenue", "Revenue"), …]          <span class="c"># for the change scan</span>
+<span class="k">BRIEFING_PLAN</span> = {"blocks": [{"type": "kpi", …}, …]}   <span class="c"># the fixed morning page</span></pre>
+			<div class="build" role="img" aria-label="build.py turns the catalog, domain and app files into one Flight file and one Dive file">
+				<div class="col">
+					<div class="box"><span class="label">Components</span>components.json<br>kit/*.tsx</div>
+					<div class="box"><span class="label">Recipe</span>domain.py<br>app.json</div>
+					<div class="box"><span class="label">Template</span>engine.py<br>app.tsx</div>
+				</div>
+				<div class="arrow" aria-hidden="true">→</div>
+				<div class="box" style="text-align:center"><span class="label">build.py</span>python3 build.py recipes/&lt;name&gt;</div>
+				<div class="arrow" aria-hidden="true">→</div>
+				<div class="col">
+					<div class="box out"><span class="label">Flight</span>flight/main.py</div>
+					<div class="box out"><span class="label">Dive</span>dive/index.tsx</div>
+				</div>
+			</div>
+			<p class="muted"><code>app.json</code> holds the brand, the theme (a key, or a brand such as <code>{"base": "paper", "accent": "#0f766e"}</code>), example questions, the output database and the Flight id. The planner rules from <code>components.json</code> go into the Flight, so it can only plan components the Dive can draw.</p>
+		</div>
+	</section>
+
+	<section id="flight">
+		<h2><span class="num">03</span>Create the Flight<span class="who">runs on MotherDuck, daily at 06:00 UTC and on demand</span></h2>
+		<div>
+			<p>One Python program with five modes: <code>briefing</code> (the morning overview, from the fixed plan), <code>ask</code> (a question), <code>investigate</code> (an insight's question, with the page it came from), <code>refresh</code>, and <code>feedback</code>, which only records viewer events. Any run also records the events the Dive sends in its <code>FEEDBACK</code> config key. Only briefing and refresh rebuild the marts, so questions stay fast.</p>
+			<div class="lanes" role="img" aria-label="Flight steps: marts, plan, compile, changes, probe, narrate, publish, learn">
+				<div class="lane">
+					<div class="lane-name">Flight</div>
+					<div class="steps">
+						<div class="step"><div class="n">a</div><b>Marts</b><span>Curated tables from the sources</span></div>
+						<div class="step model"><div class="n">b</div><b>Plan</b><span>Picks datasets, measures, dimensions and components</span></div>
+						<div class="step"><div class="n">c</div><b>Compile</b><span>Python validates the plan, writes and runs the SQL</span></div>
+						<div class="step"><div class="n">d</div><b>Changes</b><span>Weekly change-point scan over the watched metrics</span></div>
+						<div class="step model"><div class="n">e</div><b>Probe</b><span>The analyst step: up to 3 follow-up queries that test why a number moved. Catalog ids only</span></div>
+						<div class="step model"><div class="n">f</div><b>Narrate</b><span>Headline, insights, captions, markers, from the results, the follow-ups, memory and Guides</span></div>
+						<div class="step"><div class="n">g</div><b>Publish</b><span>One spec row in <code>dive_specs</code>, plus the run, its model calls and its insights in the log tables</span></div>
+						<div class="step"><div class="n">h</div><b>Learn</b><span>Updates the Guide “What the &lt;db&gt; briefing has learned”</span></div>
+					</div>
+				</div>
+			</div>
+			<p>Every number in the narrative is checked against the data, the follow-up queries, the Guides and earlier insights. If fewer than 85% match, the narrator retries once with the missing numbers named, and the better draft wins. The memory Guide is written with <code>MD_CREATE_GUIDE</code> the first time and <code>MD_UPDATE_GUIDE</code> after that, so each version is kept.</p>
+			<p class="muted">A spec holds data and presentation, never SQL the Dive would run. That's why the Dive needs read access to one table only, and why a bad generation can't break the page.</p>
+<pre><span class="c">// one row in &lt;db&gt;.main.dive_specs, abridged and illustrative</span>
+{
+  <span class="k">"kind"</span>: "investigation",  <span class="k">"parent"</span>: "&lt;briefing id&gt;",
+  <span class="k">"prompt"</span>: "Why did visitors from the Other channel jump this month?",
+  <span class="k">"headline"</span>: "One referring site sent almost all of the new Other traffic.",
+  <span class="k">"blocks"</span>: [
+    { <span class="k">"type"</span>: "kpi",  "items": [{ "label": "Sessions · Other", "value": 4400, "prior": 450 }] },
+    { <span class="k">"type"</span>: "line", "series": […], "points": [{ "x": "2026-11-02", "series": "partner-site.example" }] },
+    { <span class="k">"type"</span>: "table", "drivers": true, "data": [{ "x": "referrer: partner-site.example", "before": 50, "now": 4100, "share": 0.93 }] },
+    { <span class="k">"type"</span>: "callouts", "items": [{ "title": "Check the traffic is real", "question": "…" }] }
+  ]
+}</pre>
+		</div>
+	</section>
+
+	<section id="dive">
+		<h2><span class="num">04</span>Create the Dive<span class="who">one .tsx file, pushed with the MotherDuck CLI</span></h2>
+		<div>
+			<p>The Dive's only SQL reads <code>dive_specs</code>. It parses the spec and hands each block to its component through the registry, so it loads fast and never needs access to the source data.</p>
+			<div class="cols">
+				<div><h3>Pages</h3><p>Briefings, answers and investigations, newest first, with each investigation listed under the page it came from.</p></div>
+				<div><h3>Data as of</h3><p>A date picker on a briefing. Pick an earlier date and the Flight writes the briefing as it would have read that day.</p></div>
+				<div><h3>Context for AI chat</h3><p>The open page's question, headline and component titles go into <code>useDiveState('context')</code>, which MotherDuck AI chat reads with each message.</p></div>
+			</div>
+		</div>
+	</section>
+
+	<section id="interact">
+		<h2><span class="num">05</span>Ask and investigate<span class="who">the viewer</span></h2>
+		<div>
+			<p>The briefing is the overview: numbers first, then insights, then the charts behind them. Each insight carries an investigation question.</p>
+			<div class="lanes" role="img" aria-label="The Dive starts the Flight, follows the run, and opens the new page">
+				<div class="lane">
+					<div class="lane-name">Dive</div>
+					<div class="steps">
+						<div class="step"><div class="n">1</div><b>Ask or Investigate</b><span>The floating ask bar, or the button on an insight</span></div>
+						<div class="step"><div class="n">2</div><b>Run the Flight</b><span><code>useRunFlight({MODE, PROMPT, REQUEST_ID, PARENT, AS_OF})</code></span></div>
+						<div class="step"><div class="n">3</div><b>Follow it</b><span><code>useFlightRun</code>; the bar shows each step</span></div>
+					</div>
+				</div>
+				<div class="handoff">15 to 35 seconds later the new spec row exists</div>
+				<div class="lane">
+					<div class="lane-name">Dive</div>
+					<div class="steps">
+						<div class="step"><div class="n">4</div><b>Open the page</b><span>Found by its REQUEST_ID</span></div>
+						<div class="step"><div class="n">5</div><b>Drill down</b><span>Breadcrumb back; its findings have their own Investigate buttons</span></div>
+					</div>
+				</div>
+			</div>
+			<p>Under each title, a line says what the page drew on, for example <b>Remembers 3 earlier briefings · 2 Guides · 3 follow-up queries · 40/40 numbers checked</b>. Insights and pages have thumbs up and down. A Dive can't write to a database, so ratings go to the Flight straight away in a <code>feedback</code> run. Other signals, such as chart switches, hidden blocks and Investigate clicks, ride along with the next run the viewer starts.</p>
+			<p>When the data shows what moved but not why, the page asks. Under the insights, <b>Questions for you</b> holds up to two questions about a date or a segment, such as "What caused Other-channel visitors to jump in the week of 2 Nov?", with likely explanations to pick from. A viewer can also pin a note to any week or value with a chart's pin button. A note shows at once on every chart with that date or value: a marker on line charts and a line under the chart.</p>
+			<p class="muted">An investigation filters every block to the segment the insight is about, and adds a drivers table that ranks which values of every other dimension moved the number. In testing, a spike in “Other” traffic came down to a single referring site; the same page showed nearly all of it came from one browser on desktop, which points at automated traffic rather than growth.</p>
+		</div>
+	</section>
+
+	<section id="arrange">
+		<h2><span class="num">06</span>Rearrange<span class="who">the viewer, in Arrange mode</span></h2>
+		<div>
+			<p>Rows of preset containers. Drag a component into a slot to swap places, or between rows for a new one. Pick a row's layout on its left.</p>
+			<div class="rows" role="img" aria-label="Row presets: full, halves, two thirds plus one third, one third plus two thirds, thirds">
+				<div class="row"><span class="name">Full</span><div class="slots" style="grid-template-columns:1fr"><div class="slot filled">Headline numbers</div></div></div>
+				<div class="row"><span class="name">⅔ + ⅓</span><div class="slots" style="grid-template-columns:2fr 1fr"><div class="slot filled">Weekly requests by borough</div><div class="slot drop">Drop here</div></div></div>
+				<div class="row"><span class="name">Halves</span><div class="slots" style="grid-template-columns:1fr 1fr"><div class="slot filled">Top complaint types</div><div class="slot">Empty slot</div></div></div>
+				<div class="row"><span class="name">⅓ + ⅔</span><div class="slots" style="grid-template-columns:1fr 2fr"><div class="slot">Empty slot</div><div class="slot filled">Agency performance</div></div></div>
+				<div class="row"><span class="name">Thirds</span><div class="slots" style="grid-template-columns:1fr 1fr 1fr"><div class="slot filled">Daily requests</div><div class="slot filled">Requests by agency</div><div class="slot">Empty</div></div></div>
+			</div>
+			<div class="chips" aria-label="Variants of a line chart"><span class="chip on">Line</span><span class="chip">Area</span><span class="chip">Bar</span><span class="chip">Heatmap</span><span class="chip">Table</span></div>
+			<p class="muted">Each component can switch to any other that can show its data: a KPI row to gauges, a line to a heatmap. Hide what you don't need, switch the theme, or reset. The arrangement is saved per page in <code>useDiveState('layout')</code>, travels with the link, and always wins over the generated layout. Generating a new page never moves an existing one.</p>
+			<p class="muted">The Dive also learns defaults. When viewers switch a block type to the same chart type 3 or more times, that chart type becomes the default for every block of that type. A viewer's own choice still wins.</p>
+		</div>
+	</section>
+
+	<section id="learn">
+		<h2><span class="num">07</span>Learn<span class="who">the Flight and the Dive, from every run</span></h2>
+		<div>
+			<p>Every run, model call, insight and viewer signal is logged in the output database, and the next analysis reads it back.</p>
+			<div class="cycle" role="img" aria-label="The learning loop: run, log, read back, better next run">
+				<div><div class="n">1</div><b>Run</b><span>A briefing, a question or an investigation</span></div>
+				<div><div class="n">2</div><b>Log</b><span><code>gen_runs</code>, <code>llm_calls</code>, <code>insights</code>, <code>feedback</code>, <code>annotations</code>, <code>evals</code></span></div>
+				<div><div class="n">3</div><b>Read back</b><span>The last 3 briefings' insights, ratings, viewer notes, open questions, chart preferences, frequent questions, the recipe's Guides</span></div>
+				<div><div class="n">4</div><b>Better next run</b><span>Insights continue instead of repeating; noise gets dropped; targets get cited</span></div>
+			</div>
+			<p class="loopback">and around again, every morning and every question</p>
+			<p>The narrator marks each insight against the earlier ones: <b>new</b>, <b>ongoing</b>, <b>worsening</b>, <b>improving</b> or <b>resolved</b>. The engine then carries the first date and the count forward. One NYC 311 insight across weekly briefings:</p>
+			<div class="evolve" aria-label="An insight across briefings">
+				<div><span class="d">12 Dec</span><b>DSNY slow closures rose</b><span class="c">New</span></div>
+				<div><span class="d">19 Dec</span><b>DSNY slow closures worsened</b><span class="c worse">Worsening · since 12 Dec</span></div>
+				<div><span class="d">26 Dec</span><b>DSNY delays remain high</b><span class="c worse">Worsening · 3 briefings</span></div>
+			</div>
+			<p>The Dive's <b>Memory</b> page reads the same tables. It shows the insight timeline, what viewers ask, what they did, and each prompt version.</p>
+			<h3 style="font-size:15px;margin:22px 0 4px">Improving prompts and models</h3>
+			<p class="muted">The prompt version is a hash of every instruction and schema, so it changes whenever a prompt does. <code>eval.py</code> scores the planner on <code>recipes/&lt;name&gt;/questions.json</code>, and with <code>--narrate</code> it also scores how many numbers are grounded in the data. The Memory page compares prompt versions and models on speed, grounded share, eval score and ratings.</p>
+			<p class="muted">On NYC 311, the planner scored 1.00 on all 12 questions, and the narrate eval grounded every number on 3 questions. One prompt change, from version <code>0cb291cfec</code> to <code>04751d1f87</code>, kept those scores and cut the average time from 22.5 to 19.7 seconds.</p>
+		</div>
+	</section>
+
+
+	<section id="triggers">
+		<h2>One Flight, many triggers<span class="who">a single Flight per recipe, with five modes</span></h2>
+		<div>
+			<p>Each recipe deploys one Flight. Every trigger runs the same <code>main.py</code>, and the <code>MODE</code> config key decides what that run does. One Flight means one owner token, one <code>run</code> grant for viewers, and one place that checks every input.</p>
+			<div class="scroll">
+				<table>
+					<thead><tr><th>Trigger</th><th>Started by</th><th>Config it sends</th><th>Mode</th></tr></thead>
+					<tbody>
+						<tr><td>Morning briefing</td><td>The Flight's schedule, <code>0 6 * * *</code></td><td>The Flight's own defaults</td><td class="m">briefing, every board</td></tr>
+						<tr><td>Ask bar</td><td>The Dive, with <code>useRunFlight</code></td><td><code>PROMPT</code>, <code>REQUEST_ID</code>, <code>BOARD</code>, queued <code>FEEDBACK</code></td><td class="m">ask</td></tr>
+						<tr><td>Investigate button</td><td>The Dive</td><td><code>PROMPT</code> (the insight's question), <code>PARENT</code> (its page id)</td><td class="m">investigate</td></tr>
+						<tr><td>Data as of a date</td><td>The Dive's date picker</td><td><code>AS_OF</code></td><td class="m">briefing</td></tr>
+						<tr><td>Rating, answer or note</td><td>The Dive, straight away</td><td><code>FEEDBACK</code>: a JSON list of events</td><td class="m">feedback</td></tr>
+						<tr><td>Rebuild the marts</td><td>The owner or an agent</td><td>None</td><td class="m">refresh</td></tr>
+						<tr><td>Manual run</td><td><code>MD_RUN_FLIGHT</code>, the MCP <code>run_flight</code> tool, the CLI</td><td>Any of the above</td><td class="m">any</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="muted" style="margin-top:14px">Config sent with a run overrides the Flight's config for that run only. The Flight checks every value a caller can pass: a known mode, id formats, a 600-character prompt, ISO dates and the shape of each event. <code>MODEL</code> picks the <code>prompt()</code> model. The Dive follows a run with <code>useFlightRun</code> and finds the new page by its <code>REQUEST_ID</code>. <code>eval.py</code> runs the same engine on your machine, outside the schedule.</p>
+
+			<h3 style="font-size:15px;margin:22px 0 4px">One Flight, several boards</h3>
+			<p class="muted">A board is a dashboard for one audience on the same data. NYC 311 has two: <b>Operations</b>, a daily briefing on the last 28 days, and <b>Leadership</b>, a monthly briefing on the last complete month against the same month a year earlier. Each board has its own morning page, memory and Dive, and the Dives link to each other.</p>
+			<div class="scroll">
+				<table>
+					<thead><tr><th>Part</th><th>Shared by every board</th><th>Per board</th></tr></thead>
+					<tbody>
+						<tr><td>Recipe</td><td>Sources, marts, catalog</td><td><code>BOARDS = {"leadership": {"CADENCE": "monthly", "BRIEFING_PLAN": …}}</code></td></tr>
+						<tr><td>Flight</td><td>One Flight, token and grant</td><td>A <code>BOARD</code> config key; the 06:00 briefing writes every board, a monthly board once a month</td></tr>
+						<tr><td>Tables</td><td><code>annotations</code>: a note on one board shows on all</td><td>A <code>board</code> column on <code>dive_specs</code>, <code>gen_runs</code>, <code>insights</code> and <code>feedback</code></td></tr>
+						<tr><td>Dive</td><td>The component kit</td><td><code>board</code> in <code>app.json</code>; every query filters on it</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="muted" style="margin-top:14px">Monthly boards use the windows <code>last_full_month</code> and <code>last_12_full_months</code>, which compare calendar months: a month against the month before, or against the same month a year earlier. Data from different domains, such as docs analytics and sales, belongs in separate Flights. Each keeps its own schedule, output database, run grant and 600-second limit.</p>
+		</div>
+	</section>
+
+	<section id="tables">
+		<h2>Where the data lives<span class="who">one output database per recipe, plus Guides</span></h2>
+		<div>
+			<p>The Flight is the only writer. It reads the sources, builds the marts, and writes every page and log row into the recipe's output database, <code>&lt;db&gt;.main</code>. The Dive only reads that database: it needs a share of it and <code>run</code> on the Flight, and never sees the sources.</p>
+			<div class="scroll">
+				<div class="dflow" role="img" aria-label="Sources feed the Flight. The Flight writes marts, pages, logs and notes to the output database and Guides. The Dive reads pages, notes, feedback and logs, and starts the Flight.">
+					<div class="stack">
+						<div class="colh">Sources</div>
+						<div class="t"><code>ATTACH</code><span>Shares or databases, read-only</span></div>
+						<div class="t guide"><code>Business context</code><span>Guide from the recipe interview</span></div>
+					</div>
+					<div class="ar" aria-hidden="true">→</div>
+					<div class="stack">
+						<div class="colh">Flight</div>
+						<div class="t"><code>marts</code><span>briefing and refresh only</span></div>
+						<div class="t"><code>plan · compile · probe</code><span>reads the marts and the catalog</span></div>
+						<div class="t"><code>narrate</code><span>reads memory, notes and Guides</span></div>
+						<div class="t"><code>publish · learn</code><span>writes pages, logs and the memory Guide</span></div>
+						<div class="t hot"><code>record_feedback</code><span>on every run, and in feedback runs</span></div>
+					</div>
+					<div class="ar" aria-hidden="true">→</div>
+					<div class="stack">
+						<div class="colh" style="text-transform:none;font-family:var(--mono);letter-spacing:0">&lt;db&gt;.main</div>
+						<div class="t"><code>mart_*</code><span>curated tables</span></div>
+						<div class="t"><code>dive_specs</code><span>one spec per page</span></div>
+						<div class="t"><code>gen_runs · llm_calls</code><span>each run and model call</span></div>
+						<div class="t"><code>insights</code><span>each insight, with continuity</span></div>
+						<div class="t hot"><code>feedback · annotations</code><span>viewer events and notes</span></div>
+						<div class="t"><code>evals</code><span>from eval.py</span></div>
+						<div class="t guide"><code>Memory Guide</code><span>What the &lt;db&gt; briefing has learned</span></div>
+					</div>
+					<div class="ar" aria-hidden="true">→</div>
+					<div class="stack">
+						<div class="colh">Dive</div>
+						<div class="t"><code>pages</code><span>reads dive_specs</span></div>
+						<div class="t hot"><code>notes on charts</code><span>reads annotations</span></div>
+						<div class="t"><code>chart defaults</code><span>reads feedback</span></div>
+						<div class="t"><code>Memory page</code><span>reads the log tables</span></div>
+						<div class="t hot"><code>useRunFlight</code><span>starts the Flight again</span></div>
+					</div>
+				</div>
+			</div>
+			<div class="keys"><span><i></i>table or step</span><span><i class="hot"></i>the viewer-feedback path</span><span><i class="guide"></i>a MotherDuck Guide</span></div>
+			<div class="scroll">
+				<table>
+					<thead><tr><th>Table</th><th>One row per</th><th>Written by</th><th>Read by</th></tr></thead>
+					<tbody>
+						<tr><td class="m">mart_*</td><td>day and segment, or event</td><td>briefing and refresh runs</td><td>the compile and probe steps</td></tr>
+						<tr><td class="m">dive_specs</td><td>page</td><td>the publish step</td><td>the Dive; an investigation reads its parent page</td></tr>
+						<tr><td class="m">gen_runs</td><td>run</td><td>every generation: steps, plan, follow-ups, narrative, checks</td><td>the Memory page; the next run reads open questions from its narrative</td></tr>
+						<tr><td class="m">llm_calls</td><td><code>prompt()</code> call</td><td>the plan, probe and narrate steps</td><td>the Memory page's prompt versions</td></tr>
+						<tr><td class="m">insights</td><td>insight on a page</td><td>the publish step</td><td>the next briefing, for continuity; the Memory timeline</td></tr>
+						<tr><td class="m">feedback</td><td>viewer event</td><td><code>record_feedback</code></td><td>the next run (ratings, preferences); the Dive (learned chart defaults)</td></tr>
+						<tr><td class="m">annotations</td><td>viewer note</td><td><code>record_feedback</code>, from <code>annotate</code> and <code>unannotate</code> events</td><td>the Dive (notes on charts); the next run's narrator; the memory Guide</td></tr>
+						<tr><td class="m">evals</td><td>eval question</td><td><code>eval.py</code></td><td>the Memory page</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="muted" style="margin-top:14px">The Flight reads every Guide under the topic <code>briefings/&lt;db&gt;</code> with <code>MD_LIST_GUIDES</code> and <code>MD_GET_GUIDE</code>. The business-context Guide comes from the interview, and the Flight rewrites the memory Guide after each briefing. People can edit both, and AI Chat reads them.</p>
+		</div>
+	</section>
+
+	<section id="answers">
+		<h2>Where an answer goes<span class="who">a question, from the narrator to the next briefing</span></h2>
+		<div>
+			<p>A Dive can't write to a database, so a viewer's answer travels through the Flight. About ten seconds after the viewer clicks Answer, the note is in <code>annotations</code>. Until then the page shows it from the Dive's own state.</p>
+			<div class="lanes" role="img" aria-label="Question lifecycle: the Flight asks, the Dive collects the answer, a feedback run stores it, and the next briefing uses it">
+				<div class="lane">
+					<div class="lane-name">Flight</div>
+					<div class="steps">
+						<div class="step model"><div class="n">1</div><b>Ask</b><span>The narrator returns <code>viewer_questions</code>: a date or a segment, with likely explanations</span></div>
+						<div class="step"><div class="n">2</div><b>Check</b><span>Kept if the date or value is in the chart's data, the dimension is in the catalog, and no note answers it</span></div>
+						<div class="step"><div class="n">3</div><b>Publish</b><span>A <code>questions</code> block in the spec, and the questions in <code>gen_runs.narrative</code></span></div>
+					</div>
+				</div>
+				<div class="handoff">the Dive shows the questions card</div>
+				<div class="lane">
+					<div class="lane-name">Dive</div>
+					<div class="steps">
+						<div class="step"><div class="n">4</div><b>Answer</b><span>An explanation, a kind of note and a few words</span></div>
+						<div class="step"><div class="n">5</div><b>Show it</b><span>The note appears on every matching chart, from local state</span></div>
+						<div class="step"><div class="n">6</div><b>Send it</b><span><code>useRunFlight({ MODE: 'feedback', FEEDBACK })</code></span></div>
+					</div>
+				</div>
+				<div class="handoff">a feedback run: no marts, no model calls</div>
+				<div class="lane">
+					<div class="lane-name">Flight</div>
+					<div class="steps">
+						<div class="step"><div class="n">7</div><b>Store</b><span><code>record_feedback</code> checks the event and adds a row to <code>annotations</code> and to <code>feedback</code></span></div>
+						<div class="step"><div class="n">8</div><b>Next briefing</b><span>Reads every active note and open question; explains the movement with the note, and doesn't ask again</span></div>
+						<div class="step"><div class="n">9</div><b>Learn</b><span>Lists the notes in the memory Guide, where AI Chat reads them</span></div>
+					</div>
+				</div>
+			</div>
+<pre class="ev"><span class="c">// FEEDBACK, as the Dive sends it</span>
+[{ <span class="k">"e"</span>: "annotate", <span class="k">"s"</span>: "&lt;page id&gt;", <span class="k">"k"</span>: "date", <span class="k">"x"</span>: "2022-12-19", <span class="k">"g"</span>: "week",
+   <span class="k">"cat"</span>: "event", <span class="k">"note"</span>: "Winter Storm Elliott cold snap, 23-26 Dec",
+   <span class="k">"q"</span>: "What drove the jump in heat complaints in the week of 19 Dec?" }]
+
+<span class="c">-- the row it becomes in &lt;db&gt;.main.annotations</span>
+kind  x           grain  dimension  value  category  note                                       active
+date  2022-12-19  week                     event     Winter Storm Elliott cold snap, 23-26 Dec  true</pre>
+			<p class="muted">Kinds of note: event, release, campaign, data issue, expected, not important, and other, for when it's unclear what happened. A question nobody answers stays on later briefings' pages instead of being asked again in new words. The Flight drops an event with an unknown dimension, a malformed date or an unknown kind. Remove on the Memory page sends an <code>unannotate</code> event, which marks the note inactive. In testing, two notes on NYC 311 changed the next cloud briefing's text to "Viewers noted Winter Storm Elliott on 2022-12-19 and fewer agency staff during the holiday week of 2022-12-26."</p>
+		</div>
+	</section>
+
+	<section>
+		<h2>Who decides what</h2>
+		<div class="scroll">
+			<table>
+				<thead><tr><th>Decision</th><th>Made by</th><th>Kept honest by</th></tr></thead>
+				<tbody>
+					<tr><td>Which components exist and how they look</td><td>The developer, in the component kit</td><td>One catalog read by the planner and the Dive</td></tr>
+					<tr><td>Which data answers the question</td><td>The model, choosing from the catalog</td><td>A strict JSON schema whose allowed values are catalog ids and component types</td></tr>
+					<tr><td>The SQL</td><td>Python, from the validated plan</td><td>Filter values are bound parameters; the model never writes SQL</td></tr>
+					<tr><td>What changed, and why</td><td>A deterministic scan and the drivers table</td><td>Same input, same answer; given to the narrator as facts</td></tr>
+					<tr><td>Headline, insights, markers</td><td>The model, from the query results</td><td>A highlight or marker survives only if its value and series exist in the data</td></tr>
+					<tr><td>Follow-up queries</td><td>The model, as hypotheses from catalog ids</td><td>Compiled and run by Python like any block</td></tr>
+					<tr><td>New, ongoing or resolved</td><td>The model, against the logged insights</td><td>The engine links to the earlier insight and carries its first date and count</td></tr>
+					<tr><td>Every number in the text</td><td>The model</td><td>Checked against the data, Guides and earlier insights; one retry when too many miss</td></tr>
+					<tr><td>Questions for viewers</td><td>The model, when it can't explain a movement</td><td>Kept only when the date or value is in the data and no note answers it; the Flight checks every answer</td></tr>
+					<tr><td>Layout, chart type, theme</td><td>The viewer</td><td>Their arrangement overrides the generated one; Reset brings it back</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<section>
+		<h2>Three layers</h2>
+		<div class="cols">
+			<div><h3>Components</h3><p>Developer-owned. The component kit, its catalog and its themes, copied into each Dive as source.</p></div>
+			<div><h3>Content</h3><p>Flight-owned. Which data, which components and what to say, written as a spec each time the schedule fires or someone asks or investigates.</p></div>
+			<div><h3>Arrangement</h3><p>Viewer-owned. Rows and slots, each component's variant, hidden components and the theme.</p></div>
+			<div><h3>Memory</h3><p>Shared. The log tables and the recipe's Guides, which the next analysis reads back.</p></div>
+		</div>
+	</section>
+
+	<section>
+		<h2>Run it yourself<span class="who">this recipe, on the NYC 311 sample data</span></h2>
+		<div>
+<pre><span class="c"># from generative-briefing-dive/</span>
+export MOTHERDUCK_TOKEN=...
+python3 build.py recipes/nyc-311
+cd recipes/nyc-311/flight
+MODE=briefing REQUEST_ID=t1 uv run --with duckdb==1.5.6 python main.py
+cd ../../..
+uv run --with duckdb==1.5.6 python eval.py recipes/nyc-311 --out baseline.json
+uv run --with duckdb==1.5.6 python deploy.py recipes/nyc-311</pre>
+			<div class="links">
+				<a href="README.md"><b>README</b><span>The interview questions, what to adjust for your own data, deploying and sharing.</span></a>
+				<a href="LEARNING.md"><b>LEARNING.md</b><span>The log tables, memory, Guides, viewer notes, the number check and evals in detail.</span></a>
+			</div>
+			<p class="muted" style="margin-top:16px">To adapt it, copy <code>recipes/nyc-311</code> to <code>recipes/&lt;name&gt;</code> and replace <code>domain.py</code>, <code>app.json</code> and <code>questions.json</code>. The template and the components stay the same.</p>
+		</div>
+	</section>
+</div>
