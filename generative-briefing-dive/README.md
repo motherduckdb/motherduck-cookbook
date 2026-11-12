@@ -96,11 +96,57 @@ Copy `recipes/nyc-311` to `recipes/<name>` and replace:
   - `WATCH`: metrics for the change scan.
   - `BRIEFING_PLAN`: the fixed daily page.
   - Context for the model, and the learning settings: `GUIDE_TOPICS`, `ANALYST_PROBES`, `DEFAULT_MODEL`.
-- **`app.json`:** brand, theme (`motherduck`, `swiss`, `paper`, `duck`, `night`, or a brand spec such as `{ "base": "paper", "accent": "#0f766e" }`), example questions and the Flight name.
+- **`app.json`:** brand name, theme (see [Theme and brand](#theme-and-brand)), example questions and the Flight name.
 - **`questions.json`:** 8 to 12 questions with what a good plan uses, plus one off-topic question.
 - **`business-context.sql`:** your interview answers as a Guide.
 
 The components live in `dive-components/`: KPI rows, metric cards, gauges, line, area, bar, table, calendar and matrix heatmaps, Sankey, treemap, timeline, callouts and a date picker. Add your own by copying `dive-components/examples/funnel.tsx`.
+
+## Theme and brand
+
+Ask which look the readers expect, and whether there is a brand colour or a style guide. Then set `theme` in `app.json` one of three ways.
+
+**1. Pick a built-in theme.** Set `"theme"` to its key:
+
+| Key | Look |
+| --- | --- |
+| `swiss` | White page, Helvetica, no cards. Greyscale series told apart by dashes, with red only for emphasis. |
+| `paper` | Tufte: cream page, book serif (ET Book, falling back to Palatino or Georgia), no cards and no gridlines. Greyscale series with one muted red for emphasis. |
+| `motherduck` | The default MotherDuck Dive look: flat, light grey page, MotherDuck palette. |
+| `duck` | MotherDuck brand: beige page, hard borders and offset shadows, bright series. |
+| `night` | Dark page with rounded panels. |
+
+**2. Change the brand colour.** Use a theme as the base and set `accent`:
+
+```json
+"theme": { "base": "paper", "name": "Acme", "accent": "#0f766e" }
+```
+
+On `swiss` and `paper` the accent marks only emphasis: highlighted values, the critical tone and active controls. The series stay greyscale. On the other themes the accent also becomes the first series colour.
+
+**3. Bring your own style guide.** Any theme setting can be overridden. Settings you leave out come from `base`:
+
+```json
+"theme": {
+  "base": "swiss",
+  "name": "Acme",
+  "accent": "#ff5a00",
+  "bg": "#ffffff", "panel": "#ffffff", "text": "#1a1a1a", "muted": "#6b6b6b",
+  "line": "#e5e5e5", "rule": "#1a1a1a", "grid": "#f0f0f0",
+  "font": "\"Acme Sans\", Inter, sans-serif", "heading": "\"Acme Display\", Inter, sans-serif",
+  "series": ["#ff5a00", "#1a1a1a", "#8a8a8a", "#ffb48a", "#4a4a4a", "#c4c4c4"],
+  "tones": { "positive": { "fg": "#127a3a" }, "critical": { "fg": "#c4001a", "line": "#c4001a" } },
+  "radius": 0, "gridlines": true
+}
+```
+
+- **Colours:** `bg` (page), `panel` (cards and popovers), `text`, `muted`, `line` (hairlines), `rule` (heavy rules), `grid` (gridlines and gauge tracks), `accent`, `accentSoft` (selected backgrounds), `highlight` (annotated points).
+- **Series:** `series` holds up to six chart colours. To tell greyscale series apart by line style, set `"mono": true` and `dashes`, such as `[null, null, "6 3", "2 3"]`.
+- **Tones:** `tones.critical`, `warning`, `positive`, `info` and `neutral`, each with `fg`, `bg` and `line`. Set only the parts you want to change.
+- **Type:** `font` (body), `heading` (titles and headline figures), `displayWeight` and `displayTracking` (weight and letter spacing of titles and headline figures). The fonts must be installed on the viewer's machine, so end each stack with a common fallback.
+- **Shape:** `flat` (no card chrome, ruled sections), `radius`, `border`, `shadow`, and `gridlines` (`false` hides chart gridlines).
+
+All settings are listed in `THEMES` in `dive-components/kit/core.tsx`. A brand theme appears in the viewer's theme switcher under its `name`. To limit the switcher, list the themes viewers may pick in `"themes"`, such as `["brand", "paper"]`. With only one theme listed, the switcher is hidden. A board in `boards` can set its own `theme` and `themes`.
 
 ## Boards: one Flight, several dashboards
 

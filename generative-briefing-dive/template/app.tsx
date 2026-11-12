@@ -614,7 +614,7 @@ function MemoryPage({ db, nav }: any) {
 				<div className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: t.text }}>
 					<Brain size={13} /> Memory
 				</div>
-				<h1 className={`${t.flat ? 'text-4xl font-bold' : 'text-2xl font-semibold'} leading-tight`} style={{ fontFamily: t.heading, letterSpacing: t.flat ? -1.2 : -0.3 }}>
+				<h1 className={`${t.flat ? 'text-4xl font-bold' : 'text-2xl font-semibold'} leading-tight`} style={{ fontFamily: t.heading, fontWeight: t.displayWeight, letterSpacing: t.displayTracking ?? (t.flat ? -1.2 : -0.3) }}>
 					What this Dive has learned
 				</h1>
 				<p className="text-sm" style={{ color: t.muted, maxWidth: 760 }}>
@@ -783,7 +783,7 @@ function SpecPage({ spec, arrange, onDraft, nav }: any) {
 						</span>
 					)}
 				</div>
-				<h1 className={`${t.flat ? 'text-4xl font-bold' : 'text-2xl font-semibold'} leading-tight`} style={{ fontFamily: t.heading, letterSpacing: t.flat ? -1.2 : -0.3, maxWidth: 1000 }}>
+				<h1 className={`${t.flat ? 'text-4xl font-bold' : 'text-2xl font-semibold'} leading-tight`} style={{ fontFamily: t.heading, fontWeight: t.displayWeight, letterSpacing: t.displayTracking ?? (t.flat ? -1.2 : -0.3), maxWidth: 1000 }}>
 					{spec.kind === 'briefing' ? spec.title : spec.prompt}
 				</h1>
 				{spec.headline && (
@@ -901,11 +901,15 @@ function SpecPage({ spec, arrange, onDraft, nav }: any) {
 }
 
 export default function GenerativeBriefing() {
-	// APP.theme is a theme key, or a brand: { base, name, accent, font, radius, ... }.
+	// APP.theme is a theme key, or a brand: { base, name, accent, ...tokens }.
+	// APP.themes, when set, lists the themes viewers can switch to ('brand' for the brand).
 	const brand = APP.theme && typeof APP.theme === 'object' ? makeTheme(APP.theme) : null;
-	const [themeKey, setThemeKey] = useDiveState<string>('theme', brand ? 'brand' : APP.theme || 'swiss');
+	const fallback = brand ? 'brand' : THEMES[APP.theme] ? APP.theme : 'swiss';
+	const allowed = (key: string) => !Array.isArray(APP.themes) || APP.themes.includes(key) || key === fallback;
+	const themeOptions = [...(brand ? [['brand', brand]] : []), ...Object.entries(THEMES)].filter(([k]: any) => allowed(k));
+	const [storedTheme, setThemeKey] = useDiveState<string>('theme', fallback);
+	const themeKey = themeOptions.some(([k]: any) => k === storedTheme) ? storedTheme : fallback;
 	const theme = themeKey === 'brand' && brand ? brand : THEMES[themeKey] || THEMES.swiss;
-	const themeOptions = [...(brand ? [['brand', brand]] : []), ...Object.entries(THEMES)];
 	const [specId, setSpecId] = useDiveState<string | null>('spec', null);
 	const [arrange, setArrange] = useState(false);
 	const [view, setView] = useDiveState<string>('view', 'page');
@@ -1106,7 +1110,7 @@ export default function GenerativeBriefing() {
 						)}
 						<span className="flex-1" />
 						{rows.length > 0 && <PagesMenu rows={rows} selected={currentId} onSelect={(id: string) => { setView('page'); setSpecId(id); }} />}
-						<Segmented options={themeOptions.map(([k, v]: any) => ({ value: k, label: v.name, icon: !t.flat && k === themeKey ? <Palette size={11} /> : null }))} value={themeKey} onChange={setThemeKey} />
+						{themeOptions.length > 1 && <Segmented options={themeOptions.map(([k, v]: any) => ({ value: k, label: v.name, icon: !t.flat && k === themeKey ? <Palette size={11} /> : null }))} value={themeKey} onChange={setThemeKey} />}
 						<Button variant={arrange ? 'primary' : 'outline'} size="sm" onClick={() => setArrange(!arrange)}>
 							<LayoutGrid size={13} /> {arrange ? 'Done' : 'Arrange'}
 						</Button>

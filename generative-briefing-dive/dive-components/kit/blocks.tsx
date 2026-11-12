@@ -29,7 +29,7 @@ function KpiBlock({ block }: any) {
 						</span>
 					</div>
 					<div className={`${t.flat ? 'mt-2 flex-col items-start gap-1' : 'mt-1 items-baseline gap-2'} flex`}>
-						<span className={`${t.flat ? 'text-5xl font-bold' : 'text-3xl font-semibold'} tabular-nums`} style={{ fontFamily: t.heading, letterSpacing: t.flat ? -1.5 : -0.5, lineHeight: 1.05 }}>
+						<span className={`${t.flat ? 'text-5xl font-bold' : 'text-3xl font-semibold'} tabular-nums`} style={{ fontFamily: t.heading, fontWeight: t.displayWeight, letterSpacing: t.displayTracking ?? (t.flat ? -1.5 : -0.5), lineHeight: 1.05 }}>
 							{fmt(it.value, it.format)}
 						</span>
 						<Delta value={it.value} prior={it.prior} measure={it.key} good={it.good} label={cmp} />
@@ -79,7 +79,7 @@ function LineBlock({ block, height = 240 }: any) {
 			<Legend series={series} colors={colors} />
 			<ResponsiveContainer width="100%" height={height}>
 				<LineChart data={data} margin={{ top: (block.annotations || []).length ? 24 : 8, right: 16, bottom: 0, left: 0 }}>
-					<CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={false} />
+					{t.gridlines !== false && <CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={false} />}
 					<XAxis dataKey="x" tickFormatter={(v) => fmtPeriod(v, grain)} fontSize={11} stroke={t.muted} tickLine={false} axisLine={{ stroke: t.grid }} minTickGap={28} />
 					<YAxis tickFormatter={axisFmt(fmt0)} fontSize={11} stroke={t.muted} tickLine={false} axisLine={false} width={48} domain={ticks ? [0, ticks[ticks.length - 1]] : ['auto', 'auto']} ticks={ticks} />
 					<Tooltip content={<ChartTooltip series={series} grain={grain} />} />
@@ -140,7 +140,7 @@ function BarBlock({ block }: any) {
 			<Legend series={series} colors={colors} />
 			<ResponsiveContainer width="100%" height={height}>
 				<BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 6, right: 12, bottom: 0, left: 0 }} barGap={2}>
-					<CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={horizontal} horizontal={!horizontal} />
+					{t.gridlines !== false && <CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={horizontal} horizontal={!horizontal} />}
 					{horizontal ? (
 						<>
 							<XAxis type="number" tickFormatter={axisFmt(fmt0)} fontSize={11} stroke={t.muted} tickLine={false} axisLine={false} />

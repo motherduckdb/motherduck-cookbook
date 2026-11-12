@@ -74,7 +74,7 @@ function AreaBlock({ block, height = 220 }: any) {
 							<stop offset="100%" stopColor={colors[series.indexOf(lead)]} stopOpacity={0} />
 						</linearGradient>
 					</defs>
-					<CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={false} />
+					{t.gridlines !== false && <CartesianGrid strokeDasharray="3 3" stroke={t.grid} vertical={false} />}
 					<XAxis dataKey="x" tickFormatter={(v) => fmtPeriod(v, grain)} fontSize={11} stroke={t.muted} tickLine={false} axisLine={{ stroke: t.grid }} minTickGap={40} />
 					<YAxis tickFormatter={axisFmt(fmt0)} fontSize={11} stroke={t.muted} tickLine={false} axisLine={false} width={48} domain={ticks ? [0, ticks[ticks.length - 1]] : ['auto', 'auto']} ticks={ticks} />
 					<Tooltip cursor={{ stroke: t.muted, strokeDasharray: '3 3' }} content={<ChartTooltip series={series} grain={grain} />} />

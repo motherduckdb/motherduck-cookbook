@@ -126,30 +126,40 @@ const THEMES: Record<string, any> = {
 			neutral: { fg: '#767676', bg: 'transparent', line: '#e6e6e6' },
 		},
 	},
+	// Tufte: cream page, ink text, a book serif, no chrome and no gridlines. Data
+	// ink only: greyscale series told apart by dashes, one muted red for emphasis.
 	paper: {
 		name: 'Paper',
-		bg: '#f6f6f4',
-		panel: '#ffffff',
-		text: '#1f1d1a',
-		muted: '#6b6862',
-		line: '#e7e5e0',
-		grid: '#efede9',
-		border: '1px solid #e7e5e0',
-		radius: 12,
-		shadow: '0 1px 2px rgba(0,0,0,0.04)',
-		accent: '#0777b3',
-		accentSoft: '#e6f1f8',
-		highlight: '#e18727',
-		series: ['#0777b3', '#bd4e35', '#2d7a00', '#e18727', '#638cad', '#8a6bbf'],
-		mutedSeries: '#c9c6bf',
-		font: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
-		heading: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+		flat: true,
+		mono: true,
+		gridlines: false,
+		displayWeight: 400,
+		displayTracking: 0,
+		bg: '#fffff8',
+		panel: '#fffff8',
+		text: '#111111',
+		muted: '#6b6b63',
+		line: '#e3e1d6',
+		rule: '#111111',
+		grid: '#ebe9df',
+		border: '1px solid #e3e1d6',
+		radius: 0,
+		shadow: 'none',
+		accent: '#a6261d',
+		accentSoft: '#f4f1e4',
+		highlight: '#a6261d',
+		series: ['#111111', '#8c8c84', '#4d4d48', '#b9b8ae', '#2b2b28', '#6f6f68'],
+		dashes: [undefined, undefined, '6 3', '2 3', '10 3 2 3', '1 2'],
+		mutedSeries: '#d6d4c8',
+		gap: 40,
+		font: 'et-book, "ETBembo", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif',
+		heading: 'et-book, "ETBembo", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif',
 		tones: {
-			critical: { fg: '#a3150a', bg: '#fdecea', line: '#f5c2bd' },
-			warning: { fg: '#8a5300', bg: '#fff4e0', line: '#f6d9a4' },
-			positive: { fg: '#24660a', bg: '#ecf6e6', line: '#c5e2b5' },
-			info: { fg: '#0b5f8f', bg: '#e8f2f9', line: '#bcd9ec' },
-			neutral: { fg: '#4a4844', bg: '#f1f0ed', line: '#e0ded9' },
+			critical: { fg: '#a6261d', bg: 'transparent', line: '#a6261d' },
+			warning: { fg: '#111111', bg: 'transparent', line: '#111111' },
+			positive: { fg: '#111111', bg: 'transparent', line: '#111111' },
+			info: { fg: '#111111', bg: 'transparent', line: '#111111' },
+			neutral: { fg: '#6b6b63', bg: 'transparent', line: '#e3e1d6' },
 		},
 	},
 	duck: {
@@ -206,28 +216,29 @@ const THEMES: Record<string, any> = {
 	},
 };
 
-// A brand theme: a base theme plus a few tokens. Accepts a theme key ('swiss') or
-// { base, name, accent, series, font, heading, radius, bg, panel, text, muted }.
-// In a flat (Swiss) base the accent marks only emphasis: highlights, the critical
-// tone and active controls; series stay greyscale. Elsewhere the accent leads the
-// series palette.
+// A brand theme: a base theme plus any tokens you set. Accepts a theme key
+// ('swiss') or { base, name, accent, ...tokens }. Any token in THEMES can be set
+// (bg, panel, text, muted, line, rule, grid, border, radius, shadow, font, heading,
+// series, dashes, highlight, accentSoft, flat, mono, gridlines, displayWeight, displayTracking);
+// tones merge per tone. In a greyscale (mono) base, Swiss or Paper, the accent marks only
+// emphasis: highlights, the critical tone and active controls; series stay
+// greyscale. Elsewhere the accent leads the series palette.
 function makeTheme(spec: any): any {
 	if (!spec) return THEMES.motherduck;
 	if (typeof spec === 'string') return THEMES[spec] || THEMES.motherduck;
 	const base = THEMES[spec.base] || THEMES.motherduck;
-	const t: any = { ...base, tones: { ...base.tones }, name: spec.name || base.name };
-	['bg', 'panel', 'text', 'muted', 'line', 'grid', 'font', 'heading', 'radius', 'border', 'shadow'].forEach((k) => spec[k] != null && (t[k] = spec[k]));
+	const { base: _b, tones, ...tokens } = spec;
+	const t: any = { ...base, ...tokens, tones: { ...base.tones }, name: spec.name || base.name };
+	Object.entries(tones || {}).forEach(([k, v]: any) => (t.tones[k] = { ...base.tones[k], ...v }));
 	if (spec.accent) {
-		t.accent = spec.accent;
 		t.highlight = spec.highlight || spec.accent;
-		t.accentSoft = spec.accentSoft || (base.flat ? base.accentSoft : spec.accent + '1f');
-		if (base.flat) t.tones.critical = { ...base.tones.critical, fg: spec.accent, line: spec.accent };
-		else if (!spec.series) t.series = [spec.accent, ...base.series.filter((c: string) => c !== base.accent)].slice(0, 6);
+		t.accentSoft = spec.accentSoft || (base.mono ? base.accentSoft : spec.accent + '1f');
+		if (base.mono && !tones?.critical) t.tones.critical = { ...base.tones.critical, fg: spec.accent, line: spec.accent };
+		if (!base.mono && !spec.series) t.series = [spec.accent, ...base.series.filter((c: string) => c !== base.accent)].slice(0, 6);
 	}
 	if (spec.series) {
-		t.series = spec.series;
-		t.mono = false;
-		t.dashes = undefined;
+		t.mono = spec.mono ?? false;
+		t.dashes = spec.dashes;
 	}
 	return t;
 }

@@ -91,7 +91,7 @@ function MetricCard({ label, value, format, prior, good, context, spark, sparkX,
 					</span>
 				)}
 			</div>
-			<div className="mt-2 tabular-nums" style={{ fontFamily: t.heading, fontSize: t.flat ? 44 : 34, fontWeight: t.flat ? 700 : 600, letterSpacing: t.flat ? -1.4 : -0.6, lineHeight: 1.05 }}>
+			<div className="mt-2 tabular-nums" style={{ fontFamily: t.heading, fontSize: t.flat ? 44 : 34, fontWeight: t.displayWeight ?? (t.flat ? 700 : 600), letterSpacing: t.displayTracking ?? (t.flat ? -1.4 : -0.6), lineHeight: 1.05 }}>
 				{fmt(shown, format)}
 			</div>
 			{(context || prior != null) && (

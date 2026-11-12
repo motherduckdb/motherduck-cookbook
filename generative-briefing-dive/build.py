@@ -87,7 +87,7 @@ def build_dive(recipe: pathlib.Path, app: dict, board: str = "", cfg: dict | Non
     cfg = cfg or {}
     app = {**app, **{k: v for k, v in cfg.items() if k != "diveId"}}
     required = app.get("requiredDatabases") or [{"type": "database", "path": f"md:{app['db']}", "alias": app["db"]}]
-    public = {k: app.get(k) for k in ("brand", "tagline", "placeholder", "theme", "db", "flightId", "examples")}
+    public = {k: app.get(k) for k in ("brand", "tagline", "placeholder", "theme", "themes", "db", "flightId", "examples")}
     public["board"] = board
     # Links to the recipe's other boards, once deploy.py has given them Dive ids.
     public["boards"] = [
