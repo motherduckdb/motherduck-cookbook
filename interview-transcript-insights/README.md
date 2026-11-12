@@ -105,7 +105,10 @@ approve it, then classify everything. "Classify all" stays disabled until the
 current codebook is approved, and the view shows who approved it and when. It also asks `prompt()` for suggested edits based on
 low-confidence themes and close calls. **Categories** is the browser: a theme
 tree with a summary, the matched insights with their best quotes, and the
-source documents per theme.
+source documents per theme. Clicking a quote or a document's typical answer
+opens it with its theme, insight, sentiment and quotability, inside the full
+conversation with that answer highlighted. Markdown in transcripts (links,
+bold, code, lists) is rendered.
 
 ## Questions to answer
 

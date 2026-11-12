@@ -17,6 +17,7 @@ import {
 	Search,
 	Sparkles,
 	Workflow,
+	X,
 } from 'lucide-react';
 
 export const REQUIRED_DATABASES = [
@@ -1017,29 +1018,230 @@ function ThemeSummary({ themeId, cohortSql }: { themeId: number; cohortSql: stri
 	);
 }
 
-function QuoteText({ text }: { text: string }) {
-	const [open, setOpen] = useState(false);
+// Just enough markdown for transcripts: links, bare URLs, bold, inline and fenced code, lists, headings.
+// It builds React elements, never HTML, and only links http(s) URLs, so transcript text cannot inject markup.
+const INLINE_MD = /(`[^`\n]+`)|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)<>\]]+)/g;
+
+function mdInline(text: string): any[] {
+	const out: any[] = [];
+	const re = new RegExp(INLINE_MD.source, 'g');
+	let last = 0;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(text))) {
+		if (m.index > last) out.push(text.slice(last, m.index));
+		const k = out.length;
+		if (m[1]) {
+			out.push(
+				<code key={k} className="px-1 rounded" style={{ background: C.bg, fontSize: '0.9em' }}>
+					{m[1].slice(1, -1)}
+				</code>,
+			);
+		} else if (m[2]) {
+			out.push(<strong key={k}>{mdInline(m[2])}</strong>);
+		} else {
+			const href = m[4] ?? m[5];
+			out.push(
+				<a key={k} href={href} target="_blank" rel="noreferrer" style={{ color: C.accent, textDecoration: 'underline' }}>
+					{m[3] ?? m[5]}
+				</a>,
+			);
+		}
+		last = re.lastIndex;
+	}
+	if (last < text.length) out.push(text.slice(last));
+	return out;
+}
+
+function Markdown({ text }: { text: string }) {
+	const blocks: any[] = [];
+	const lines = text.split('\n');
+	let para: string[] = [];
+	let list: { ordered: boolean; items: string[] } | null = null;
+	const flush = () => {
+		if (para.length) {
+			blocks.push(
+				<p key={blocks.length}>
+					{para.map((l, i) => (
+						<Fragment key={i}>
+							{i > 0 && <br />}
+							{mdInline(l)}
+						</Fragment>
+					))}
+				</p>,
+			);
+			para = [];
+		}
+		if (list) {
+			const Tag = list.ordered ? 'ol' : 'ul';
+			blocks.push(
+				<Tag key={blocks.length} className="pl-5" style={{ listStyleType: list.ordered ? 'decimal' : 'disc' }}>
+					{list.items.map((it, i) => (
+						<li key={i}>{mdInline(it)}</li>
+					))}
+				</Tag>,
+			);
+			list = null;
+		}
+	};
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const item = /^\s*(?:([-*])|(\d+)\.)\s+(.*)$/.exec(line);
+		if (/^\s*```/.test(line)) {
+			flush();
+			const code: string[] = [];
+			while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+			blocks.push(
+				<pre key={blocks.length} className="p-3 rounded text-xs overflow-x-auto" style={{ background: C.bg }}>
+					<code>{code.join('\n')}</code>
+				</pre>,
+			);
+		} else if (/^#{1,4}\s/.test(line)) {
+			flush();
+			blocks.push(
+				<p key={blocks.length} className="font-semibold">
+					{mdInline(line.replace(/^#{1,4}\s+/, ''))}
+				</p>,
+			);
+		} else if (item) {
+			if (para.length || (list && list.ordered !== !!item[2])) flush();
+			list ??= { ordered: !!item[2], items: [] };
+			list.items.push(item[3]);
+		} else if (!line.trim()) {
+			flush();
+		} else if (list && /^\s+\S/.test(line)) {
+			list.items[list.items.length - 1] += ' ' + line.trim();
+		} else {
+			if (list) flush();
+			para.push(line);
+		}
+	}
+	flush();
+	return <div className="flex flex-col gap-2">{blocks}</div>;
+}
+
+// One answer with its classification and the whole conversation around it, the answer highlighted.
+function AnswerModal({ turnId, onClose }: { turnId: string; onClose: () => void }) {
+	const head = useSQLQuery(`
+    SELECT tu.transcript_id, tu.cohort, tt.theme_name, tt.sentiment, i.insight, ti.quotability
+    FROM ${DB}."turns" tu
+    LEFT JOIN ${DB}."turn_themes" tt USING (turn_id)
+    LEFT JOIN ${DB}."turn_insights" ti USING (turn_id)
+    LEFT JOIN ${DB}."insights" i ON i.insight_id = ti.insight_id
+    WHERE tu.turn_id = ${sqlStr(turnId)}
+  `);
+	const r = rowsOf(head)[0] ?? {};
+	const tid = S(r.transcript_id);
+	const convo = useSQLQuery(
+		`SELECT turn_id, speaker, text FROM ${DB}."turns" WHERE transcript_id = ${sqlStr(tid)} ORDER BY turn_no`,
+		{ enabled: !!tid },
+	);
+	const current = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [onClose]);
+	// Braces matter: an effect that returns scrollIntoView's result would hand React a non-function cleanup.
+	useEffect(() => {
+		current.current?.scrollIntoView({ block: 'center' });
+	}, [convo.data]);
+
 	return (
-		<p
-			onClick={() => setOpen(!open)}
-			title={open ? 'Collapse' : 'Show full answer'}
-			style={{ cursor: 'pointer', ...(open ? {} : clamp(4)) }}
+		<div
+			onClick={onClose}
+			className="fixed inset-0 flex items-center justify-center p-6"
+			style={{ background: 'rgba(38,35,43,0.45)', zIndex: 50 }}
 		>
-			{text}
-		</p>
+			<div
+				role="dialog"
+				aria-modal="true"
+				aria-label="Answer details"
+				onClick={(e) => e.stopPropagation()}
+				className="flex flex-col w-full"
+				style={{ ...panel, maxWidth: 920, maxHeight: '88vh' }}
+			>
+				<div className="flex items-start gap-4 p-5" style={{ borderBottom: `1px solid ${C.line}` }}>
+					<div className="flex-1">
+						{head.isLoading ? (
+							<Skeleton h={40} />
+						) : (
+							<>
+								<p className="text-lg font-semibold">{tid}</p>
+								<p className="text-sm" style={{ color: C.muted }}>
+									{S(r.cohort)}
+								</p>
+							</>
+						)}
+					</div>
+					<button onClick={onClose} aria-label="Close" style={{ color: C.muted }}>
+						<X size={18} />
+					</button>
+				</div>
+				<div className="overflow-y-auto p-5 flex flex-col gap-4">
+					<Err q={head} />
+					{S(r.theme_name) || r.sentiment != null ? (
+						<div className="grid grid-cols-4 gap-4 text-sm">
+							<div>
+								<p className="text-xs uppercase" style={label}>Theme</p>
+								<p>{S(r.theme_name) || 'other'}</p>
+							</div>
+							<div className="col-span-2">
+								<p className="text-xs uppercase" style={label}>Insight</p>
+								<p>{S(r.insight) || <span style={{ color: C.muted }}>none matched</span>}</p>
+							</div>
+							<div>
+								<p className="text-xs uppercase" style={label}>Sentiment · quotability</p>
+								<p>
+									{signed(N(r.sentiment))} · {r.quotability == null ? '–' : N(r.quotability).toFixed(2)}
+								</p>
+							</div>
+						</div>
+					) : (
+						<p className="text-sm" style={{ color: C.muted }}>Not classified in the current run.</p>
+					)}
+					<div>
+						<p className="text-xs uppercase mb-2" style={label}>Conversation</p>
+						{convo.isLoading && <Skeleton h={160} />}
+						<Err q={convo} />
+						<div className="flex flex-col gap-2">
+							{rowsOf(convo).map((t) => {
+								const isCurrent = S(t.turn_id) === turnId;
+								return (
+									<div
+										key={S(t.turn_id)}
+										ref={isCurrent ? current : undefined}
+										className="text-sm px-3 py-2 rounded"
+										style={{
+											background: isCurrent ? C.select : 'transparent',
+											borderLeft: `3px solid ${isCurrent ? C.accent : t.speaker === 'participant' ? C.line : 'transparent'}`,
+										}}
+									>
+										<p className="text-xs mb-1" style={{ color: C.muted }}>
+											{t.speaker === 'participant' ? 'Participant' : 'Interviewer'}
+											{isCurrent && ' · this answer'}
+										</p>
+										<Markdown text={S(t.text)} />
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
 	);
 }
 
 function InsightsQuotes({ themeId, cohortSql }: { themeId: number; cohortSql: string }) {
 	const q = useSQLQuery(`
     WITH ranked AS (
-      SELECT ti.insight_id, tu.text, tu.transcript_id,
+      SELECT ti.insight_id, tu.text, tu.transcript_id, tu.turn_id,
         row_number() OVER (PARTITION BY ti.insight_id ORDER BY ti.quotability * ti.insight_conf DESC) AS rn,
         count(*) OVER (PARTITION BY ti.insight_id) AS support
       FROM ${DB}."turn_insights" ti JOIN ${DB}."turns" tu USING (turn_id)
       WHERE ti.theme_id = ${themeId} AND ti.insight_id IS NOT NULL ${cohortSql}
     )
-    SELECT i.insight_id, i.insight, coalesce(r.support, 0) AS support, r.text, r.transcript_id, r.rn
+    SELECT i.insight_id, i.insight, coalesce(r.support, 0) AS support, r.text, r.transcript_id, r.turn_id, r.rn
     FROM ${DB}."insights" i
     LEFT JOIN ranked r ON r.insight_id = i.insight_id AND r.rn <= 3
     WHERE i.theme_id = ${themeId}
@@ -1047,20 +1249,22 @@ function InsightsQuotes({ themeId, cohortSql }: { themeId: number; cohortSql: st
   `);
 
 	const insights = useMemo(() => {
-		const out: { id: number; text: string; support: number; quotes: { text: string; source: string }[] }[] = [];
+		const out: { id: number; text: string; support: number; quotes: { text: string; source: string; turnId: string }[] }[] = [];
 		for (const r of rowsOf(q)) {
 			const id = N(r.insight_id);
 			let ins = out[out.length - 1];
 			if (!ins || ins.id !== id) out.push((ins = { id, text: S(r.insight), support: N(r.support), quotes: [] }));
-			if (r.text) ins.quotes.push({ text: S(r.text), source: S(r.transcript_id) });
+			if (r.text) ins.quotes.push({ text: S(r.text), source: S(r.transcript_id), turnId: S(r.turn_id) });
 		}
 		return out;
 	}, [q.data]);
+	const [open, setOpen] = useState<string | null>(null);
 
 	if (q.isLoading) return <Skeleton h={240} />;
 	return (
 		<div style={{ maxHeight: 520, overflowY: 'auto' }}>
 			<Err q={q} />
+			{open && <AnswerModal turnId={open} onClose={() => setOpen(null)} />}
 			<table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
 				<thead>
 					<tr className="text-xs uppercase" style={label}>
@@ -1096,7 +1300,14 @@ function InsightsQuotes({ themeId, cohortSql }: { themeId: number; cohortSql: st
 								)}
 								<td className="py-3 pr-6">
 									{qt ? (
-										<QuoteText text={qt.text} />
+										<button
+											onClick={() => setOpen(qt.turnId)}
+											title="Show the full answer and conversation"
+											className="text-left"
+											style={clamp(4)}
+										>
+											{qt.text}
+										</button>
 									) : (
 										<span style={{ color: C.muted }}>No supporting answers</span>
 									)}
@@ -1121,15 +1332,17 @@ function InsightsQuotes({ themeId, cohortSql }: { themeId: number; cohortSql: st
 function Documents({ themeId, cohortSql }: { themeId: number; cohortSql: string }) {
 	const q = useSQLQuery(`
     SELECT tu.transcript_id, tu.cohort, count(*) AS answers, avg(tt.sentiment) AS sentiment,
-      arg_max(tu.text, tt.theme_conf) AS example
+      arg_max(tu.text, tt.theme_conf) AS example, arg_max(tu.turn_id, tt.theme_conf) AS example_turn
     FROM ${DB}."turn_themes" tt JOIN ${DB}."turns" tu USING (turn_id)
     WHERE tt.theme_id = ${themeId} ${cohortSql}
     GROUP BY 1, 2 ORDER BY answers DESC, transcript_id LIMIT 50
   `);
+	const [open, setOpen] = useState<string | null>(null);
 	if (q.isLoading) return <Skeleton h={240} />;
 	return (
 		<div style={{ maxHeight: 520, overflowY: 'auto' }}>
 			<Err q={q} />
+			{open && <AnswerModal turnId={open} onClose={() => setOpen(null)} />}
 			<table className="w-full text-sm">
 				<thead>
 					<tr className="text-xs uppercase" style={label}>
@@ -1154,7 +1367,14 @@ function Documents({ themeId, cohortSql }: { themeId: number; cohortSql: string 
 							<td className="py-2 pr-4 text-right">{N(r.answers)}</td>
 							<td className="py-2 pr-4 text-right">{signed(N(r.sentiment))}</td>
 							<td className="py-2 text-xs" style={{ color: C.muted }}>
-								<span style={clamp(3)}>{S(r.example)}</span>
+								<button
+									onClick={() => setOpen(S(r.example_turn))}
+									title="Show the full answer and conversation"
+									className="text-left"
+									style={clamp(3)}
+								>
+									{S(r.example)}
+								</button>
 							</td>
 						</tr>
 					))}
