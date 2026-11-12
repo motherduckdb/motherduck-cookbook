@@ -411,7 +411,7 @@ function Pipeline({ onClassified, onReview }: { onClassified: () => void; onRevi
 	const done: Record<string, boolean> = {
 		load: !!last.load,
 		discover: after(last.discover, last.load),
-		review: after(last.edit, last.discover),
+		review: after(last.approve, last.discover, last.edit),
 		classify: after(last.classify, last.discover, last.edit),
 	};
 	const steps: { key: Phase | 'review'; title: string; body: string; controls?: any; config: Record<string, string> }[] = [
@@ -458,7 +458,7 @@ function Pipeline({ onClassified, onReview }: { onClassified: () => void; onRevi
 		{
 			key: 'review',
 			title: '3  Review',
-			body: 'Read the codebook with its evidence, then rename, redefine, merge or delete themes before classifying every answer.',
+			body: 'Read the codebook with its evidence, rename, redefine, merge or delete themes, test on 500 answers, then approve it. Classifying all answers needs an approved codebook.',
 			config: {},
 		},
 		{
@@ -509,6 +509,7 @@ function Pipeline({ onClassified, onReview }: { onClassified: () => void; onRevi
 			<div className="flex flex-col px-5" style={panel}>
 				{steps.map((st, i) => {
 					const active = phase === st.key;
+					const blocked = busy || (st.key === 'classify' && N(limit) === 0 && !done.review);
 					return (
 						<div
 							key={st.key}
@@ -530,6 +531,11 @@ function Pipeline({ onClassified, onReview }: { onClassified: () => void; onRevi
 							</div>
 							<div className="flex-1 text-sm" style={{ color: C.muted }}>
 								{st.body}
+								{st.key === 'classify' && N(limit) === 0 && !done.review && (
+									<span className="block mt-1" style={{ color: C.accent }}>
+										Approve the codebook in Review before classifying all answers, or set a number to run a test.
+									</span>
+								)}
 								{st.key === 'classify' && N(rowsOf(stale)[0]?.edits) > 0 && (
 									<span className="block mt-1" style={{ color: C.accent }}>
 										The codebook changed since the last classification. Run this to apply the edits.
@@ -554,13 +560,13 @@ function Pipeline({ onClassified, onReview }: { onClassified: () => void; onRevi
 								</Btn>
 							) : (
 							<button
-								disabled={busy}
+								disabled={blocked}
 								onClick={() => go(st.key as Phase, st.config)}
 								className="flex items-center gap-1 px-3 py-1 rounded text-sm"
 								style={{
-									background: busy ? C.line : C.text,
-									color: busy ? C.muted : 'white',
-									cursor: busy ? 'default' : 'pointer',
+									background: blocked ? C.line : C.text,
+									color: blocked ? C.muted : 'white',
+									cursor: blocked ? 'default' : 'pointer',
 								}}
 							>
 								{busy && active ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
@@ -1775,7 +1781,12 @@ function Codebook() {
          WHERE phase IN ('discover', 'classify'))) AS edits,
       (SELECT coalesce(max(finished_at)::VARCHAR, '') FROM ${DB}."pipeline_runs" WHERE phase = 'discover') AS basis,
       (SELECT details->>'limit' FROM ${DB}."pipeline_runs" WHERE phase = 'classify'
-       ORDER BY finished_at DESC LIMIT 1) AS last_limit
+       ORDER BY finished_at DESC LIMIT 1) AS last_limit,
+      (SELECT details->>'approved_by' || ', ' || strftime(finished_at, '%Y-%m-%d %H:%M')
+       FROM ${DB}."pipeline_runs" WHERE phase = 'approve' AND finished_at > (
+         SELECT coalesce(max(finished_at), TIMESTAMP '1970-01-01') FROM ${DB}."pipeline_runs"
+         WHERE phase IN ('discover', 'edit'))
+       ORDER BY finished_at DESC LIMIT 1) AS approved
     -- rev ${rev}
   `);
 	const corpus = useSQLQuery(`SELECT summary, context FROM ${DB}."corpus" WHERE id = 1`);
@@ -1818,14 +1829,14 @@ function Codebook() {
 	const pick = selected.map((id) => themes.find((t) => t.id === id)).filter((t): t is Theme => !!t);
 
 	const start = useRunFlight(FLIGHT_ID);
-	const action = useRef<'submit' | 'test' | 'full'>('submit');
+	const action = useRef<'submit' | 'test' | 'approve' | 'full'>('submit');
 	const run = useFlightRun(FLIGHT_ID, start.data?.runNumber);
 	const refreshing = useAfterRun(start.data?.runNumber, run.status === 'SUCCEEDED', () => {
 		if (action.current === 'submit') setDraft([]);
 		setRev((v) => v + 1);
 	});
 	const busy = start.isPending || run.isChecking || refreshing;
-	const go = (a: 'submit' | 'test' | 'full', config: Record<string, string>) => {
+	const go = (a: 'submit' | 'test' | 'approve' | 'full', config: Record<string, string>) => {
 		action.current = a;
 		start.run(config);
 	};
@@ -1840,11 +1851,14 @@ function Codebook() {
 	};
 
 	const st = rowsOf(stale)[0] ?? {};
-	const step = draft.length > 0 ? 2 : N(st.edits) > 0 ? 3 : N(st.last_limit) > 0 ? 4 : 1;
-	const steps = ['Edit themes', 'Submit changes', 'Test on 500 answers', 'Classify all answers'];
+	// A full classification needs an approval newer than the codebook; the Flight enforces the same rule.
+	const approved = S(st.approved);
+	const step = draft.length > 0 ? 2 : N(st.edits) > 0 ? 3 : approved ? 5 : N(st.last_limit) > 0 ? 4 : 1;
+	const steps = ['Edit themes', 'Submit changes', 'Test on 500 answers', 'Approve codebook', 'Classify all answers'];
 	const msgs = {
 		submit: ['Submitting changes…', 'Changes saved. Run a test classification next.', 'Submit failed. Nothing changed; your draft is kept.'],
-		test: ['Classifying 500 answers…', 'Test done. Check the numbers below, then classify all answers.', 'Test classification failed.'],
+		test: ['Classifying 500 answers…', 'Test done. Check the numbers below, then approve the codebook.', 'Test classification failed.'],
+		approve: ['Recording approval…', 'Codebook approved. Classify all answers next.', 'Approval failed.'],
 		full: ['Classifying all answers…', 'All answers classified.', 'Classification failed.'],
 	}[action.current];
 	const message = busy ? msgs[0] : run.status === 'SUCCEEDED' ? msgs[1] : run.isFinished ? `${msgs[2]} (run #${start.data?.runNumber})` : '';
@@ -1893,7 +1907,14 @@ function Codebook() {
 					<Btn kind={step === 3 ? 'primary' : 'plain'} disabled={busy || draft.length > 0} onClick={() => go('test', { PHASE: 'classify', LIMIT_TURNS: '500' })}>
 						Test on 500
 					</Btn>
-					<Btn kind={step === 4 ? 'primary' : 'plain'} disabled={busy || draft.length > 0} onClick={() => go('full', { PHASE: 'classify', LIMIT_TURNS: '0' })}>
+					<Btn
+						kind={step === 4 ? 'primary' : 'plain'}
+						disabled={busy || draft.length > 0 || N(st.edits) > 0 || !!approved || saved.length === 0}
+						onClick={() => go('approve', { PHASE: 'approve' })}
+					>
+						Approve
+					</Btn>
+					<Btn kind={step === 5 ? 'primary' : 'plain'} disabled={busy || draft.length > 0 || !approved} onClick={() => go('full', { PHASE: 'classify', LIMIT_TURNS: '0' })}>
 						Classify all
 					</Btn>
 				</div>
@@ -1917,6 +1938,11 @@ function Codebook() {
 						))}
 					</ul>
 				)}
+				<p className="text-xs" style={{ color: approved ? C.pos : C.muted }}>
+					{approved
+						? `Approved by ${approved}. Any edit needs a new approval.`
+						: 'The codebook is a draft until a person approves it. Classify all stays locked until then; a test run does not need approval.'}
+				</p>
 				{step === 3 && draft.length === 0 && (
 					<p className="text-xs" style={{ color: C.muted }}>
 						A test run classifies a random 500 answers and replaces the current results, so the numbers below cover

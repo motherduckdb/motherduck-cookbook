@@ -15,7 +15,7 @@ Flags:
     --dive-title TITLE   Dive title (default: Interview insights)
     --config KEY=VALUE   override a Flight config default (repeatable)
     --run PHASE          after deploying, run one phase and print its logs
-                         (load, describe, discover, classify, edit, reset)
+                         (load, describe, discover, classify, edit, approve, reset)
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_CONFIG = {
     "PHASE": "load",
     "MODEL": "gpt-6-luna",
-    "SUMMARY_MODEL": "gpt-5-mini",
+    "SUMMARY_MODEL": "gpt-6-luna",
     "SAMPLE_PER_COHORT": "20",
     "MIN_CHARS": "80",
     "LIMIT_TURNS": "0",
@@ -61,7 +61,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--flight-name", default="interview-insights")
     parser.add_argument("--dive-title", default="Interview insights")
     parser.add_argument("--config", action="append", default=[], metavar="KEY=VALUE")
-    parser.add_argument("--run", choices=["load", "describe", "discover", "classify", "edit", "reset"])
+    parser.add_argument("--run", choices=["load", "describe", "discover", "classify", "edit", "approve", "reset"])
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.database):
         parser.error(f"--database must be a plain identifier, got {args.database!r}")

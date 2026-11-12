@@ -26,9 +26,10 @@ featured: true
 Qualitative research on a few hundred interviews usually means a week in a
 spreadsheet: read a sample, write a codebook, then tag every answer by hand.
 This recipe does that work in SQL. A Flight loads the transcripts, `prompt()`
-drafts a codebook from a sample, a researcher edits it in a Dive, and
-`prompt_jev()` classifies every participant answer against it, with sentiment
-and a quotability score.
+drafts a codebook from a sample, a researcher edits and approves it in a Dive,
+and `prompt_jev()` classifies every participant answer against it, with
+sentiment and a quotability score. The full classification only runs on an
+approved codebook.
 
 It ships with the public
 [Anthropic Interviewer](https://huggingface.co/datasets/Anthropic/AnthropicInterviewer)
@@ -56,7 +57,8 @@ refetches.
 | `describe` | Writes a 2 to 4 sentence corpus summary and suggests context fields (source, domain, period, participants, research question) | `prompt()` | ~5 s |
 | `discover` | Takes `SAMPLE_PER_COHORT` transcripts per cohort, extracts 3 to 6 observations with a verbatim quote each, then consolidates them into groups, themes and insights | `prompt()` with a JSON schema | ~40 s |
 | `edit` | Applies a batch of codebook edits (add, update, delete, merge) in one transaction | none | ~4 s |
-| `classify` | Assigns every participant answer to a theme (or `other`) with sentiment, matches it to an insight within that theme, scores quotability, then summarizes each theme | `prompt_jev()`, `prompt()` | ~16 s for 11,791 answers |
+| `approve` | Records that a person approved the current codebook, with their user name. A later `discover` or `edit` needs a new approval | none | ~4 s |
+| `classify` | Assigns every participant answer to a theme (or `other`) with sentiment, matches it to an insight within that theme, scores quotability, then summarizes each theme. With `LIMIT_TURNS=0` (all answers) it fails unless the codebook is approved | `prompt_jev()`, `prompt()` | ~16 s for 11,791 answers |
 | `reset` | Empties every pipeline table | none | ~4 s |
 
 On the sample data, one `discover` run with `gpt-6-luna` produced 5 groups, 23
@@ -99,7 +101,8 @@ Three views. **Overview** shows the corpus summary and context, KPIs, and the
 four steps (load, discover, review, classify) with run buttons and recent runs.
 **Codebook** is the review step: rename, redefine, re-rank, merge or delete
 themes as a local draft, submit it as one `edit` run, test it on 500 answers,
-then classify everything. It also asks `prompt()` for suggested edits based on
+approve it, then classify everything. "Classify all" stays disabled until the
+current codebook is approved, and the view shows who approved it and when. It also asks `prompt()` for suggested edits based on
 low-confidence themes and close calls. **Categories** is the browser: a theme
 tree with a summary, the matched insights with their best quotes, and the
 source documents per theme.
@@ -123,6 +126,12 @@ source documents per theme.
   label, and the Flight joins it back to `themes` and `insights` by name. Theme
   names must be unique, and `other` is reserved. The `edit` phase rejects
   both.
+- **The codebook from `discover` is a draft.** A person reviews and approves it
+  before every answer is classified; `prompt()` can produce overlapping or vague
+  themes that only a reader catches. The Flight enforces this: `classify` with
+  `LIMIT_TURNS=0` fails until a `PHASE=approve` run is newer than the latest
+  `discover` and `edit`. If an agent adapts this recipe for you, it should stop
+  after `discover` and hand you the codebook.
 - **A new codebook clears the classifications.** `discover` deletes
   `turn_themes`, `turn_insights` and `theme_summaries`, because their ids no
   longer mean anything. `edit` does not, but the Dive shows the coding as stale
@@ -155,7 +164,7 @@ source documents per theme.
 | `OBS_PROMPT`, `CB_PROMPT` | `flight/flight.py` | 3 to 6 observations; 4 to 6 groups x 3 to 5 themes x 2 to 4 insights | Shape and size of the codebook. |
 | `DATABASE` | Flight config, `--database` | `interview_insights` | Where every table lives. `deploy.py` points the Dive at the same database. |
 | `MODEL` | Flight config, Dive dropdown | `gpt-6-luna` | Model for `describe` and `discover`. Also `gpt-5`, `gpt-5-mini`, `gpt-4.1`, `gpt-4o` and their smaller variants. |
-| `SUMMARY_MODEL` | Flight config | `gpt-5-mini` | Model for the per-theme summaries. |
+| `SUMMARY_MODEL` | Flight config | `gpt-6-luna` | Model for the per-theme summaries only. Answers are classified by `prompt_jev()`, which takes no model. |
 | `SAMPLE_PER_COHORT` | Flight config, Dive | `20` | Transcripts per cohort that `discover` reads. |
 | `MIN_CHARS` | Flight config | `80` | Shorter answers ("Yes", "Sure") are not classified. |
 | `CONF` | Flight config | `0.4` | Minimum theme confidence before matching an insight and scoring quotability. |
@@ -194,7 +203,7 @@ The script resolves the Flight by name through `MD_LIST_FLIGHTS()` and the Dive
 by title through `MD_LIST_DIVES()`. It creates each the first time and updates
 it after, so no id is pinned in the repo. It writes the Flight id and the
 database name into the Dive source on upload. It prints the Dive URL; open it
-and continue from the Overview: Discover, review the codebook, Classify.
+and continue from the Overview: Discover, review and approve the codebook, Classify.
 
 Deploy into another database, or change a default:
 
@@ -208,6 +217,9 @@ Run a phase without the Dive:
 
 ```bash
 uv run --with-requirements flight/requirements.txt deploy.py --run discover
+# review the codebook (Dive, or the themes and insights tables), then:
+uv run --with-requirements flight/requirements.txt deploy.py --run approve
+uv run --with-requirements flight/requirements.txt deploy.py --run classify
 ```
 
 To run the Flight locally instead, set the config as environment variables:
@@ -217,6 +229,8 @@ cd flight
 PHASE=load uv run --with-requirements requirements.txt flight.py
 PHASE=discover uv run --with-requirements requirements.txt flight.py
 PHASE=classify LIMIT_TURNS=500 uv run --with-requirements requirements.txt flight.py
+PHASE=approve uv run --with-requirements requirements.txt flight.py
+PHASE=classify uv run --with-requirements requirements.txt flight.py
 ```
 
 Then read the result:
