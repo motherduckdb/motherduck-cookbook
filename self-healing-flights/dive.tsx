@@ -2044,8 +2044,8 @@ function Fig({ n, title, caption, h, y0 = 0, children }: { n: string; title: str
 // A3: four failed runs flow into Classify, which buckets them into two incidents; each incident gets a zero-copy clone
 // and a fixer, both fixes converge on the reviewer, then Ship, and Learn feeds the next fixes.
 function FlowA3() {
-	const C = { x: 182, y: 175, r: 50 };
-	const lanes = [95, 255];
+	const C = { x: 194, y: 215, r: 60 };
+	const lanes = [120, 310];
 	const edgeAt = (x: number, y: number) => {
 		const dx = x - C.x;
 		const dy = y - C.y;
@@ -2053,50 +2053,53 @@ function FlowA3() {
 		return [Math.round((C.x + (dx / d) * C.r) * 10) / 10, Math.round((C.y + (dy / d) * C.r) * 10) / 10];
 	};
 	const errs = [
-		{ y: 55, p: 'weather', lane: 0 },
-		{ y: 135, p: 'weather', lane: 0 },
-		{ y: 215, p: 'hourly', lane: 1 },
-		{ y: 295, p: 'weather', lane: 0 },
+		{ y: 95, p: 'weather', lane: 0 },
+		{ y: 175, p: 'weather', lane: 0 },
+		{ y: 255, p: 'hourly', lane: 1 },
+		{ y: 335, p: 'weather', lane: 0 },
 	];
 	const CYCLE = 6;
-	const INC = { x: 250, w: 112 };
+	const INC = { x: 270, w: 120, h: 100 };
 	const outPath = (L: number) => {
 		const [ox, oy] = edgeAt(INC.x, L);
-		return { start: [ox, oy], d: `M${ox} ${oy} Q 228 ${L} ${INC.x - 6} ${L}`, tail: `Q 228 ${L} ${INC.x - 6} ${L}` };
+		return { start: [ox, oy], d: `M${ox} ${oy} Q ${INC.x - 22} ${L} ${INC.x - 6} ${L}`, tail: `Q ${INC.x - 22} ${L} ${INC.x - 6} ${L}` };
 	};
 	const inPath = (y: number) => {
 		const [bx, by] = edgeAt(112, y);
-		return { end: [bx, by], d: `M112 ${y} Q 132 ${y} ${bx} ${by}` };
+		return { end: [bx, by], d: `M112 ${y} Q 134 ${y} ${bx} ${by}` };
 	};
 	// Each error arrives in its incident at ~92% of its cycle; that incident's dot pops then.
 	const delayOf = (i: number) => i * 1.5;
 	const popDelay = (i: number) => delayOf(i) + CYCLE * 0.92 - CYCLE * 0.03;
 	const dotsByLane = lanes.map((_, li) => errs.map((e, i) => ({ e, i })).filter((x) => x.e.lane === li));
-	const CL = { x: 452, w: 128, h: 86 };
-	const FX = { x: 542, w: 120 };
-	const RV = { x: 726, y: 120, w: 104, h: 110 };
+	const CL = { x: 476, w: 128, h: 130 };
+	const FX = { x: 566, w: 120, h: 116 };
+	const RV = { x: 734, y: 149, w: 104, h: 132 };
 	const rc = RV.x + RV.w / 2;
-	const SH = { x: 856, y: 120, w: 90, h: 110 };
+	const SH = { x: 864, y: 149, w: 90, h: 132 };
 	const sc = SH.x + SH.w / 2;
-	const enter = [150, 200];
-	const fixToReview = (L: number, li: number) => `M${FX.x + FX.w + 6} ${L} C ${FX.x + FX.w + 36} ${L}, ${RV.x - 32} ${enter[li]}, ${RV.x - 6} ${enter[li]}`;
+	const mid = RV.y + RV.h / 2;
+	const enter = [180, 250];
+	const fixToReview = (L: number, li: number) => `M${FX.x + FX.w + 6} ${L} C ${FX.x + FX.w + 30} ${L}, ${RV.x - 28} ${enter[li]}, ${RV.x - 6} ${enter[li]}`;
 	const bottomFixer = FX.x + FX.w / 2;
-	const LE = { cx: 760, cy: 352, w: 128, h: 50 };
-	const back1 = `M${sc} ${SH.y + SH.h + 6} C ${sc} 320, ${sc - 30} ${LE.cy}, ${LE.cx + LE.w / 2 + 6} ${LE.cy}`;
-	const back2 = `M${LE.cx - LE.w / 2 - 6} ${LE.cy} C ${bottomFixer + 40} ${LE.cy}, ${bottomFixer} ${LE.cy - 10}, ${bottomFixer} ${lanes[1] + 52}`;
-	const loopTok = `M${rc} 175 L${sc} 175 L${sc} ${SH.y + SH.h + 6} C ${sc} 320, ${sc - 30} ${LE.cy}, ${LE.cx + LE.w / 2 + 6} ${LE.cy} L${LE.cx - LE.w / 2 - 6} ${LE.cy} C ${bottomFixer + 40} ${LE.cy}, ${bottomFixer} ${LE.cy - 10}, ${bottomFixer} ${lanes[1] + 52}`;
+	const fixerBottom = lanes[1] + FX.h / 2 + 6;
+	const LE = { cx: 770, cy: 428, w: 128, h: 60 };
+	const shipOut = `M${sc} ${SH.y + SH.h + 6} C ${sc} 400, ${sc - 30} ${LE.cy}, ${LE.cx + LE.w / 2 + 6} ${LE.cy}`;
+	const toFixer = `M${LE.cx - LE.w / 2 - 6} ${LE.cy} C ${bottomFixer + 40} ${LE.cy}, ${bottomFixer} ${LE.cy - 10}, ${bottomFixer} ${fixerBottom}`;
+	const loopTok = `M${rc} ${mid} L${sc} ${mid} L${sc} ${SH.y + SH.h + 6} C ${sc} 400, ${sc - 30} ${LE.cy}, ${LE.cx + LE.w / 2 + 6} ${LE.cy} L${LE.cx - LE.w / 2 - 6} ${LE.cy} C ${bottomFixer + 40} ${LE.cy}, ${bottomFixer} ${LE.cy - 10}, ${bottomFixer} ${fixerBottom}`;
+	const sub = { s: 15, w: 400, f: 'sans' as const };
 	return (
-		<Fig n="A3" title="Four errors, two incidents, fixed side by side" y0={10} h={385}>
+		<Fig n="A3" title="Four errors, two incidents, fixed side by side" y0={34} h={440}>
 			<Defs p="a3" />
-			<Tx x={62} y={26} s={12} w={500} f="sans" c={A.muted}>
+			<Tx x={62} y={60} s={16} w={500} f="sans" c={A.muted}>
 				4 failed runs
 			</Tx>
 			{errs.map((e) => (
 				<g key={`c${e.y}`}>
 					<Edge p="a3" d={inPath(e.y).d} />
-					<Card x={12} y={e.y - 17} w={100} h={34} r={17} shadow={3} fill={A.coralSoft} />
-					<Cross x={30} y={e.y} />
-					<Tx x={70} y={e.y + 4} s={12}>
+					<Card x={12} y={e.y - 18} w={100} h={36} r={18} shadow={3} fill={A.coralSoft} />
+					<Cross x={27} y={e.y} />
+					<Tx x={40} y={e.y + 5} s={15} a="start">
 						{e.p}
 					</Tx>
 				</g>
@@ -2111,26 +2114,29 @@ function FlowA3() {
 				return <Tok key={`t${i}`} d={`${a.d} L ${o.start[0]} ${o.start[1]} ${o.tail}`} dur={CYCLE} delay={delayOf(i)} c={A.coral} r={7} />;
 			})}
 			<circle cx={C.x} cy={C.y} r={C.r} fill={A.white} stroke={A.ink} strokeWidth={2.5} />
-			<Ic I={Sparkles} x={C.x} y={C.y - 22} s={20} />
-			<Tx x={C.x} y={C.y + 6} s={14}>
+			<Ic I={Sparkles} x={C.x} y={C.y - 30} s={24} />
+			<Tx x={C.x} y={C.y + 5} s={18}>
 				Classify
 			</Tx>
-			<Tx x={C.x} y={C.y + 23} s={11} w={400} f="sans">
+			<Tx x={C.x} y={C.y + 27} {...sub}>
 				Jev + an LLM
 			</Tx>
 			{/* Work flowing down each lane and around the loop, hidden behind the shapes so it shows in the gaps */}
 			{lanes.map((L, li) => (
-				<Tok key={`w${L}`} d={`M${INC.x + INC.w + 4} ${L} L${FX.x + FX.w + 6} ${L} C ${FX.x + FX.w + 36} ${L}, ${RV.x - 32} ${enter[li]}, ${RV.x - 6} ${enter[li]}`} dur={4} delay={li * 0.6 + 1} c={A.yellow} r={7} />
+				<Tok key={`w${L}`} d={`M${INC.x + INC.w + 4} ${L} L${FX.x + FX.w + 6} ${L} C ${FX.x + FX.w + 30} ${L}, ${RV.x - 28} ${enter[li]}, ${RV.x - 6} ${enter[li]}`} dur={4} delay={li * 0.6 + 1} c={A.yellow} r={7} />
 			))}
 			<Tok d={loopTok} dur={6} delay={2} c={A.tealSoft} r={7} />
 			{lanes.map((L, li) => (
 				<g key={`l${L}`}>
-					<Card x={INC.x} y={L - 37} w={INC.w} h={74} fill={A.coralSoft} />
-					<Tx x={INC.x + INC.w / 2} y={L - 10} s={14}>
+					<Card x={INC.x} y={L - INC.h / 2} w={INC.w} h={INC.h} fill={A.coralSoft} />
+					<Tx x={INC.x + INC.w / 2} y={L - 23} s={17}>
 						{`incident ${li + 1}`}
 					</Tx>
-					<Tx x={INC.x + INC.w / 2} y={L + 8} s={11.5} w={400} f="sans">
-						{`${li ? 'Hourly' : 'Weather'} pipeline`}
+					<Tx x={INC.x + INC.w / 2} y={L - 2} {...sub}>
+						{li ? 'Hourly' : 'Weather'}
+					</Tx>
+					<Tx x={INC.x + INC.w / 2} y={L + 16} {...sub}>
+						pipeline
 					</Tx>
 					{dotsByLane[li].map(({ i }, k) => {
 						const n = dotsByLane[li].length;
@@ -2138,7 +2144,7 @@ function FlowA3() {
 							<circle
 								key={i}
 								cx={INC.x + INC.w / 2 + (k - (n - 1) / 2) * 16}
-								cy={L + 23}
+								cy={L + 34}
 								r={5.5}
 								fill={A.coral}
 								stroke={A.ink}
@@ -2150,61 +2156,73 @@ function FlowA3() {
 					})}
 					<Edge p="a3" d={`M${INC.x + INC.w + 6} ${L} L${CL.x - CL.w / 2 - 4} ${L}`} />
 					<Cyl cx={CL.x} cy={L} w={CL.w} h={CL.h} />
-					<Tx x={CL.x} y={L + 6} s={12}>
-						Zero-Copy Clone
+					<Tx x={CL.x} y={L - 30} s={16}>
+						Zero-Copy
 					</Tx>
-					<Tx x={CL.x} y={L + 24} s={11} w={400} f="sans">
-						Separate MotherDuck
+					<Tx x={CL.x} y={L - 10} s={16}>
+						Clone
 					</Tx>
-					<Tx x={CL.x} y={L + 38} s={11} w={400} f="sans">
+					<Tx x={CL.x} y={L + 14} {...sub}>
+						Separate
+					</Tx>
+					<Tx x={CL.x} y={L + 32} {...sub}>
+						MotherDuck
+					</Tx>
+					<Tx x={CL.x} y={L + 50} {...sub}>
 						compute
 					</Tx>
 					<Edge p="a3" d={`M${CL.x + CL.w / 2 + 4} ${L} L${FX.x - 5} ${L}`} />
-					<Card x={FX.x} y={L - 45} w={FX.w} h={90} fill={A.yellow} />
-					<Ic I={Bot} x={FX.x + FX.w / 2} y={L - 20} s={26} />
-					<Tx x={FX.x + FX.w / 2} y={L + 12} s={15}>
+					<Card x={FX.x} y={L - FX.h / 2} w={FX.w} h={FX.h} fill={A.yellow} />
+					<Ic I={Bot} x={FX.x + FX.w / 2} y={L - 30} s={30} />
+					<Tx x={FX.x + FX.w / 2} y={L + 8} s={19}>
 						fixer
 					</Tx>
-					<Tx x={FX.x + FX.w / 2} y={L + 30} s={12} w={400} f="sans">
-						OpenCode agent
+					<Tx x={FX.x + FX.w / 2} y={L + 30} s={16} w={400} f="sans">
+						OpenCode
+					</Tx>
+					<Tx x={FX.x + FX.w / 2} y={L + 49} s={16} w={400} f="sans">
+						agent
 					</Tx>
 					<Edge p="a3" d={fixToReview(L, li)} />
 				</g>
 			))}
 			<Card x={RV.x} y={RV.y} w={RV.w} h={RV.h} fill={A.tealSoft} />
-			<Ic I={UserCheck} x={rc} y={RV.y + 24} s={24} />
-			<Tx x={rc} y={RV.y + 54} s={14}>
+			<Ic I={UserCheck} x={rc} y={RV.y + 26} s={28} />
+			<Tx x={rc} y={RV.y + 62} s={18}>
 				review
 			</Tx>
-			<Tx x={rc} y={RV.y + 72} s={11} w={400} f="sans">
+			<Tx x={rc} y={RV.y + 84} {...sub}>
 				Independent
 			</Tx>
-			<Tx x={rc} y={RV.y + 86} s={11} w={400} f="sans">
+			<Tx x={rc} y={RV.y + 102} {...sub}>
 				reviewer
 			</Tx>
-			<Tx x={rc} y={RV.y + 100} s={11} w={400} f="sans">
+			<Tx x={rc} y={RV.y + 120} {...sub}>
 				approves
 			</Tx>
-			<Edge p="a3" d={`M${RV.x + RV.w + 6} 175 L${SH.x - 5} 175`} />
+			<Edge p="a3" d={`M${RV.x + RV.w + 6} ${mid} L${SH.x - 5} ${mid}`} />
 			<Card x={SH.x} y={SH.y} w={SH.w} h={SH.h} fill={A.white} />
-			<Ic I={Rocket} x={sc} y={SH.y + 24} s={22} />
-			<Tx x={sc} y={SH.y + 54} s={14}>
+			<Ic I={Rocket} x={sc} y={SH.y + 26} s={26} />
+			<Tx x={sc} y={SH.y + 62} s={18}>
 				ship
 			</Tx>
-			<Tx x={sc} y={SH.y + 72} s={11} w={400} f="sans">
-				Ship or alert
+			<Tx x={sc} y={SH.y + 84} {...sub}>
+				Ship or
 			</Tx>
-			<Tx x={sc} y={SH.y + 86} s={11} w={400} f="sans">
-				a human
+			<Tx x={sc} y={SH.y + 102} {...sub}>
+				alert a
 			</Tx>
-			<Edge p="a3" d={back1} />
-			<Edge p="a3" d={back2} />
+			<Tx x={sc} y={SH.y + 120} {...sub}>
+				human
+			</Tx>
+			<Edge p="a3" d={shipOut} />
+			<Edge p="a3" d={toFixer} />
 			<Card x={LE.cx - LE.w / 2} y={LE.cy - LE.h / 2} w={LE.w} h={LE.h} fill={A.white} />
-			<Ic I={BookOpen} x={LE.cx - 38} y={LE.cy} s={22} />
-			<Tx x={LE.cx + 14} y={LE.cy - 3} s={14}>
+			<Ic I={BookOpen} x={LE.cx - 40} y={LE.cy} s={26} />
+			<Tx x={LE.cx + 14} y={LE.cy - 4} s={18}>
 				learn
 			</Tx>
-			<Tx x={LE.cx + 14} y={LE.cy + 14} s={11} w={400} f="sans">
+			<Tx x={LE.cx + 14} y={LE.cy + 17} {...sub}>
 				A Guide
 			</Tx>
 		</Fig>
