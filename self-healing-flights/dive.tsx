@@ -2076,7 +2076,7 @@ function FlowA3() {
 	const FX = { x: 542, w: 120 };
 	const RV = { x: 726, y: 120, w: 104, h: 110 };
 	const rc = RV.x + RV.w / 2;
-	const SH = { x: 856, y: 135, w: 90, h: 80 };
+	const SH = { x: 856, y: 120, w: 90, h: 110 };
 	const sc = SH.x + SH.w / 2;
 	const enter = [150, 200];
 	const fixToReview = (L: number, li: number) => `M${FX.x + FX.w + 6} ${L} C ${FX.x + FX.w + 36} ${L}, ${RV.x - 32} ${enter[li]}, ${RV.x - 6} ${enter[li]}`;
@@ -2130,7 +2130,7 @@ function FlowA3() {
 						{`incident ${li + 1}`}
 					</Tx>
 					<Tx x={INC.x + INC.w / 2} y={L + 8} s={11.5} w={400} f="sans">
-						{`${li ? 'hourly' : 'weather'} pipeline`}
+						{`${li ? 'Hourly' : 'Weather'} pipeline`}
 					</Tx>
 					{dotsByLane[li].map(({ i }, k) => {
 						const n = dotsByLane[li].length;
@@ -2157,7 +2157,7 @@ function FlowA3() {
 						Separate MotherDuck
 					</Tx>
 					<Tx x={CL.x} y={L + 38} s={11} w={400} f="sans">
-						Compute
+						compute
 					</Tx>
 					<Edge p="a3" d={`M${CL.x + CL.w / 2 + 4} ${L} L${FX.x - 5} ${L}`} />
 					<Card x={FX.x} y={L - 45} w={FX.w} h={90} fill={A.yellow} />
@@ -2177,7 +2177,7 @@ function FlowA3() {
 				review
 			</Tx>
 			<Tx x={rc} y={RV.y + 72} s={11} w={400} f="sans">
-				independent
+				Independent
 			</Tx>
 			<Tx x={rc} y={RV.y + 86} s={11} w={400} f="sans">
 				reviewer
@@ -2187,9 +2187,15 @@ function FlowA3() {
 			</Tx>
 			<Edge p="a3" d={`M${RV.x + RV.w + 6} 175 L${SH.x - 5} 175`} />
 			<Card x={SH.x} y={SH.y} w={SH.w} h={SH.h} fill={A.white} />
-			<Ic I={Rocket} x={sc} y={SH.y + 26} s={22} />
-			<Tx x={sc} y={SH.y + 56} s={14}>
+			<Ic I={Rocket} x={sc} y={SH.y + 24} s={22} />
+			<Tx x={sc} y={SH.y + 54} s={14}>
 				ship
+			</Tx>
+			<Tx x={sc} y={SH.y + 72} s={11} w={400} f="sans">
+				Ship or alert
+			</Tx>
+			<Tx x={sc} y={SH.y + 86} s={11} w={400} f="sans">
+				a human
 			</Tx>
 			<Edge p="a3" d={back1} />
 			<Edge p="a3" d={back2} />
@@ -2199,7 +2205,7 @@ function FlowA3() {
 				learn
 			</Tx>
 			<Tx x={LE.cx + 14} y={LE.cy + 14} s={11} w={400} f="sans">
-				a Guide
+				A Guide
 			</Tx>
 		</Fig>
 	);
