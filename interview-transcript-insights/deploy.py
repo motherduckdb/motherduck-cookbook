@@ -15,7 +15,7 @@ Flags:
     --dive-title TITLE   Dive title (default: Interview insights)
     --config KEY=VALUE   override a Flight config default (repeatable)
     --run PHASE          after deploying, run one phase and print its logs
-                         (load, describe, discover, classify, edit, reset)
+                         (load, describe, discover, classify, edit, approve, reset)
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_CONFIG = {
     "PHASE": "load",
     "MODEL": "gpt-6-luna",
-    "SUMMARY_MODEL": "gpt-5-mini",
+    "SUMMARY_MODEL": "gpt-6-luna",
     "SAMPLE_PER_COHORT": "20",
     "MIN_CHARS": "80",
     "LIMIT_TURNS": "0",
@@ -61,7 +61,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--flight-name", default="interview-insights")
     parser.add_argument("--dive-title", default="Interview insights")
     parser.add_argument("--config", action="append", default=[], metavar="KEY=VALUE")
-    parser.add_argument("--run", choices=["load", "describe", "discover", "classify", "edit", "reset"])
+    parser.add_argument("--run", choices=["load", "describe", "discover", "classify", "edit", "approve", "reset"])
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.database):
         parser.error(f"--database must be a plain identifier, got {args.database!r}")
@@ -74,10 +74,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> str:
-    existing = con.execute(
-        "SELECT flight_id FROM MD_LIST_FLIGHTS(owner_only := true) WHERE flight_name = ?", [args.flight_name]
+def find_flights(con: duckdb.DuckDBPyConnection, name: str) -> list[tuple]:
+    return con.execute(
+        "SELECT flight_id FROM MD_LIST_FLIGHTS(owner_only := true) WHERE flight_name = ?", [name]
     ).fetchall()
+
+
+def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> str:
+    existing = find_flights(con, args.flight_name)
     if len(existing) > 1:
         raise SystemExit(f"{len(existing)} Flights are named {args.flight_name!r}; expected 0 or 1")
 
@@ -95,7 +99,10 @@ def deploy_flight(con: duckdb.DuckDBPyConnection, args: argparse.Namespace) -> s
         con.execute(f"FROM MD_UPDATE_FLIGHT(flight_id := ?::UUID, {fields})", [flight_id, *params])
         print(f"updated Flight {args.flight_name} ({flight_id})")
     else:
-        flight_id = str(con.execute(f"FROM MD_CREATE_FLIGHT({fields})", params).fetchone()[0])
+        # Reading MD_CREATE_FLIGHT's row would convert its TIMESTAMPTZ columns, which needs pytz,
+        # so look the new id up by name instead.
+        con.execute(f"FROM MD_CREATE_FLIGHT({fields})", params)
+        flight_id = str(find_flights(con, args.flight_name)[0][0])
         print(f"created Flight {args.flight_name} ({flight_id})")
     return flight_id
 
@@ -107,6 +114,14 @@ def deploy_dive(con: duckdb.DuckDBPyConnection, args: argparse.Namespace, flight
         raise SystemExit("dive.tsx no longer contains the placeholder Flight id")
     content = source.replace(PLACEHOLDER_ID, flight_id).replace("interview_insights", args.database)
     resources = [{"url": f"md:{args.database}", "alias": args.database}]
+    # Once the Dive's data is shared (share_dive_data), keep reading the share, or a redeploy
+    # would point viewers back at the owner's private database.
+    share = con.execute(
+        "SELECT url FROM md_information_schema.owned_shares WHERE name = ?", [args.database]
+    ).fetchone()
+    if share:
+        content = content.replace(f"type: 'database', path: 'md:{args.database}'", f"type: 'share', path: '{share[0]}'")
+        resources = [{"url": share[0], "alias": args.database}]
 
     existing = con.execute("SELECT id FROM MD_LIST_DIVES() WHERE title = ?", [args.dive_title]).fetchall()
     if len(existing) > 1:

@@ -1,7 +1,11 @@
 """Interview insights: qualitative analysis of conversation transcripts with MotherDuck AI SQL.
 
-load -> describe (prompt) -> discover a codebook (prompt) -> edit the codebook -> classify (prompt_jev).
-Run with PHASE = load | describe | discover | edit | classify | reset.
+load -> describe (prompt) -> discover a codebook (prompt) -> edit the codebook -> approve -> classify (prompt_jev).
+Run with PHASE = load | describe | discover | edit | approve | classify | reset.
+
+The codebook from discover is a draft. A full classify (LIMIT_TURNS=0) only runs after a person
+approves the current codebook with PHASE=approve; a discover or edit after that needs a new approval.
+Test runs with LIMIT_TURNS > 0 don't need approval.
 
 To use your own data, replace load_turns() below; everything after it works on the
 turns table it produces. Config keys: DATABASE, PHASE, MODEL, SUMMARY_MODEL,
@@ -24,6 +28,7 @@ CONTEXT and SUMMARY, which the Dive sends.
 #     themes --> insights[Match insights and score quotes]:::transform
 #     insights --> summaries[Summarize themes]:::transform
 #     phase -->|edit| edit[Apply codebook edits]:::load
+#     phase -->|approve| approve[Record codebook approval]:::load
 # @end-flight
 
 import json
@@ -41,7 +46,7 @@ MODELS = {
     "gpt-6-luna", "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o", "gpt-4o-mini",
     "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
 }
-ALL_NODES = ["load", "split", "sample", "extract", "codebook", "themes", "insights", "summaries", "edit", "describe", "reset"]
+ALL_NODES = ["load", "split", "sample", "extract", "codebook", "themes", "insights", "summaries", "edit", "approve", "describe", "reset"]
 
 
 def T(name):
@@ -526,6 +531,27 @@ def choice_literal(items, other_label, other_desc):
     return "[" + ", ".join(parts) + "]"
 
 
+def codebook_approved(con):
+    """Whether an approve run is newer than the latest discover and edit, the only writers of the codebook."""
+    return con.execute(f"""
+        SELECT coalesce(max(finished_at) FILTER (phase = 'approve') > coalesce(
+          max(finished_at) FILTER (phase IN ('discover', 'edit')), TIMESTAMP '1970-01-01'), false)
+        FROM {T('pipeline_runs')}
+    """).fetchone()[0]
+
+
+def approve(con):
+    with step("approve") as s:
+        themes = count(con, "themes")
+        if themes == 0:
+            raise SystemExit("No codebook to approve. Run PHASE=discover first.")
+        s.fields = {"rows": themes, "effect": f"table:{DB}.main.pipeline_runs"}
+    log_run(con, "approve", {
+        "approved_by": con.execute("SELECT current_user").fetchone()[0],
+        "themes": themes, "insights": count(con, "insights"),
+    })
+
+
 def classify(con, min_chars, limit, conf, summary_model, sentiment_question):
     ctx = context_text(*load_corpus(con)[:2])
     themes = con.execute(
@@ -533,6 +559,12 @@ def classify(con, min_chars, limit, conf, summary_model, sentiment_question):
     ).fetchall()
     if not themes:
         raise SystemExit("No codebook yet. Run PHASE=discover first.")
+    if limit == 0 and not codebook_approved(con):
+        raise SystemExit(
+            "The codebook is not approved: it changed since the last approval, or was never approved. "
+            "Review it, then run PHASE=approve before classifying all answers. "
+            "A test run with LIMIT_TURNS > 0 doesn't need approval."
+        )
 
     limit_sql = f"ORDER BY hash(turn_id) LIMIT {limit}" if limit > 0 else ""
     base = f"""
@@ -636,7 +668,7 @@ def classify(con, min_chars, limit, conf, summary_model, sentiment_question):
         "other_share": round(con.execute(
             f"SELECT avg((theme_id IS NULL)::INT) FROM {T('turn_themes')}").fetchone()[0] or 0, 3),
         "matched_insights": count(con, "turn_insights", "insight_id IS NOT NULL"),
-        "limit": limit, "min_chars": min_chars, "conf": conf, "summary_model": summary_model,
+        "classifier": "prompt_jev", "limit": limit, "min_chars": min_chars, "conf": conf, "summary_model": summary_model,
     })
 
 
@@ -783,8 +815,8 @@ def reset(con):
 
 def main():
     phase = (os.environ.get("PHASE") or "load").strip()
-    if phase not in ("load", "describe", "discover", "classify", "edit", "reset"):
-        raise SystemExit(f"PHASE must be load, describe, discover, classify, edit or reset, got {phase!r}")
+    if phase not in ("load", "describe", "discover", "classify", "edit", "approve", "reset"):
+        raise SystemExit(f"PHASE must be load, describe, discover, classify, edit, approve or reset, got {phase!r}")
     print(f"phase={phase}", flush=True)
     ev("@flight", "running")
     ev("phase", "ok", branch=phase)
@@ -794,7 +826,7 @@ def main():
     ensure_schema(con)
 
     ran = {"load": ["load", "split", "describe"], "describe": ["describe"], "discover": ["sample", "extract", "codebook"],
-           "classify": ["themes", "insights", "summaries"], "edit": ["edit"], "reset": ["reset"]}[phase]
+           "classify": ["themes", "insights", "summaries"], "edit": ["edit"], "approve": ["approve"], "reset": ["reset"]}[phase]
     for node in ALL_NODES:
         if node not in ran:
             ev(node, "skipped")
@@ -809,6 +841,8 @@ def main():
             discover(con, env_int("SAMPLE_PER_COHORT", 20, 1, 500), env_model("MODEL", "gpt-6-luna"))
         elif phase == "edit":
             edit(con)
+        elif phase == "approve":
+            approve(con)
         elif phase == "reset":
             reset(con)
         else:
@@ -817,7 +851,7 @@ def main():
                 env_int("MIN_CHARS", 80, 0, 5000),
                 env_int("LIMIT_TURNS", 0, 0, 100000),
                 env_float("CONF", 0.4, 0.0, 1.0),
-                env_model("SUMMARY_MODEL", "gpt-5-mini"),
+                env_model("SUMMARY_MODEL", "gpt-6-luna"),
                 env_text("SENTIMENT_QUESTION", DEFAULT_SENTIMENT_QUESTION, 300),
             )
         # The Dive reads this database through a share; publish the writes so it sees them at once.
