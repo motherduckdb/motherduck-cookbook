@@ -1098,8 +1098,10 @@ class OpenCode:
         home = f"{WORK}/home"
         os.makedirs(f"{home}/.config/opencode", exist_ok=True)
         os.makedirs(f"{WORK}/bin", exist_ok=True)
+        # Code Mode (execute) is off: it is a JavaScript runtime with its own fetch and session utilities, and nothing here needs
+        # it, because the healer's MCP tools are exposed directly (codemode false below).
         base = {"read": "allow", "edit": "deny", "webfetch": "deny", "websearch": "deny", "external_directory": "deny", "bash": "deny", "task": "deny",
-                **{f"{s}_*": "deny" for s in MCP_TOOLS}}  # the healer's tools are the fixer's alone
+                "execute": "deny", **{f"{s}_*": "deny" for s in MCP_TOOLS}}  # the healer's tools are the fixer's alone
         with open(f"{WORK}/bin/heal_mcp.py", "w") as f:
             f.write(HEAL_MCP)
         mcp = {s: {"type": "local", "command": [sys.executable, "-I", f"{WORK}/bin/heal_mcp.py", s, str(broker_port), json.dumps(tools)],
