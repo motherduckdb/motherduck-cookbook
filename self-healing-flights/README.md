@@ -1,0 +1,311 @@
+---
+title: Self-Healing Pipelines With MotherDuck Flights
+id: self-healing-flights
+description: >-
+  One healer Flight that notices when your pipeline Flights break, fixes them with
+  AI coding agents that run as separate service accounts on zero-copy clones, has
+  every fix checked and reviewed independently, and proposes it for your approval
+  (or ships it) as a new Flight version, plus a Dive that shows every step.
+  Use when you want pipelines that repair upstream changes on their own.
+type: example
+category: automation
+features: [flights, dives, shares, admin_api]
+tags: [python, openrouter]
+prompt: >-
+  I want my MotherDuck pipelines to detect their own failures and fix them with an
+  AI agent, with a human approving each fix and a readable record of every step.
+  Help me adapt the "Self-Healing Pipelines With MotherDuck Flights" recipe to my
+  own pipelines and use case, using it as a guide:
+  https://motherduck.com/docs/cookbook/self-healing-flights
+published_date: 2026-10-19
+---
+
+# Self-Healing Pipelines With MotherDuck Flights
+
+Two pipeline Flights load weather data. A healer Flight notices when one breaks, opens an incident, and
+has an AI coding agent fix it. The agent works as its own service account, on a zero-copy clone of
+your data that it can only read through a restricted share. Every fix must pass the healer's own
+checks, a separate test-reviewer agent and an approver model. It then waits for you to approve it in
+the Dive, or ships on its own if you allow that. A Dive shows the pipelines, runs, alerts, fixes
+waiting for approval, and each step of every fix.
+
+## How it works
+
+| File | What it does |
+|---|---|
+| `pipeline_flight.py`, `hourly_flight.py` | Two pipelines (NWS daily forecast and hourly temperatures). On failure they print one `HEAL_EVENT {...}` line: that is their whole contract with the healer. |
+| `healer_flight.py` | The healer. Runs every 5 minutes; see below. The Dive's Approve, Reject and Retry buttons run it too. |
+| `dive.tsx` | The board: health, alerts, fixes waiting for approval, pipeline graph, run timeline, incidents with each fix's steps, Guides, and three Architecture tabs. |
+| `schema.sql` | The `heal` database the healer writes and the Dive reads: four tables (see below). |
+| `deploy.py` | Creates or updates everything above (safe to re-run). |
+
+**One coordinator at a time.** A healer run takes the `healer` lease (a row in `heal.main.leases`) or exits
+because a live run already holds it. While it holds the lease it renews it every 30 seconds, but only while
+its main loop makes progress. A run that hangs stops renewing; the next scheduled run cancels it and sends a
+`stuck` alert. A run that crashes is reported by the next one (`healer_failed`).
+
+**State: four tables in `heal`.**
+
+| Table | Holds |
+|---|---|
+| `incidents` | One row per incident: status, class, the fingerprint of its first failure (exact repeats join it), attempts, the shipped version and its Guide. The fix waiting for a human is a `proposal` VARIANT on the same row, so Approve claims it with one atomic `UPDATE ... WHERE status = 'proposed'`. |
+| `log` | Append-only, one row per fact: status transitions, failures, fix attempts and every step of a fix, costs, decisions, alerts, and which Guide helped. Kind-specific fields are in a `detail` VARIANT (`detail.usd::DOUBLE`). Counts such as an incident's failures or spend are sums over it, never stored copies. |
+| `runs` | The last runs of each Flight (for the Dive), and whether the healer has processed each one. |
+| `leases` | The `healer` lease and one `agent:<account>` lease per pool account. |
+
+Guides live in MotherDuck itself (`MD_LIST_GUIDES`), and the agent accounts and shares are found by their names, so
+none of them needs a table. Avoid reading a VARIANT field through an index lookup: DuckDB 1.5.6 fails on it, which is
+why `incidents` has no primary key (its sequence keeps ids unique) and `runs.config` is read as `config::JSON`.
+
+**Detection, even mid-fix.** The coordinator checks every finished pipeline run once per minute, also while
+fixes are running. Jev decides whether a failure joins one of the pipeline's current incidents. Its message is
+masked first (numbers, ids and hashes), and one `prompt_jev` request asks two questions, following TypeSafe's
+companion Noul pattern: a yes/no "same root cause as one of these incidents?" and a choice of which one. Each
+incident is described by its class, status and recent failures. A clear yes (0.8) with a clear pick (0.8) joins that
+incident; a clear no (0.3 or less) opens a new one; anything in between goes to an LLM that picks an incident or
+`new_incident`, and an unsure or invalid answer opens a new incident rather than risk hiding a failure in an old one.
+Only incidents a fix is coming for are candidates: watching and escalated incidents get no fix, so a different
+failure must not disappear into one, and resolved incidents are left out because what they taught reaches fixers as
+Guides. An exact repeat of a failure that opened, or was routed to, a current incident reuses that decision without
+asking again. Every failure's log row records how it was routed (`attach`, and Jev's yes/no and pick probabilities
+under `routing`). `prompt_jev` then classifies new incidents: fix, watch (a source outage) or
+escalate (credentials). When Jev is unsure (confidence below 0.8) or fails, an LLM classifies instead, with the
+log text fenced as data. An LLM answer that is not one of the classes is ignored, and if neither answers, the incident
+is a `code_bug` and gets a fix attempt. The incident's first transition records which path decided. A run that cannot
+be processed, for example because of a malformed `HEAL_EVENT` line, is retried for 30 minutes and then parked with a
+`dead_letter` alert. It never blocks later runs. Floods are capped by one rule: after 5 new kinds of failure on a
+pipeline within an hour, further ones fold into its newest open incident, with a `storm` alert, even
+when Jev would have opened a new one. A pass reads at most
+the last 25 runs of each Flight, so it stays short however many runs fail.
+
+**Picking up new failures while an agent fixes.** Every new failure on the same pipeline, or on another
+pipeline with the same upstream, goes to the fixing agent's inbox. The inbox is a local SQLite file in WAL
+mode. The coordinator steers at most one short notice per minute into the agent's running opencode session:
+- If the failures are short, the notice carries them inline, fenced as untrusted log text.
+- If they are long, the notice tells the agent to run `inbox <key>` and read them there.
+- A notice the agent could not see before it finished goes with its next prompt, or to the reviewers.
+
+**Agent accounts.** On its first run the healer creates:
+- the role `self_healing_pipeline_agent`
+- `AGENT_POOL_SIZE` service accounts named `heal_agent_<owner>_1..N` that hold the role (later runs create none)
+- one restricted share per pipeline database, granted only to that role
+
+For each fix it leases a free account and mints a short-lived token for it. Before cloning, it runs
+`CREATE SNAPSHOT` on the database, and the agent account runs `REFRESH DATABASE` on its share and
+zero-copy clones it under the production name (`CREATE DATABASE heal_demo FROM heal_demo__share`). So the
+unchanged pipeline code writes into the clone, inside the agent's own account.
+
+**A fix.** The opencode fixer can edit only `pipeline.py` and `result.json`, and run two commands, `verify` and
+`inbox`. `verify` runs the pipeline as the agent account, as an unprivileged sandbox user, against a fresh clone.
+Before anything runs, an independent safety gate (another vendor's model) checks it and answers `BLOCKED`, with the
+reason and a safer route, if it would send data to another host, read credentials, leave the sandbox, reach beyond
+the clone, abuse resources or hide what it does. The gate blocks only on evidence it can quote from the code; 3
+blocks in a row, or 5 in a fix, send the fix to a human. On 12 benign and 15 hostile variants of the weather
+pipeline it had no false positives and blocked every hostile one, in about 3 s per check.
+
+The fixer also has the healer's tools, served by a small local MCP server that only forwards calls to the healer:
+- `motherduck_sql` runs one read-only statement (`SELECT`, `DESCRIBE`, `SUMMARIZE`, `SHOW`, `EXPLAIN`) on the same
+  clone, through the same gate, to explore the data before changing the code.
+- `docs_search` searches offline copies of the DuckDB docs (for the newest DuckDB MotherDuck supports), the MotherDuck
+  docs and the DuckLake docs: all three by default, or the ones the agent names. It takes up to five short keyword
+  queries in one call and runs them all in one SQL statement, ranking with BM25 that weights headings 3x and also
+  matches snake_case names spelled with spaces (`time bucket` finds `time_bucket`); common words and numbers are
+  dropped. Results come back grouped per doc set, with an id to read a whole section. The healer builds these indexes itself,
+  in this account's `heal_docs` database (DuckDB's `fts` extension runs inside MotherDuck), on its first run and again
+  whenever MotherDuck, DuckDB or DuckLake releases a new version. A new index is built next to the old one and swapped
+  in by one transaction, so a search always finds a complete index.
+
+When the agent is done, four gates must pass in order, and any "no" goes back to the agent as feedback:
+1. **The healer's own checks**: only `pipeline.py` changed, protected lines kept, no merge markers, green
+   in a fresh clone, plus the pipeline's contract (SQL assertions on the output) and drift against
+   production.
+2. **An independent test-reviewer agent** reviews every test the fix adds, changes or removes.
+3. **An approver model** sees the evidence the healer gathered, including every run of the agent's code in order, so a
+   second problem that appeared after the first was fixed justifies the larger fix. Of the agent's reasoning it sees only a
+   two-sentence explanation, labelled as a claim to check against that evidence. In a scenario with two stacked problems,
+   this turned 2 of 2 escalations into 2 of 2 fixes approved on the first review.
+
+**Ship: check, merge, retest, check again.** Before submitting, the healer re-reads the pipeline's current
+code. If it changed since the fix started, it 3-way merges the fix onto it (`git merge-file`):
+- A clean merge is retested through every gate.
+- A conflict goes back to the agent to resolve.
+
+It then checks again, because retesting takes time. This loops until the code is unchanged.
+- With `AUTONOMY=L3`, the default, the fix becomes a proposal. Approve in the Dive runs the healer again, which
+  checks once more and ships with `MD_UPDATE_FLIGHT` only if the pipeline is still exactly what was tested. If it has
+  changed, the healer redoes the fix on the new version through every gate and proposes it again, so you always
+  approve exactly what ships.
+- With `L1` it ships at once.
+
+Two green runs resolve the incident. The fix then becomes a MotherDuck Guide with a reusable code snippet,
+and later fixes recall it.
+
+## Questions to answer
+
+- Which pipeline Flights should be healed, which databases do they write, and which lines must a fix never
+  touch? (`PIPELINES` in `healer_flight.py`.)
+- What does correct output look like? Write it as the pipeline's `contract`: SQL that returns true when a
+  check passes, run by the healer on the agent's output.
+- Should fixes ship on their own (`AUTONOMY=L1`) or wait for a human (`L3`, the default)?
+- How many fixes may run at once (`AGENT_POOL_SIZE`), and what may one fix and one day cost?
+- Where should alerts go? Set up a Slack-compatible incoming webhook as the `heal_webhook` secret, or rely on
+  the Dive's Alerts panel.
+
+## Caveats
+
+- **The owner must be an Admin on a Business or Enterprise plan.** The healer creates service accounts and
+  their tokens through the REST API (Admin only) and a custom role (custom roles need Business or Enterprise).
+  Deploy as a dedicated Admin service account rather than a person.
+- **This recipe's demo runs at `AUTONOMY=L1`**: `deploy.py` sets it so the demo heals on its own. Remove it, or
+  set `L3`, for real pipelines; then every fix waits in the Dive's Approvals tab.
+- **The role is organization-wide.** Every owner's agent accounts hold `self_healing_pipeline_agent`, so they can
+  read every share granted to it. To separate owners or teams, give each its own `ROLE` constant in `healer_flight.py`.
+- **Agent accounts and shares stay** after you delete the Flights. Remove them with
+  `DELETE /v1/users/<name>` (REST API) and `DROP SHARE <db>_heal_agents`.
+- **The sandbox runs the healer's Python and packages, without the pipeline's secrets.** A failure that depends on either
+  will not reproduce: the incident is watched, and escalated if production keeps failing.
+- `CREATE SNAPSHOT` briefly blocks writes to the database. The healer runs it once per fix, not per verify.
+- **One fix per pipeline at a time.** A pending proposal holds its pipeline until you decide; the healer
+  reminds you daily.
+- **Cost.** Each fix costs real LLM money (about $0.10 to $0.30 here). Keep `BUDGET_USD` (enforced while the
+  agent works) and the daily cap (`DAILY_BUDGET_USD`, all fixes together per UTC day).
+- **Missed runs.** The healer reads the last 25 runs of each pipeline. Runs that finish while it is off for
+  longer than that are not processed; it sends a `gap` alert.
+- Turn the schedules off when you are done: `deploy.py --no-schedules`.
+- DuckDB uses a lowercase `motherduck_token` before `MOTHERDUCK_TOKEN`; `deploy.py` stops if both are set to
+  different tokens.
+
+## What you'll adjust
+
+| Knob | Where | Default |
+|---|---|---|
+| Pipelines to heal, their databases, protected lines, contract and drift check | `PIPELINES` in `healer_flight.py` | the two weather pipelines |
+| Autonomy: `L3` waits for Approve in the Dive, `L1` ships | Healer config `AUTONOMY` | `L3` in code; `L1` in this demo's `deploy.py` |
+| Agent pool size: service accounts `heal_agent_<owner>_1..n`, created once; the most fixes at once | Healer config `AGENT_POOL_SIZE` | `3` |
+| Models: the fixing agent; the approver and test reviewer (keep another vendor) | Healer config `MODEL`, `REVIEW_MODEL` | Claude Opus latest, GPT Sol latest |
+| Spend: per incident; all fixes per UTC day | Healer config `BUDGET_USD`, `DAILY_BUDGET_USD` | `10`, `20` |
+| Constants: agent role, fallback classifier, green runs to resolve, attempts, review rounds, merge loops, check and notice cadence, storm limit | Top of `healer_flight.py` (`ROLE`, `CLASSIFIER`, `GREEN_RUNS`, ...) | `self_healing_pipeline_agent`, GPT Luna latest, `2`, `2`, `2`, `3`, `60` s, `5` per hour |
+| Run deadline | The healer Flight's `max_runtime_sec`: it stops starting work 5 minutes before | `2700` s in `deploy.py` |
+| Kill switch | Pause the healer's schedule (`MD_UPDATE_FLIGHT(..., schedule_cron := '')`, or `deploy.py --no-schedules`) and cancel its running run (`MD_CANCEL_FLIGHT_RUN`). Interrupted fixes go back in the queue for the next run. | on schedule |
+| Alert webhook | Flight secret `heal_webhook` with key `WEBHOOK_URL` | none (alerts only in the Dive) |
+| Schedules | `deploy.py` (`--no-schedules` to skip) | healer every 5 min, pipelines hourly |
+| Who sees the Dive's data | `deploy.py --share-org` (organization share `heal_board`, kept on later deploys) | the deploying account only |
+
+## Run it
+
+Everything runs as one MotherDuck account (an Admin, see Caveats), the owner of the Flights. These steps
+work from a fresh service account.
+
+1. Add your OpenRouter key as a Flight secret (DuckDB CLI 1.5.6 or later, connected as the owner):
+
+   ```sql
+   CREATE OR REPLACE SECRET openrouter IN motherduck (TYPE flights, PARAMS MAP {'OPENROUTER_API_KEY': getenv('OPENROUTER_API_KEY')});
+   ```
+
+   Optional: alerts to Slack. Create a Slack app with an incoming webhook for your alerts channel (api.slack.com/apps,
+   then Incoming Webhooks, then Add New Webhook). Store its URL as a secret; put it in the environment without echoing
+   it (`read -s HEAL_WEBHOOK_URL && export HEAL_WEBHOOK_URL`). Any endpoint that accepts a Slack-style `{"text": ...}`
+   POST works too.
+
+   ```sql
+   CREATE OR REPLACE SECRET heal_webhook IN motherduck (TYPE flights, PARAMS MAP {'WEBHOOK_URL': getenv('HEAL_WEBHOOK_URL')});
+   ```
+
+   Deploy (step 2) after creating it, so the healer Flight gets the secret. Then **Send a test alert** in the Dive's
+   Alerts panel; the healer run fails if the webhook does not accept it.
+
+### Deploy as a Flight
+
+2. Deploy from this folder. This creates the `heal` and `heal_demo` databases, the three Flights (resolved
+   by name with `MD_LIST_FLIGHTS`, created with `MD_CREATE_FLIGHT`) and the Dive. It also runs each new
+   pipeline once, so there is production data to clone:
+
+   ```bash
+   cd self-healing-flights
+   MOTHERDUCK_TOKEN=... uv run --with duckdb==1.5.6 --with pytz deploy.py
+   ```
+
+   Only the deploying account sees the Dive's data. To let others in your organization see it, add `--share-org`:
+   it creates `heal_board`, an organization share of `heal`, and points the Dive at it (both its `required_resources`
+   and the `REQUIRED_DATABASES` export in its code: viewers other than the owner are warned about "Unshared databases"
+   whenever the code still declares a plain `database`). Later deploys keep using that
+   share without the flag; `DROP SHARE heal_board` and a redeploy make the Dive private again.
+
+3. Break a pipeline on purpose. This makes the weather API send a new payload shape (DuckDB 1.5.6 or later, connected as the owner):
+
+   ```sql
+   SET VARIABLE w = (SELECT flight_id FROM MD_LIST_FLIGHTS(owner_only := true) WHERE flight_name = 'heal-demo-weather');
+   SELECT * FROM MD_UPDATE_FLIGHT(flight_id := getvariable('w'), config := MAP {'NWS_FEATURE_FLAGS': 'forecast_temperature_qv'});
+   SELECT * FROM MD_RUN_FLIGHT(flight_id := getvariable('w'));
+   ```
+
+4. Open the **Self-healing Flights** Dive. Within about 5 minutes the healer opens an incident. On its first fix
+   it creates the agent accounts and the restricted share; the Overview shows them under Agent accounts. In
+   a few more minutes the fix is reviewed and shipped, and two green runs later the incident is `resolved` with a
+   Guide. With `AUTONOMY=L3`, the fix instead waits in the **Approvals** tab with its diff and every reviewer's
+   verdict. **Approve and ship** runs the healer to ship it.
+
+To undo a fix, roll the pipeline Flight back in the Flights UI. Re-running `deploy.py` leaves existing pipeline
+Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the original code.
+
+## Security
+
+- **The agent holds no MotherDuck token.** It can read only its own directory and edit only `pipeline.py` and
+  `result.json`. Its shell is limited to `verify` and `inbox`; opencode rejects anything else: chaining, pipes,
+  redirections, `$` expansion and substitution. Every other opencode tool is denied, including web fetch and search,
+  subagents, Code Mode (`execute`, a JavaScript runtime with its own `fetch`) and the session and worktree utilities.
+  opencode ignores project config (`OPENCODE_DISABLE_PROJECT_CONFIG`), so an `opencode.json` the agent might write
+  can't widen its permissions. The OpenRouter key is in opencode's config file, which only the healer can read, not
+  in its environment.
+- **An independent gate checks every action before it runs.** Each `verify` and each `motherduck_sql` statement is
+  judged by a model from another vendor, which sees the action, the allowed hosts and the healer's own facts, never
+  the agent's reasoning or upstream error text. It fails closed when it can't answer. The sandbox stays the real
+  boundary: the gate catches what the sandbox can't, like sending the clone's rows to another host.
+- **Code the agent writes runs as an agent service account, not as you.** `verify` runs it under that account's own
+  unprivileged uid, with no supplementary groups, `python -I`, limits on processes, file size and CPU, and every
+  leftover process killed afterwards. The code is copied from a directory the healer owns, so it cannot plant links
+  for the healer to follow. Its token is short-lived and is for an agent account that reads production only through a
+  read-only, restricted share and writes only to its own zero-copy clones. After each fix the healer revokes every
+  token of that account and drops every database and share it owns. The healer marks itself non-dumpable and gives
+  child processes a minimal environment, so the owner's token never leaves the healer process.
+- **Every fix is checked and reviewed independently:**
+  - The healer's own checks and the pipeline's contract run on the output, on exactly the code that would ship.
+  - A separate test-reviewer agent rejects removed or weakened tests and vacuous new ones.
+  - An approver model judges the diff and the healer's evidence; the agent's two-sentence explanation is fenced and
+    labelled as a claim, never as evidence.
+  - At `L3` a human approves each fix.
+  - After a fix ships, its green runs only count if production passes the contract too.
+- **A deterministic risk gate overrides `L1`.** A fix that adds anything a data fix rarely needs waits for a human,
+  even at `L1`:
+  - imports
+  - process, file, network or environment access
+  - new hosts
+  - SQL such as `ATTACH`, `SECRET`, `GRANT` or `MD_*`
+- **Pipelines get no secrets.** Only the healer Flight holds the OpenRouter key and the webhook URL. A healer run started
+  with any setting overridden other than `ACTION` or `INCIDENT_ID` refuses to run, so run access cannot
+  switch autonomy to `L1`.
+- **Upstream text is data.** Log excerpts and recalled Guides reach agents and reviewers fenced and labelled as
+  untrusted, never as instructions. Alerts escape it for Slack.
+- **The Dive's buttons run the healer Flight.** Approve and Reject claim the proposal atomically and record who
+  decided. A run always uses the owner's settings, so grant `run` on the healer only to people who may approve fixes.
+- **The Dive's data is private unless you share it.** `deploy.py --share-org` shares all of `heal` with your
+  organization: incidents, the fix log with each agent's steps and diffs, and alerts. `heal_demo` stays private.
+
+What remains:
+- **A shipped fix runs as the owner, an Admin.** A malicious change that got past every gate (and, at `L3`, past you)
+  would run with Admin rights. Keep `L3` for real pipelines.
+- **opencode itself runs as root** in the healer's container. It is fenced by its permissions and config, not by the
+  operating system.
+- **`verify` has open outbound network**, because the pipeline calls its upstream API. The gate, not a network
+  allowlist, is what stops code from sending data elsewhere.
+- **Production data reaches the model provider.** It goes to OpenRouter's models in failure messages and samples, and
+  into the organization's Guides.
+
+## Learn more
+
+- Flights and Dives guides: `get_flight_guide`, `get_dive_guide`; service accounts, roles and shares:
+  `ask_docs_question`.
+- Guides: resolved incidents are stored under the `self-healing/incidents/<category>` topic (`MD_LIST_GUIDES`,
+  DuckDB 1.5.6+), each with a code snippet a later fix can reuse.
+- The Dive's Architecture tabs explain the design in three ways: a 2 a.m. story, a zoom from system to fix loop,
+  and an incident's life as states and time.
