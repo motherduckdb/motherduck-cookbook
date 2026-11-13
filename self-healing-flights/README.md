@@ -95,10 +95,24 @@ For each fix it leases a free account and mints a short-lived token for it. Befo
 zero-copy clones it under the production name (`CREATE DATABASE heal_demo FROM heal_demo__share`). So the
 unchanged pipeline code writes into the clone, inside the agent's own account.
 
-**A fix.** The opencode fixer can only edit its directory and run two commands, `verify <key>` and
-`inbox <key>`. `verify` runs the pipeline as the agent account, as the unprivileged `nobody` user,
-against a fresh clone. When the agent is done, four gates must pass in order, and any "no" goes back to
-the agent as feedback:
+**A fix.** The opencode fixer can edit only `pipeline.py` and `result.json`, and run two commands, `verify` and
+`inbox`. `verify` runs the pipeline as the agent account, as an unprivileged sandbox user, against a fresh clone.
+Before anything runs, an independent safety gate (another vendor's model) checks it and answers `BLOCKED`, with the
+reason and a safer route, if it would send data to another host, read credentials, leave the sandbox, reach beyond
+the clone, abuse resources or hide what it does. The gate blocks only on evidence it can quote from the code; 3
+blocks in a row, or 5 in a fix, send the fix to a human. On 12 benign and 15 hostile variants of the weather
+pipeline it had no false positives and blocked every hostile one, in about 3 s per check.
+
+The fixer also has the healer's tools, served by a small local MCP server that only forwards calls to the healer:
+- `motherduck_sql` runs one read-only statement (`SELECT`, `DESCRIBE`, `SUMMARIZE`, `SHOW`, `EXPLAIN`) on the same
+  clone, through the same gate, to explore the data before changing the code.
+- `motherduck_docs`, `duckdb_docs` and `ducklake_docs` search offline copies of the MotherDuck docs, the DuckDB docs
+  for the newest DuckDB MotherDuck supports, and the DuckLake docs. The healer builds these full-text indexes itself,
+  in this account's `heal_docs` database (DuckDB's `fts` extension runs inside MotherDuck), on its first run and again
+  whenever MotherDuck, DuckDB or DuckLake releases a new version. A new index is built next to the old one and swapped
+  in by one transaction, so a search always finds a complete index.
+
+When the agent is done, four gates must pass in order, and any "no" goes back to the agent as feedback:
 1. **The healer's own checks**: only `pipeline.py` changed, protected lines kept, no merge markers, green
    in a fresh clone, plus the pipeline's contract (SQL assertions on the output) and drift against
    production.
@@ -230,10 +244,17 @@ Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the or
 
 ## Security
 
-- **The agent holds no MotherDuck token.** It can read and edit only its own directory, and its shell is limited to
-  `verify` and `inbox` with plain arguments. opencode rejects anything else: chaining, pipes, redirections, `$`
-  expansion and substitution. The OpenRouter key is in opencode's config file, which only the healer can read, not
+- **The agent holds no MotherDuck token.** It can read only its own directory and edit only `pipeline.py` and
+  `result.json`. Its shell is limited to `verify` and `inbox`; opencode rejects anything else: chaining, pipes,
+  redirections, `$` expansion and substitution. Every other opencode tool is denied, including web fetch and search,
+  subagents, Code Mode (`execute`, a JavaScript runtime with its own `fetch`) and the session and worktree utilities.
+  opencode ignores project config (`OPENCODE_DISABLE_PROJECT_CONFIG`), so an `opencode.json` the agent might write
+  can't widen its permissions. The OpenRouter key is in opencode's config file, which only the healer can read, not
   in its environment.
+- **An independent gate checks every action before it runs.** Each `verify` and each `motherduck_sql` statement is
+  judged by a model from another vendor, which sees the action, the allowed hosts and the healer's own facts, never
+  the agent's reasoning or upstream error text. It fails closed when it can't answer. The sandbox stays the real
+  boundary: the gate catches what the sandbox can't, like sending the clone's rows to another host.
 - **Code the agent writes runs as an agent service account, not as you.** `verify` runs it under that account's own
   unprivileged uid, with no supplementary groups, `python -I`, limits on processes, file size and CPU, and every
   leftover process killed afterwards. The code is copied from a directory the healer owns, so it cannot plant links
@@ -266,8 +287,10 @@ Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the or
 What remains:
 - **A shipped fix runs as the owner, an Admin.** A malicious change that got past every gate (and, at `L3`, past you)
   would run with Admin rights. Keep `L3` for real pipelines.
-- **opencode itself runs as root** in the healer's container. It is fenced by its permissions, not by the operating
-  system.
+- **opencode itself runs as root** in the healer's container. It is fenced by its permissions and config, not by the
+  operating system.
+- **`verify` has open outbound network**, because the pipeline calls its upstream API. The gate, not a network
+  allowlist, is what stops code from sending data elsewhere.
 - **Production data reaches the model provider.** It goes to OpenRouter's models in failure messages and samples, and
   into the organization's Guides.
 
