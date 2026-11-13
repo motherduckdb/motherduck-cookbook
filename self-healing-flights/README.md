@@ -120,7 +120,10 @@ When the agent is done, four gates must pass in order, and any "no" goes back to
    in a fresh clone, plus the pipeline's contract (SQL assertions on the output) and drift against
    production.
 2. **An independent test-reviewer agent** reviews every test the fix adds, changes or removes.
-3. **An approver model** sees only the evidence the healer gathered, never the agent's reasoning.
+3. **An approver model** sees the evidence the healer gathered, including every run of the agent's code in order, so a
+   second problem that appeared after the first was fixed justifies the larger fix. Of the agent's reasoning it sees only a
+   two-sentence explanation, labelled as a claim to check against that evidence. In a scenario with two stacked problems,
+   this turned 2 of 2 escalations into 2 of 2 fixes approved on the first review.
 
 **Ship: check, merge, retest, check again.** Before submitting, the healer re-reads the pipeline's current
 code. If it changed since the fix started, it 3-way merges the fix onto it (`git merge-file`):
@@ -268,7 +271,8 @@ Flights alone, so it never overwrites a fix; `--reset-pipelines` restores the or
 - **Every fix is checked and reviewed independently:**
   - The healer's own checks and the pipeline's contract run on the output, on exactly the code that would ship.
   - A separate test-reviewer agent rejects removed or weakened tests and vacuous new ones.
-  - An approver model judges the diff and the healer's evidence, not the agent's reasoning.
+  - An approver model judges the diff and the healer's evidence; the agent's two-sentence explanation is fenced and
+    labelled as a claim, never as evidence.
   - At `L3` a human approves each fix.
   - After a fix ships, its green runs only count if production passes the contract too.
 - **A deterministic risk gate overrides `L1`.** A fix that adds anything a data fix rarely needs waits for a human,
