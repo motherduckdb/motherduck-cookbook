@@ -106,8 +106,11 @@ pipeline it had no false positives and blocked every hostile one, in about 3 s p
 The fixer also has the healer's tools, served by a small local MCP server that only forwards calls to the healer:
 - `motherduck_sql` runs one read-only statement (`SELECT`, `DESCRIBE`, `SUMMARIZE`, `SHOW`, `EXPLAIN`) on the same
   clone, through the same gate, to explore the data before changing the code.
-- `motherduck_docs`, `duckdb_docs` and `ducklake_docs` search offline copies of the MotherDuck docs, the DuckDB docs
-  for the newest DuckDB MotherDuck supports, and the DuckLake docs. The healer builds these full-text indexes itself,
+- `docs_search` searches offline copies of the DuckDB docs (for the newest DuckDB MotherDuck supports), the MotherDuck
+  docs and the DuckLake docs: all three by default, or the ones the agent names. It takes up to five short keyword
+  queries in one call and runs them all in one SQL statement, ranking with BM25 that weights headings 3x and also
+  matches snake_case names spelled with spaces (`time bucket` finds `time_bucket`); common words and numbers are
+  dropped. Results come back grouped per doc set, with an id to read a whole section. The healer builds these indexes itself,
   in this account's `heal_docs` database (DuckDB's `fts` extension runs inside MotherDuck), on its first run and again
   whenever MotherDuck, DuckDB or DuckLake releases a new version. A new index is built next to the old one and swapped
   in by one transaction, so a search always finds a complete index.
