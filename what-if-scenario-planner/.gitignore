@@ -1,0 +1,10 @@
+# Dependencies and generated files
+dive/node_modules/
+dive/build/
+dive/vendor-cache/
+dive/src/univer-vendor.generated.ts
+flight/build/
+__pycache__/
+
+# Per-organization ids (written by flight/setup.py and dive/scripts/deploy-dive.sh)
+dive/deploy-targets.json

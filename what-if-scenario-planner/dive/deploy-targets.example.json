@@ -1,0 +1,10 @@
+{
+  "prod": {
+    "admin_token_env": "motherduck_token",
+    "api": "https://api.motherduck.com",
+    "host": "api.motherduck.com",
+    "share_url": "md:_share/scenario_planner_org/00000000-0000-0000-0000-000000000000",
+    "write_flight_id": "00000000-0000-0000-0000-000000000000",
+    "dive_id": ""
+  }
+}
