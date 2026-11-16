@@ -64,6 +64,7 @@ curl -fsSL https://get.motherduck.com | bash -s dbt-ingestion-s3
 - [vercel-agent-analytics](vercel-agent-analytics) - Capture a Vercel log drain and classify AI-agent traffic in MotherDuck.
 - [nodejs-motherduck](nodejs-motherduck) - Connect from Node.js with the DuckDB Neo driver, including a connection pool.
 - [nba-box-scores](nba-box-scores) - Ingest NBA box scores with scheduled Flights and ship a Dive frontend over the data (`features: flights, dives`).
+- [what-if-scenario-planner](what-if-scenario-planner) - Build a what-if planning Dive with spreadsheet input, in-browser recalculation, an optimizer and Flight writeback (`features: dives, flights, shares`).
 
 ### Integrations and UI
 
