@@ -1,0 +1,8 @@
+# duckdb is provided by the MotherDuck Flight runtime; pinned here to fix the version.
+duckdb==1.5.6
+dlt[motherduck,sql_database]==1.21.0
+# psycopg2 is the Postgres driver dlt reads through (SQLAlchemy); numpy is needed by
+# the pyarrow backend.
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.43
+numpy==2.5.5
